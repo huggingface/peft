@@ -4498,6 +4498,60 @@ class TestPeftCustomModel(PeftCommonTester):
             ["default", "other"], weights=[1.0, 1.0], adapter_name="merged", combination_type="cat"
         )
 
+    @pytest.mark.parametrize("combination_type", ["linear", "ties", "dare_linear", "dare_ties", "magnitude_prune"])
+    def test_add_weighted_adapter_elementwise_with_rank_pattern(self, combination_type, tmp_path):
+        # Fixes a bug described in #3737: the element-wise combination types keep the rank that each module has in the
+        # source adapters, so the config of the new adapter needs a matching rank_pattern, otherwise the adapter cannot
+        # be loaded again.
+        torch.manual_seed(0)
+        config_kwargs = {
+            "target_modules": ["lin0", "lin1"],
+            "r": 8,
+            "rank_pattern": {"lin1": 4},
+            "init_lora_weights": False,
+        }
+        model = get_peft_model(MLP(), LoraConfig(**config_kwargs), adapter_name="adapter0").to(self.torch_device)
+        model.add_adapter("adapter1", LoraConfig(**config_kwargs))
+        kwargs = {} if combination_type == "linear" else {"density": 0.5}
+        model.add_weighted_adapter(
+            ["adapter0", "adapter1"],
+            weights=[0.5, 0.5],
+            adapter_name="merged",
+            combination_type=combination_type,
+            **kwargs,
+        )
+        assert model.peft_config["merged"].rank_pattern == {"lin1": 4}
+
+        delta_weights = {
+            name: module.get_delta_weight("merged")
+            for name, module in model.named_modules()
+            if isinstance(module, lora.LoraLayer)
+        }
+        model.save_pretrained(tmp_path, selected_adapters=["merged"])
+
+        loaded = PeftModel.from_pretrained(MLP().to(self.torch_device), tmp_path / "merged")
+        for name, module in loaded.named_modules():
+            if isinstance(module, lora.LoraLayer):
+                assert torch.allclose(delta_weights[name], module.get_delta_weight("default"))
+
+    def test_add_weighted_adapter_elementwise_different_rank_pattern_raises(self):
+        # Fixes a bug described in #3737: the adapters have the same maximum rank but different ranks for lin1, which
+        # the element-wise combination types cannot combine. This used to fail with an opaque error from torch.stack.
+        config0 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin1": 4})
+        config1 = LoraConfig(target_modules=["lin0", "lin1"], r=8)
+        model = get_peft_model(MLP(), config0, adapter_name="adapter0")
+        model.add_adapter("adapter1", config1)
+
+        msg = re.escape(
+            "All adapters must have the same rank for each module when using combination_type linear, ties, "
+            "dare_ties, dare_linear or magnitude_prune, but module 'lin1' has ranks [4, 8]. Use combination_type cat "
+            "or one of the svd variants instead."
+        )
+        with pytest.raises(ValueError, match=msg):
+            model.add_weighted_adapter(
+                ["adapter0", "adapter1"], weights=[0.5, 0.5], adapter_name="merged", combination_type="linear"
+            )
+
     def test_add_weighted_adapter_negative_weight_negates_adapter(self):
         # Test that weight=-1.0 properly negates an adapter
         torch.manual_seed(42)

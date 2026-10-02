@@ -706,7 +706,7 @@ class LoraModel(BaseTuner):
 
     def _check_add_weighted_adapter(
         self, adapters: list[str], combination_type: str, svd_rank: int | None
-    ) -> tuple[str, int, str]:
+    ) -> tuple[str, int, str, dict[str, int]]:
         """
         Helper function to check if the arguments to add_weighted_adapter are valid and compatible with the underlying
         model.
@@ -745,6 +745,7 @@ class LoraModel(BaseTuner):
             for config in (self.peft_config[adapter] for adapter in adapters)
         ]
 
+        new_rank_pattern: dict[str, int] = {}
         if combination_type in ("linear", "ties", "dare_ties", "dare_linear", "magnitude_prune"):
             # all adapters ranks should be same, new rank is just this value
             if len(set(adapters_ranks)) != 1:
@@ -753,6 +754,10 @@ class LoraModel(BaseTuner):
                     "dare_linear."
                 )
             new_rank = adapters_ranks[0]
+            # These combination types sum the LoRA weights element-wise, so each module keeps the rank it has in the
+            # source adapters. Record the ranks that deviate from new_rank, otherwise the config of the new adapter
+            # would not match its weights and the adapter could not be loaded again.
+            new_rank_pattern = self._get_elementwise_rank_pattern(adapters, new_rank)
         elif combination_type == "cat":
             # adapters ranks may be different, new rank is sum of all ranks
             # be careful, because output adapter rank may be really big if mixing a lot of adapters
@@ -781,7 +786,32 @@ class LoraModel(BaseTuner):
         else:
             raise TypeError(f"Invalid type {target_module_types[0]} found in target_modules")
 
-        return combination_type, new_rank, new_target_modules
+        return combination_type, new_rank, new_target_modules, new_rank_pattern
+
+    def _get_elementwise_rank_pattern(self, adapters: list[str], new_rank: int) -> dict[str, int]:
+        """
+        Determine the per-module ranks of the adapter resulting from an element-wise combination of `adapters`.
+
+        Only ranks that deviate from `new_rank` are returned. Raises if the adapters disagree on the rank of a module,
+        as the element-wise combination types cannot combine those.
+        """
+        rank_pattern: dict[str, int] = {}
+        for key, module in self.model.named_modules():
+            if not isinstance(module, LoraLayer):
+                continue
+            ranks = {module.r[adapter] for adapter in adapters if adapter in module.r}
+            if not ranks:
+                continue
+            if len(ranks) > 1:
+                raise ValueError(
+                    "All adapters must have the same rank for each module when using combination_type linear, ties, "
+                    f"dare_ties, dare_linear or magnitude_prune, but module '{key}' has ranks {sorted(ranks)}. Use "
+                    "combination_type cat or one of the svd variants instead."
+                )
+            rank = ranks.pop()
+            if rank != new_rank:
+                rank_pattern[key] = rank
+        return rank_pattern
 
     def add_weighted_adapter(
         self,
@@ -854,7 +884,7 @@ class LoraModel(BaseTuner):
         if adapter_name in list(self.peft_config.keys()):
             return
 
-        combination_type, new_rank, new_target_modules = self._check_add_weighted_adapter(
+        combination_type, new_rank, new_target_modules, new_rank_pattern = self._check_add_weighted_adapter(
             adapters=adapters,
             combination_type=combination_type,
             svd_rank=svd_rank,
@@ -863,14 +893,15 @@ class LoraModel(BaseTuner):
         # The scaling of each source adapter is already folded into the combined lora_A/lora_B weights below, so the
         # new adapter must have a scaling of exactly 1. With lora_alpha == r this only holds when use_rslora=False
         # (otherwise scaling would be r / sqrt(r) = sqrt(r)), so don't inherit use_rslora from adapters[0].
+        # alpha_pattern mirrors rank_pattern for the same reason.
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],
             r=new_rank,
             lora_alpha=new_rank,
             use_rslora=False,
             target_modules=new_target_modules,
-            alpha_pattern={},
-            rank_pattern={},
+            alpha_pattern=dict(new_rank_pattern),
+            rank_pattern=dict(new_rank_pattern),
         )
         self.inject_adapter(self.model, adapter_name)
 
