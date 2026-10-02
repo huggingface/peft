@@ -173,7 +173,7 @@ def calib_cov_distribution(
         if not config.astra_config.use_float16_for_covariance:
             output = output.float()
         # scale the activations to make the covariance invariant to their magnitude
-        output = output / torch.max(output).abs()
+        output = output / output.abs().max()
 
         # check if output is valid
         if torch.isnan(output).any() or torch.isinf(output).any():

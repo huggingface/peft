@@ -4414,6 +4414,33 @@ class TestAstraInitialization:
         torch.manual_seed(233)
         return torch.rand(1000, 1000).to(self.torch_device)
 
+    def test_lora_astra_covariance_scaling_uses_max_abs(self, tmp_path):
+        """#3871: calibration scaled activations by `max(output).abs()` — the
+        largest value, not the largest magnitude — so negatively skewed
+        activations stayed unbounded and the covariance lost the promised
+        magnitude invariance."""
+        torch.manual_seed(7)
+        model = self.get_small_model()
+        with torch.no_grad():
+            model.linear.bias[3].fill_(-50.0)
+        data = torch.rand(16, 64).to(self.torch_device)
+
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            r=8,
+            astra_config=AstraConfig(covariance_file=tmp_path / "cov.pt", prune_temporary_fields=False),
+        )
+        preprocess_astra(model, config, run_model=lambda: model(data))
+
+        with torch.no_grad():
+            activations = model.linear(data)
+        scaled = activations / activations.abs().max()
+        # the hook accumulates scaled^T @ scaled once per run_model call and
+        # preprocess_astra divides by sample_count afterwards (== 1 here)
+        expected_covariance = scaled.t() @ scaled
+        torch.testing.assert_close(model.linear.covariance_matrix, expected_covariance, rtol=1e-4, atol=1e-6)
+
     def test_lora_astra_requires_rank_at_most_out_features(self, tmp_path):
         model = self.get_small_model()
         data = torch.rand(4, 64).to(self.torch_device)
