@@ -84,17 +84,46 @@ Now wrap the base model and `peft_config` with the [`get_peft_model`] function t
   </div>
 </div>
 
-To get a sense of the number of trainable parameters in your model, use the [`print_trainable_parameters`] method.
+Before starting training, run a healthcheck to confirm the adapter state and inspect the number of trainable parameters.
 
 ```python
-from peft import get_peft_model
+from peft import get_peft_model, LoraConfig
 
+peft_config = LoraConfig()  # or your other PEFT method of choice
 peft_model = get_peft_model(model, peft_config)
-peft_model.print_trainable_parameters()
-"output: trainable params: 524,288 || all params: 1,236,338,688 || trainable%: 0.0424"
+peft_model.print_healthcheck()
 ```
 
-Out of [meta-llama/Llama-3.2-1B's](https://huggingface.co/meta-llama/Llama-3.2-1B) 1B parameters, you're only training 0.04% of them!
+The healthcheck includes the trainable parameter fraction alongside the adapter state, model configuration, and environment.
+
+### Run a healthcheck
+
+Use [`~peft.PeftModel.print_healthcheck`] to identify suspicious states, such as merged or inconsistent adapters, and to create a compact report for a bug report.
+
+```py
+peft_model.print_healthcheck()
+```
+
+This should show something like:
+
+```
+PEFT healthcheck
+Model:
+  ID: meta-llama/Llama-3.2-1B, type: LlamaForCausalLM, adapters: default (LORA)
+Environment:
+  peft: 0.21.0, transformers: 5.18.0.dev0, torch: 2.14.0+cu130, Python: 3.13.9
+Runtime:
+  training: True, devices: cpu, dtypes: bfloat16=1,235,814,400, float32=851,968, gradient checkpointing: False
+Parameters:
+  trainable: 851,968, total: 1,236,666,368, percent trainable: 0.0689%, adapter layers: 32
+State:
+  adapter is enabled: True, active: default, merged: none
+Layer types:
+  default:
+    lora.Linear=32
+```
+
+The print output is subject to change, don't try to parse it. For programmatic use, call [`~peft.PeftModel.healthcheck`] instead, which returns the same information as a JSON-serializable dictionary.
 
 That is it 🎉! Now you can train the model with the Transformers [`~transformers.Trainer`], Accelerate, or any custom PyTorch training loop.
 
