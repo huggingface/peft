@@ -701,7 +701,7 @@ def hotswap_adapter(
     config_cls = PEFT_TYPE_TO_CONFIG_MAPPING[PeftConfig._get_peft_type(model_name_or_path, **hf_kwargs)]
     config = config_cls.from_pretrained(model_name_or_path, **kwargs)
     # config keys that could affect the model output besides what is determined by the state_dict
-    check_hotswap_configs_compatible(model.active_peft_config, config)
+    check_hotswap_configs_compatible(model.peft_config[adapter_name], config)
 
     state_dict = load_peft_weights(model_name_or_path, device=torch_device, **kwargs)
 
