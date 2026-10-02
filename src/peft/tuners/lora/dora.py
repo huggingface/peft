@@ -245,15 +245,7 @@ class _DoraConvNdLayer(DoraLinearLayer):
         mag_norm_scale = magnitude / weight_norm
 
         if base_result is None:
-            base_result = self.conv_fn(
-                x,
-                weight,
-                bias=None,
-                stride=base_layer.stride,
-                padding=base_layer.padding,
-                dilation=base_layer.dilation,
-                groups=base_layer.groups,
-            )
+            base_result = base_layer._conv_forward(x, weight, None)
         else:
             bias = base_layer.bias
             if bias is not None:
@@ -264,24 +256,14 @@ class _DoraConvNdLayer(DoraLinearLayer):
         result_dora = (mag_norm_scale - 1) * base_result + mag_norm_scale * lora_B(lora_A(x)) * scaling
         return result_dora
 
-    def __repr__(self) -> str:
-        rep = super().__repr__()
-        return "lora.dora." + rep
-
 
 class DoraConv1dLayer(_DoraConvNdLayer):
-    def __init__(self, fan_in_fan_out):
-        super().__init__(fan_in_fan_out)
-        self.conv_fn = F.conv1d
+    pass
 
 
 class DoraConv2dLayer(_DoraConvNdLayer):
-    def __init__(self, fan_in_fan_out):
-        super().__init__(fan_in_fan_out)
-        self.conv_fn = F.conv2d
+    pass
 
 
 class DoraConv3dLayer(_DoraConvNdLayer):
-    def __init__(self, fan_in_fan_out):
-        super().__init__(fan_in_fan_out)
-        self.conv_fn = F.conv3d
+    pass
