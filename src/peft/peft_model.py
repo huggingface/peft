@@ -44,7 +44,7 @@ from peft.tuners.lora.variants import get_alora_offsets_for_forward, get_alora_o
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, _delete_auxiliary_adapter
 from peft.utils import AuxiliaryTrainingWrapper
 from peft.utils.constants import DUMMY_MODEL_CONFIG
-from peft.utils.integrations import init_empty_weights
+from peft.utils.integrations import get_fsdp_modules, init_empty_weights
 from peft.utils.other import TrainableTokensWrapper, create_attention_mask, set_additional_trainable_modules
 
 from . import __version__
@@ -1087,6 +1087,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             finally:
                 if model_status.enabled is not False:
                     # model_status.enabled is `True` or `"irregular"`
+                    # with FSDP2, re-enabling has to reach the sharded parameters; it decides the final state, so
+                    # disabling doesn't need to reshard
+                    self._reshard_fsdp_modules()
                     self.base_model.enable_adapter_layers()
                 self._adapters_disabled = was_disabled
 
@@ -1643,6 +1646,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         if adapter_name not in self.peft_config:
             raise ValueError(f"Adapter {adapter_name} not found.")
+        self._reshard_fsdp_modules()
         self.active_adapter = adapter_name
         if not self.peft_config[adapter_name].is_prompt_learning:
             # _set_adapter does not need to be called, since it's called through the BaseTuner class.
@@ -1669,7 +1673,38 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 f"{self.active_peft_config.peft_type.value}."
             )
 
+        self._reshard_fsdp_modules()
         self.base_model.set_requires_grad(adapter_names=adapter_names, requires_grad=requires_grad)
+
+    def _reshard_fsdp_modules(self) -> None:
+        """
+        Reshard the FSDP2 modules in this model, including itself, so that changes to `requires_grad` land on the
+        sharded parameters. Must be called on all ranks, since a resharded module is all-gathered again in its next
+        forward.
+        """
+        fsdp_modules = set(get_fsdp_modules(self))
+        if not fsdp_modules:
+            return
+
+        # resharding drops the unsharded parameters, including weights that were merged into them, so FSDP modules
+        # that shard parameters of a merged layer are skipped
+        merged_modules = {
+            submodule
+            for tuner_layer in self.modules()
+            if isinstance(tuner_layer, BaseTunerLayer) and tuner_layer.merged
+            for submodule in tuner_layer.modules()
+        }
+        for fsdp_module in fsdp_modules:
+            if merged_modules:
+                # an FSDP module shards the parameters of its submodules, except those inside nested FSDP modules
+                sharded_modules, stack = set(), [fsdp_module]
+                while stack:
+                    module = stack.pop()
+                    sharded_modules.add(module)
+                    stack.extend(child for child in module.children() if child not in fsdp_modules)
+                if not sharded_modules.isdisjoint(merged_modules):
+                    continue
+            fsdp_module.reshard()
 
     @property
     def base_model_torch_dtype(self):

@@ -74,3 +74,4 @@ tests_training:
 	accelerate launch --config_file tests/training/fsdp2_config.yaml tests/training/training.py --quant 4bit --target_modules q_proj --target_parameters v_proj.weight
 	accelerate launch --config_file tests/training/fsdp_config.yaml tests/training/adapters.py
 	accelerate launch --config_file tests/training/tp_config.yaml tests/training/lora_tp.py
+	accelerate launch --config_file tests/training/fsdp2_config.yaml tests/training/adapters_fsdp2_reshard_false.py
