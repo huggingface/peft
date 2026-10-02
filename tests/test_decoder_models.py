@@ -1542,8 +1542,9 @@ class TestDecoderModels(PeftCommonTester):
             assert not torch.isclose(losses[0], losses[-1], atol=1e-6, rtol=1e-3)
 
     def test_prefix_tuning_gemma4_warns_if_some_layers_skipped(self):
-        # See previous test_prefix_tuning_gemma4_works. When the embedding matrix is too small to fit any layer targeted
-        # by prefix tuning, raise an error
+        # See previous test_prefix_tuning_gemma4_works. Layers that share their KV with an earlier layer never write to
+        # the cache themselves, but they do receive the prefix transitively from the layer they share with. Warn that
+        # the prefix slots of those layers go unused.
         model_id = "peft-internal-testing/tiny-random-gemma4-E2B"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(
@@ -1560,8 +1561,16 @@ class TestDecoderModels(PeftCommonTester):
             model = get_peft_model(model, config)
 
             inputs = torch.arange(10).view(1, -1).to(self.torch_device)
-            with pytest.warns(UserWarning, match=r"skipped \[.*\] due to KV shape"):
+            with pytest.warns(UserWarning) as record:
                 model(inputs)
+
+            (message,) = [str(w.message) for w in record if "Prefix tuning" in str(w.message)]
+            assert "injected into layers [0, 1, 2]" in message
+            assert "layers [3] share their KV with an earlier layer" in message
+            assert "go unused" in message
+            # the layers that do receive the prefix are not reported as running without one
+            assert "wider than the provisioned prefix" not in message
+            assert "without a prefix" not in message
 
     def test_prefix_tuning_gemma4_raises_if_all_layers_skipped(self):
         # See previous test_prefix_tuning_gemma4_works. When the embedding matrix is too small to fit any layer targeted

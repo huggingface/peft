@@ -857,12 +857,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     getattr(base_config, "num_hidden_layers", peft_config.num_layers) - num_kv_shared_layers
                 )
                 injected_layers: list[int] = []
-                skipped_layers: list[int] = []
+                # Layers that do receive the prefix only transitively, because they share their KV with an earlier
+                # layer of the same type.
+                shared_kv_layers: list[int] = []
+                # Layers whose KV is wider than what the prefix was provisioned for. They cannot be sliced up, so
+                # they have to run without a prefix.
+                too_wide_layers: list[int] = []
                 # past_key_values is a tuple of `num_layers` per-layer tensors each shaped
                 # [2, batch, num_heads, num_virtual_tokens, head_dim], where dim 0 stacks K and V.
                 for layer_idx, layer_past_key_values in enumerate(past_key_values):
                     if num_kv_shared_layers > 0 and layer_idx >= first_kv_shared_layer_idx:
-                        skipped_layers.append(layer_idx)
+                        shared_kv_layers.append(layer_idx)
                         continue
                     key_states, value_states = layer_past_key_values
                     shape_or_none = _get_layer_kv_target_shape(base_config, layer_idx)
@@ -872,7 +877,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         # than what we provisioned, we cannot slice up; skip rather than silently truncating to a shape
                         # the model won't accept.
                         if n_h > key_states.shape[1] or d > key_states.shape[3]:
-                            skipped_layers.append(layer_idx)
+                            too_wide_layers.append(layer_idx)
                             continue
                         key_states = key_states[:, :n_h, :, :d]
                         value_states = value_states[:, :n_h, :, :d]
@@ -891,11 +896,21 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         "and `num_attention_heads` in `PrefixTuningConfig` to match a layer that should receive the "
                         "prefix."
                     )
-                if skipped_layers:
-                    warnings.warn(
-                        f"Prefix tuning injected into layers {injected_layers}; skipped {skipped_layers} due to KV "
-                        "shape mismatch or shared-KV layers."
-                    )
+                if shared_kv_layers or too_wide_layers:
+                    details = [f"injected into layers {injected_layers}"]
+                    if shared_kv_layers:
+                        details.append(
+                            f"layers {shared_kv_layers} share their KV with an earlier layer and receive the prefix "
+                            "from it, so their own prefix slots go unused"
+                        )
+                    if too_wide_layers:
+                        details.append(
+                            f"the KV of layers {too_wide_layers} is wider than the provisioned prefix "
+                            f"(num_attention_heads={peft_config.num_attention_heads}, "
+                            f"head_dim={peft_config.token_dim // peft_config.num_attention_heads}), so these layers run "
+                            "without a prefix"
+                        )
+                    warnings.warn(f"Prefix tuning: {'; '.join(details)}.")
 
             elif peft_config.num_transformer_submodules == 1:
                 # Don't apply this to encoder-decoder models and not to models requiring special processing.
