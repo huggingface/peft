@@ -17,11 +17,17 @@ import re
 import pytest
 import torch
 from torch import nn
-from transformers import AutoModelForCausalLM
+from transformers import (
+    AutoModelForCausalLM,
+    DeepseekV3Config,
+    DeepseekV3ForCausalLM,
+    Qwen3MoeConfig,
+    Qwen3MoeForCausalLM,
+)
 
 import peft
 from peft import LoraConfig, PeftModel, TaskType, get_peft_model
-from peft.tuners.lora.layer import ParamWrapper
+from peft.tuners.lora.layer import Linear, LoraLayer, ParamWrapper
 
 from .testing_common import PeftCommonTester
 from .testing_utils import hub_online_once, set_init_weights_false
@@ -714,3 +720,358 @@ class TestTargetParameters:
         msg = re.escape("Targeting an nn.Parameter on the top-level module is not supported (parameter 'param')")
         with pytest.raises(ValueError, match=msg):
             get_peft_model(MyModule(), config)
+
+    @pytest.fixture
+    def deepseek_model(self):
+        # docstyle-ignore
+        """
+        DeepseekV3ForCausalLM(
+          (model): DeepseekV3Model(
+            (embed_tokens): Embedding(32, 32)
+            (layers): ModuleList(
+              (0): DeepseekV3DecoderLayer(
+                (self_attn): DeepseekV3Attention(
+                  (q_a_proj): Linear(in_features=32, out_features=16, bias=False)
+                  (q_a_layernorm): DeepseekV3RMSNorm((16,), eps=1e-06)
+                  (q_b_proj): Linear(in_features=16, out_features=32, bias=False)
+                  (kv_a_proj_with_mqa): Linear(in_features=32, out_features=12, bias=False)
+                  (kv_a_layernorm): DeepseekV3RMSNorm((8,), eps=1e-06)
+                  (kv_b_proj): Linear(in_features=8, out_features=48, bias=False)
+                  (o_proj): Linear(in_features=32, out_features=32, bias=False)
+                )
+                (mlp): DeepseekV3MLP(
+                  (gate_proj): Linear(in_features=32, out_features=32, bias=False)
+                  (up_proj): Linear(in_features=32, out_features=32, bias=False)
+                  (down_proj): Linear(in_features=32, out_features=32, bias=False)
+                  (act_fn): SiLUActivation()
+                )
+                (input_layernorm): DeepseekV3RMSNorm((32,), eps=1e-06)
+                (post_attention_layernorm): DeepseekV3RMSNorm((32,), eps=1e-06)
+              )
+              (1): DeepseekV3DecoderLayer(
+                (self_attn): DeepseekV3Attention(
+                  (q_a_proj): Linear(in_features=32, out_features=16, bias=False)
+                  (q_a_layernorm): DeepseekV3RMSNorm((16,), eps=1e-06)
+                  (q_b_proj): Linear(in_features=16, out_features=32, bias=False)
+                  (kv_a_proj_with_mqa): Linear(in_features=32, out_features=12, bias=False)
+                  (kv_a_layernorm): DeepseekV3RMSNorm((8,), eps=1e-06)
+                  (kv_b_proj): Linear(in_features=8, out_features=48, bias=False)
+                  (o_proj): Linear(in_features=32, out_features=32, bias=False)
+                )
+                (mlp): DeepseekV3MoE(
+                  (experts): DeepseekV3Experts(
+                    (act_fn): SiLUActivation()
+                  )
+                  (gate): DeepseekV3TopkRouter()
+                  (shared_experts): DeepseekV3MLP(
+                    (gate_proj): Linear(in_features=32, out_features=16, bias=False)
+                    (up_proj): Linear(in_features=32, out_features=16, bias=False)
+                    (down_proj): Linear(in_features=16, out_features=32, bias=False)
+                    (act_fn): SiLUActivation()
+                  )
+                )
+                (input_layernorm): DeepseekV3RMSNorm((32,), eps=1e-06)
+                (post_attention_layernorm): DeepseekV3RMSNorm((32,), eps=1e-06)
+              )
+            )
+            (norm): DeepseekV3RMSNorm((32,), eps=1e-06)
+            (rotary_emb): DeepseekV3RotaryEmbedding()
+          )
+          (lm_head): Linear(in_features=32, out_features=32, bias=False)
+        )
+        """
+        torch.manual_seed(0)
+        config = DeepseekV3Config(
+            vocab_size=32,
+            hidden_size=32,
+            intermediate_size=32,
+            moe_intermediate_size=16,
+            num_hidden_layers=2,
+            num_attention_heads=4,
+            num_key_value_heads=4,
+            q_lora_rank=16,
+            kv_lora_rank=8,
+            qk_nope_head_dim=4,
+            qk_rope_head_dim=4,
+            v_head_dim=8,
+            n_routed_experts=4,
+            n_shared_experts=1,
+            n_group=2,  # V3's router takes the top two experts within each group.
+            topk_group=1,
+            num_experts_per_tok=2,
+            first_k_dense_replace=1,  # first block is dense, second is MoE
+            max_position_embeddings=32,
+            num_mtp_layers=0,
+            use_cache=False,
+            attn_implementation="eager",
+            experts_implementation="eager",
+        )
+        return DeepseekV3ForCausalLM(config)
+
+    @pytest.mark.parametrize(
+        "target_parameters,target_modules",
+        [
+            pytest.param(
+                target_parameters,
+                target_modules,
+                # Bare module names without parameter targets still use legacy MoE conversion, this is not fixed (yet)
+                # but also not very likely to to be used an issue in practice; users can qualify the module names if
+                # needed
+                marks=(
+                    pytest.mark.xfail(strict=True, reason="Bare targets without parameters use legacy MoE conversion")
+                    if not target_parameters and all("." not in name for name in target_modules)
+                    else ()
+                ),
+            )
+            for target_parameters in [
+                [],
+                ["experts.down_proj"],
+                ["experts.gate_up_proj", "experts.down_proj"],
+            ]
+            for target_modules in [
+                ["down_proj"],  # this xfails for target_parameters=[]
+                ["gate_proj", "down_proj"],  # this xfails for target_parameters=[]
+                ["shared_experts.down_proj"],
+                ["shared_experts.gate_proj", "shared_experts.down_proj"],
+                ["mlp.shared_experts.down_proj"],
+                ["mlp.shared_experts.gate_proj", "mlp.shared_experts.down_proj"],
+            ]
+        ],
+    )
+    def test_deepseek_v3_target_modules_and_target_parameters_name_overlap(
+        self, deepseek_model, target_modules, target_parameters
+    ):
+        # see #3711: down_proj can both be nn.Linear and an nn.Parameter, don't accidentally target with the wrong type
+        mlp0 = deepseek_model.model.layers[0].mlp  # layer 0: all dense
+        mlp1 = deepseek_model.model.layers[1].mlp  # layer 1: shared experts dense, experts MoE
+        # sanity check
+        assert isinstance(mlp0.down_proj, nn.Linear)
+        assert isinstance(mlp0.gate_proj, nn.Linear)
+        assert isinstance(mlp1.shared_experts.down_proj, nn.Linear)
+        assert isinstance(mlp1.shared_experts.gate_proj, nn.Linear)
+        assert isinstance(mlp1.experts.down_proj, nn.Parameter)
+        assert isinstance(mlp1.experts.gate_up_proj, nn.Parameter)
+
+        lora_config = LoraConfig(
+            task_type=TaskType.CAUSAL_LM,
+            r=2,
+            lora_alpha=2,
+            lora_dropout=0.0,
+            target_modules=target_modules,
+            target_parameters=target_parameters,
+            init_lora_weights=False,
+        )
+        peft_model = get_peft_model(deepseek_model, lora_config)
+
+        # check the rewritten config
+        assert peft_model.peft_config["default"].target_modules == set(target_modules)
+        assert peft_model.peft_config["default"].target_parameters == set(target_parameters or [])
+
+        # check the lora modules
+        # for some modules, whether they're targeted depends on the parametrization
+        assert isinstance(mlp0.gate_proj, (Linear, nn.Linear))
+        assert isinstance(mlp0.down_proj, (Linear, nn.Linear))
+        assert isinstance(mlp1.shared_experts.gate_proj, (Linear, nn.Linear))
+        # this must be targeted no matter what parametrization
+        assert isinstance(mlp1.shared_experts.down_proj, Linear)
+
+        # remember: for the param wrapper, the *parent module* is wrapped
+        if len(target_parameters or []) == 0:
+            assert not isinstance(mlp1.experts, ParamWrapper)
+        else:
+            assert isinstance(mlp1.experts, ParamWrapper)
+            assert mlp1.experts.parameter_name == "down_proj"
+        if len(target_parameters or []) > 1:
+            # 2 targets: -> nested ParamWrapper
+            assert isinstance(mlp1.experts.base_layer, ParamWrapper)
+            assert mlp1.experts.base_layer.parameter_name == "gate_up_proj"
+
+    @pytest.fixture
+    def qwen_model(self):
+        # docstyle-ignore
+        """
+        Qwen model mixing dense and MoE layers with ambiguous names:
+        Qwen3MoeForCausalLM(
+          (model): Qwen3MoeModel(
+            (embed_tokens): Embedding(32, 16)
+            (layers): ModuleList(
+              (0): Qwen3MoeDecoderLayer(
+                (self_attn): Qwen3MoeAttention(
+                  (q_proj): Linear(in_features=16, out_features=16, bias=False)
+                  (k_proj): Linear(in_features=16, out_features=16, bias=False)
+                  (v_proj): Linear(in_features=16, out_features=16, bias=False)
+                  (o_proj): Linear(in_features=16, out_features=16, bias=False)
+                  (q_norm): Qwen3MoeRMSNorm((8,), eps=1e-06)
+                  (k_norm): Qwen3MoeRMSNorm((8,), eps=1e-06)
+                )
+                (mlp): Qwen3MoeMLP(
+                  (gate_proj): Linear(in_features=16, out_features=32, bias=False)
+                  (up_proj): Linear(in_features=16, out_features=32, bias=False)
+                  (down_proj): Linear(in_features=32, out_features=16, bias=False)
+                  (act_fn): SiLUActivation()
+                )
+                (input_layernorm): Qwen3MoeRMSNorm((16,), eps=1e-06)
+                (post_attention_layernorm): Qwen3MoeRMSNorm((16,), eps=1e-06)
+              )
+              (1-2): 2 x Qwen3MoeDecoderLayer(
+                (self_attn): Qwen3MoeAttention(
+                  (q_proj): Linear(in_features=16, out_features=16, bias=False)
+                  (k_proj): Linear(in_features=16, out_features=16, bias=False)
+                  (v_proj): Linear(in_features=16, out_features=16, bias=False)
+                  (o_proj): Linear(in_features=16, out_features=16, bias=False)
+                  (q_norm): Qwen3MoeRMSNorm((8,), eps=1e-06)
+                  (k_norm): Qwen3MoeRMSNorm((8,), eps=1e-06)
+                )
+                (mlp): Qwen3MoeSparseMoeBlock(
+                  (experts): Qwen3MoeExperts(
+                    (act_fn): SiLUActivation()
+                  )
+                  (gate): Qwen3MoeTopKRouter()
+                )
+                (input_layernorm): Qwen3MoeRMSNorm((16,), eps=1e-06)
+                (post_attention_layernorm): Qwen3MoeRMSNorm((16,), eps=1e-06)
+              )
+            )
+            (norm): Qwen3MoeRMSNorm((16,), eps=1e-06)
+            (rotary_emb): Qwen3MoeRotaryEmbedding()
+          )
+          (lm_head): Linear(in_features=16, out_features=32, bias=False)
+        )
+        """
+        torch.manual_seed(0)
+        config = Qwen3MoeConfig(
+            vocab_size=32,
+            hidden_size=16,
+            intermediate_size=32,
+            moe_intermediate_size=8,
+            num_hidden_layers=3,
+            num_attention_heads=2,
+            num_key_value_heads=2,
+            num_experts=2,
+            num_experts_per_tok=2,
+            mlp_only_layers=[0],
+            max_position_embeddings=32,
+            use_cache=False,
+            attn_implementation="eager",
+            experts_implementation="eager",
+        )
+        return Qwen3MoeForCausalLM(config)
+
+    @pytest.mark.parametrize("prefix", ["model.layers.0.mlp", "mlp"], ids=["full-path", "suffix"])
+    @pytest.mark.parametrize("projection", ["gate_proj", "up_proj", "down_proj"])
+    def test_qwen_linear_module_target_is_preserved(self, qwen_model, prefix, projection):
+        # The dense MLP has ordinary linear projections with the same leaf names as the legacy expert projections.
+        # Preserve its module target alongside an explicit, layer-specific fused parameter target.
+        target_module = f"{prefix}.{projection}"
+        target_parameter = "model.layers.1.mlp.experts.down_proj"
+        config = LoraConfig(r=2, target_modules=[target_module], target_parameters=[target_parameter])
+        model = get_peft_model(qwen_model, config)
+
+        assert config.target_modules == {target_module}
+        assert set(config.target_parameters) == {target_parameter}
+
+        layers = model.get_base_model().model.layers
+        assert isinstance(getattr(layers[0].mlp, projection), Linear)
+        assert isinstance(layers[1].mlp.experts, ParamWrapper)
+        assert layers[1].mlp.experts.parameter_name == "down_proj"
+        assert not isinstance(layers[2].mlp.experts, LoraLayer)
+        assert len([module for module in model.modules() if isinstance(module, LoraLayer)]) == 2
+
+    @pytest.mark.parametrize(
+        "target_modules",
+        [
+            [
+                "1.self_attn.q_proj",
+                "1.mlp.gate",
+                "1.mlp.experts.gate_proj",
+                "1.mlp.experts.up_proj",
+                "1.mlp.experts.down_proj",
+            ],
+            r"model\.layers\.1\.(self_attn\.q_proj|mlp\.(gate|experts\.(gate_proj|up_proj|down_proj)))",
+            r"model\.layers\.1\.(self_attn\.q_proj|mlp\.(gate|experts\.\d+\.(gate_proj|up_proj|down_proj)))",
+        ],
+        ids=["suffixes", "regex", "numbered-expert-regex"],
+    )
+    @pytest.mark.xfail(strict=True, reason="Legacy expert conversion still loses layer scope")
+    def test_qwen_legacy_targets_install_parameter_adapters_on_correct_layer(self, qwen_model, target_modules):
+        # Looking only at named_modules() would either reject the custom router or silently drop the expert targets
+        # while still adapting q_proj. Check actual wrappers and gradients, including the fused gate/up rank.
+        config = LoraConfig(r=2, lora_alpha=2, target_modules=target_modules)
+        model = get_peft_model(qwen_model, config)
+
+        # only layer 1 should be targeted but right now, all layers are targeted -> xfail
+        assert config.target_parameters != {"down_proj", "gate_up_proj", "gate.weight"}
+
+        layers = model.get_base_model().model.layers
+        assert isinstance(layers[1].self_attn.q_proj, Linear)
+        assert isinstance(layers[1].mlp.gate, ParamWrapper)
+        assert layers[1].mlp.gate.parameter_name == "weight"
+
+        experts = layers[1].mlp.experts
+        assert isinstance(experts, ParamWrapper)
+        assert experts.parameter_name == "down_proj"
+        assert isinstance(experts.base_layer, ParamWrapper)
+        assert experts.base_layer.parameter_name == "gate_up_proj"
+        # fused weight:
+        assert experts.base_layer.r["default"] == 4
+        assert experts.base_layer.lora_alpha["default"] == 4
+
+        # layers[2] should not be updated but it is -> xfail
+        assert not isinstance(layers[2].mlp.experts, LoraLayer)
+        assert not isinstance(layers[2].mlp.gate, LoraLayer)
+        assert not isinstance(layers[0].mlp.down_proj, LoraLayer)
+
+        # expected: q_proj, gate, gate_up_proj, down_proj for one layer -> xfail
+        adapters = [module for module in model.modules() if isinstance(module, LoraLayer)]
+        assert len(adapters) == 4
+
+        # Resolve a fresh legacy config against the already wrapped architecture, without targeting adapter internals.
+        model.add_adapter("other", LoraConfig(r=2, lora_alpha=2, target_modules=target_modules))
+        # same issue as above: should be only 4 targets -> xfail
+        assert len([module for module in model.modules() if isinstance(module, LoraLayer)]) == 4
+        assert all("other" in adapter.lora_A for adapter in adapters)
+
+    @pytest.mark.parametrize("target_modules", [["down_proj"], r".*\.down_proj"], ids=["suffix", "regex"])
+    @pytest.mark.xfail(strict=True, reason="Broad MoE targets still omit dense modules")
+    def test_qwen_target_can_match_dense_modules_and_expert_parameters(self, qwen_model, target_modules):
+        # down_proj can refer to both nn.Linear in layer 0 and MoE in layer 1 & 2
+        config = LoraConfig(r=2, target_modules=target_modules)
+        model = get_peft_model(qwen_model, config)
+
+        # layer 0: normal target_modules -> xfail
+        assert len(config.target_modules) == 1
+        assert all(".0." in key for key in config.target_modules)
+        # layers 1 and 2: target_parameters -> xfail
+        assert len(config.target_parameters) == 2
+        assert all(".1." in key or ".2." in key for key in config.target_parameters)
+
+        layers = model.get_base_model().model.layers
+        # not targeted -> xfail
+        assert isinstance(layers[0].mlp.down_proj, Linear)
+
+        # parameters are correctly targeted:
+        for idx in (1, 2):
+            assert isinstance(layers[idx].mlp.experts, ParamWrapper)
+            assert layers[idx].mlp.experts.parameter_name == "down_proj"
+
+        # one for each layer but layer 0 is not targeted -> xfail
+        assert len([module for module in model.modules() if isinstance(module, LoraLayer)]) == 3
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            # gate_proj and up_proj would be fused to gate_up_proj
+            {"target_modules": ["1.mlp.experts.0.down_proj"]},
+            {"target_modules": ["1.mlp.experts.gate_proj", "2.mlp.experts.up_proj"]},
+            # with fused experts, it's no longer possible to exclude one specific expert, so this can no longer be
+            # expressed
+            {"target_modules": ["down_proj"], "exclude_modules": ["1.mlp.experts.0.down_proj"]},
+        ],
+        ids=["target-subset", "non-overlapping-targets", "exclude-expert"],
+    )
+    @pytest.mark.xfail(strict=True, reason="Legacy conversion still broadens numbered expert selections")
+    def test_targeting_subset_of_layers_to_be_fused_raises(self, qwen_model, kwargs):
+        # when trying to target a subset of modules from layers that will be fused, an error should be raised
+        config = LoraConfig(**kwargs)
+        with pytest.raises(ValueError, match="Cannot convert a subset of experts"):
+            get_peft_model(qwen_model, config)

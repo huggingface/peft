@@ -441,7 +441,40 @@ def _convert_peft_config_moe(peft_config: PeftConfig, model: torch.nn.Module) ->
     remaining_target_modules = set()
     matched_targets: dict[str, set[str]] = {new_name: set() for new_name in fused_targets}
 
+    named_modules = list(model.named_modules())
+    parameter_names = [name for name, _ in model.named_parameters()]
     for target in peft_config.target_modules:
+        # Possibly preserve linear module targets when the name is qualified or target_parameters is nonempty. Bare
+        # names without explicit parameter targets still use legacy MoE conversion below. See #3711.
+        if "." in target or peft_config.target_parameters:
+            target_config = copy.copy(peft_config)
+            target_config.target_modules = {target}
+            matching_modules = [
+                module for name, module in named_modules if check_target_module_exists(target_config, name)
+            ]
+            if (
+                matching_modules
+                and all(isinstance(module, torch.nn.Linear) for module in matching_modules)
+                # Say we have a config like this:
+                #
+                #  `LoraConfig(target_modules=["down_proj"], target_parameters=["experts.down_proj"])`
+                #
+                # Possibly keep the matching Linear modules as module targets, even though "down_proj" also matches an
+                # expert parameter. It's possible that the architecture has both nn.Linear and nn.Parameter targets with
+                # that name (e.g. DeepSeek v3). A non-empty target_parameters signals that parameter selection is
+                # specified separately; we don't check its individual entries here.
+                # Without explicit parameter targets, the remaining check is defensive, as a qualified suffix like
+                # "mlp.down_proj" could hypothetically match a Linear in one model branch and a parameter in another. In
+                # that case, preserve the existing legacy conversion behavior instead of keeping only the module target
+                # and losing parameter adaptation.
+                and (
+                    peft_config.target_parameters
+                    or not any(check_target_module_exists(target_config, name) for name in parameter_names)
+                )
+            ):
+                remaining_target_modules.add(target)
+                continue
+
         mapped_new_name = None
         mapped_old_name = None
         for old_name, new_name in target_module_mapping.items():
