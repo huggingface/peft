@@ -117,7 +117,13 @@ def _get_return_dict_transformers_v4(config) -> bool:
     return getattr(config, "return_dict", True) and not getattr(config, "torchscript", False)
 
 
-def _add_modules_to_save(peft_config: PeftConfig, module_names: list[str]) -> None:
+# Task heads that sequence and token classification models add to `modules_to_save`. `pre_classifier` is randomly
+# initialized in DistilBERT-style sequence classification heads and thus has to be trained and saved alongside
+# `classifier`.
+CLASSIFIER_MODULE_NAMES = ("classifier", "score", "pre_classifier")
+
+
+def _add_modules_to_save(peft_config: PeftConfig, module_names: Sequence[str]) -> None:
     """Add a task head's module names to `peft_config.modules_to_save`.
 
     The config belongs to the caller and is stored by reference, so the list is rebound instead of extended in place,
@@ -125,7 +131,7 @@ def _add_modules_to_save(peft_config: PeftConfig, module_names: list[str]) -> No
     folds) neither accumulates duplicates nor changes the configs of models that were already created from it.
     """
     if peft_config.modules_to_save is None:
-        peft_config.modules_to_save = module_names[:]
+        peft_config.modules_to_save = list(module_names)
     else:
         existing = list(peft_config.modules_to_save)
         peft_config.modules_to_save = existing + [name for name in module_names if name not in existing]
@@ -1841,12 +1847,8 @@ class PeftModelForSequenceClassification(PeftModel):
     def __init__(
         self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default", **kwargs
     ) -> None:
-        # `pre_classifier` is randomly initialized in DistilBERT-style sequence classification
-        # heads and thus has to be trained and saved alongside `classifier`.
-        classifier_module_names = ["classifier", "score", "pre_classifier"]
-
         if hasattr(peft_config, "modules_to_save"):
-            _add_modules_to_save(peft_config, classifier_module_names)
+            _add_modules_to_save(peft_config, CLASSIFIER_MODULE_NAMES)
 
         # The modification of peft_config must happen before the init call as the `modules_to_save` information
         # will be used to guard the target layer matching against matching `modules_to_save` layers. Only the
@@ -1900,10 +1902,7 @@ class PeftModelForSequenceClassification(PeftModel):
         """
         # ensure that additional adapters also add the classifier layer to modules_to_save
         if hasattr(peft_config, "modules_to_save"):
-            # `pre_classifier` is randomly initialized in DistilBERT-style sequence classification
-            # heads and thus has to be trained and saved alongside `classifier`.
-            classifier_module_names = ["classifier", "score", "pre_classifier"]
-            _add_modules_to_save(peft_config, classifier_module_names)
+            _add_modules_to_save(peft_config, CLASSIFIER_MODULE_NAMES)
 
         return super().add_adapter(
             adapter_name,
@@ -2701,9 +2700,8 @@ class PeftModelForTokenClassification(PeftModel):
     ) -> None:
         super().__init__(model, peft_config, adapter_name, **kwargs)
 
-        classifier_module_names = ["classifier", "score"]
         if hasattr(peft_config, "modules_to_save"):
-            _add_modules_to_save(peft_config, classifier_module_names)
+            _add_modules_to_save(peft_config, CLASSIFIER_MODULE_NAMES)
 
         for name, _ in self.base_model.named_children():
             if any(module_name in name for module_name in self.modules_to_save):
@@ -2752,8 +2750,7 @@ class PeftModelForTokenClassification(PeftModel):
         """
         # ensure that additional adapters also add the classifier layer to modules_to_save
         if hasattr(peft_config, "modules_to_save"):
-            classifier_module_names = ["classifier", "score"]
-            _add_modules_to_save(peft_config, classifier_module_names)
+            _add_modules_to_save(peft_config, CLASSIFIER_MODULE_NAMES)
 
         return super().add_adapter(
             adapter_name,

@@ -829,7 +829,7 @@ class TestPrepareModelForKbitTraining:
 # auto classes build the matching head from the same config.
 TASK_TYPE_CASES = [
     ("SEQ_CLS", AutoModelForSequenceClassification, ["classifier", "score", "pre_classifier"]),
-    ("TOKEN_CLS", AutoModelForTokenClassification, ["classifier", "score"]),
+    ("TOKEN_CLS", AutoModelForTokenClassification, ["classifier", "score", "pre_classifier"]),
     ("QUESTION_ANS", AutoModelForQuestionAnswering, ["qa_outputs"]),
 ]
 TASK_TYPE_MODEL_ID = "peft-internal-testing/tiny-random-BertForSequenceClassification"

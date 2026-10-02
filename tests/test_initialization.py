@@ -1283,7 +1283,7 @@ class TestLoraInitialization:
     def test_modules_to_save_does_not_match_lora_submodule(self, modules_to_save):
         # modules_to_save is matched against module names. A name must not match a sub-module that the LoRA layer
         # created for itself, e.g. "out" must not match "linear.lora_dropout" and "A" must not match "linear.lora_A",
-        # which used to raise a TypeError because those are nn.ModuleDicts. Only the real module is wrapped.
+        # which used to raise a TypeError because those are nn.ModuleDicts. Only the real module is wrapped. See #3755.
         class MyModule(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1291,9 +1291,6 @@ class TestLoraInitialization:
                 self.out = nn.Linear(10, 2)
                 self.A = nn.Linear(2, 2)
                 self.B = nn.Linear(2, 2)
-
-            def forward(self, x):
-                return self.B(self.A(self.out(self.linear(x))))
 
         config = LoraConfig(target_modules=["linear"], modules_to_save=modules_to_save)
         model = get_peft_model(MyModule(), config)
@@ -1315,9 +1312,6 @@ class TestLoraInitialization:
                 self.classifier = nn.Linear(10, 2)
                 self.my_classifier = nn.Linear(10, 2)
 
-            def forward(self, x):
-                return self.classifier(self.linear(x))
-
         config = LoraConfig(target_modules=["linear"], modules_to_save=["classifier"])
         model = get_peft_model(MyModule(), config)
 
@@ -1327,7 +1321,7 @@ class TestLoraInitialization:
     def test_seq_cls_auto_modules_to_save_targets_expected_layers(self):
         # The classification head must still be auto-targeted for task_type="SEQ_CLS". DistilBERT is the relevant
         # case: its randomly initialized `pre_classifier` used to be wrapped only because "classifier" happened to be
-        # a suffix of it, so it is now listed explicitly.
+        # a suffix of it, so it is now listed explicitly. See #3755.
         config = DistilBertConfig(vocab_size=100, dim=32, hidden_dim=64, n_layers=2, n_heads=2, num_labels=2)
         model = DistilBertForSequenceClassification(config)
         peft_config = LoraConfig(task_type="SEQ_CLS", target_modules=["q_lin", "v_lin"])
