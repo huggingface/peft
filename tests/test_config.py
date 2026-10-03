@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import builtins
 import copy
 import inspect
 import json
@@ -249,13 +250,23 @@ class TestPeftConfig:
             config_from_json = config_class.from_json_file(config_path)
             assert config.to_dict() == config_from_json
 
-    def test_from_json_file_utf8_non_ascii(self, tmp_path):
-        # Config files are UTF-8; without an explicit encoding, reading them falls back to the
-        # locale encoding (e.g. cp936 on Windows, or LC_ALL=C on Linux), crashing or corrupting
-        # literal non-ASCII values (e.g. a hand-edited config or one written by another tool with
-        # ensure_ascii=False). Not Windows-gated: the regression shows on any non-UTF-8 locale.
+    def test_from_json_file_utf8_non_ascii(self, tmp_path, monkeypatch):
+        # Simulate a non-UTF-8 locale (e.g. cp1252/cp936 on Windows, LC_ALL=C on POSIX): any
+        # text-mode open() without an explicit encoding decodes as cp1252 instead of UTF-8.
+        # (Patching locale.getpreferredencoding is not enough: the C io layer caches the
+        # locale encoding at startup, so patch builtins.open directly.)
+        real_open = builtins.open
+
+        def open_with_legacy_locale(*args, **kwargs):
+            mode = args[1] if len(args) > 1 else kwargs.get("mode", "r")
+            if "b" not in mode and "encoding" not in kwargs:
+                kwargs["encoding"] = "cp1252"
+            return real_open(*args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", open_with_legacy_locale)
         value = "汉 模型 🤗 Ё"
         config_path = os.path.join(tmp_path, "adapter_config.json")
+        # Write the config with literal (non-escaped) non-ASCII characters.
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump({"base_model_name_or_path": value, "peft_type": "LORA"}, f, ensure_ascii=False)
 
