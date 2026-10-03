@@ -25,6 +25,7 @@ from peft import (
     C3AConfig,
     IA3Config,
     KasaConfig,
+    LoHaConfig,
     LoKrConfig,
     LoraConfig,
     MissConfig,
@@ -692,6 +693,103 @@ class TestMissLoraConversion:
             output_after = loaded_model(inputs).logits
 
         assert torch.allclose(output_before, output_after, atol=atol, rtol=rtol)
+
+
+class TestLoHaLoraConversion:
+    """Test LoHa to LoRA conversion.
+
+    Thanks to the Khatri-Rao identity, the LoHa delta weight is exactly a rank r² LoRA. If the requested rank is at
+    least r², the conversion is exact (no SVD); for smaller ranks, the SVD-based approximation is used as usual.
+    """
+
+    model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+    torch_device = infer_device()
+    base_model = None
+
+    def get_base_model(self):
+        if self.base_model is None:
+            with hub_online_once(self.model_id):
+                self.base_model = AutoModelForCausalLM.from_pretrained(self.model_id).to(self.torch_device)
+        return copy.deepcopy(self.base_model)
+
+    @staticmethod
+    def get_mse(output1, output2):
+        return nn.functional.mse_loss(output1.hidden_states[-1], output2.hidden_states[-1]).item()
+
+    @pytest.mark.parametrize("use_khatri_rao", [False, True])
+    def test_loha_exact_conversion(self, use_khatri_rao):
+        torch.manual_seed(0)
+        config = LoHaConfig(
+            r=4, init_weights=False, target_modules=["q_proj", "v_proj"], use_khatri_rao=use_khatri_rao
+        )
+        loha_model = get_peft_model(self.get_base_model(), config).eval()
+        assert loha_model.supports_lora_conversion()
+
+        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+        with torch.inference_mode():
+            output_loha = loha_model(inputs, output_hidden_states=True)
+
+        # the requested rank is r**2, so the exact conversion is used
+        lora_config, state_dict = convert_to_lora(loha_model, rank=16)
+        for key, weight in state_dict.items():
+            if ".lora_A" in key:
+                assert weight.shape[0] == 16
+
+        base_model = self.get_base_model()
+        lora_model = get_peft_model(base_model, lora_config).eval()
+        load_result = set_peft_model_state_dict(lora_model, state_dict)
+        assert not load_result.unexpected_keys
+
+        with torch.inference_mode():
+            output_lora = lora_model(inputs, output_hidden_states=True)
+
+        mse = self.get_mse(output_lora, output_loha)
+        assert mse < 1e-5, f"LoHa conversion should be exact, got mse={mse}"
+
+    def test_loha_lower_rank_uses_svd_approximation(self):
+        # when the requested rank is lower than r**2, the requested rank is honored via the SVD-based approximation
+        torch.manual_seed(0)
+        config = LoHaConfig(r=4, init_weights=False, target_modules=["q_proj", "v_proj"])
+        loha_model = get_peft_model(self.get_base_model(), config).eval()
+
+        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+        with torch.inference_mode():
+            output_loha = loha_model(inputs, output_hidden_states=True)
+
+        lora_config, state_dict = convert_to_lora(loha_model, rank=8)
+        for key, weight in state_dict.items():
+            if ".lora_A" in key:
+                assert weight.shape[0] == 8
+
+        base_model = self.get_base_model()
+        lora_model = get_peft_model(base_model, lora_config).eval()
+        load_result = set_peft_model_state_dict(lora_model, state_dict)
+        assert not load_result.unexpected_keys
+
+        with torch.inference_mode():
+            output_lora = lora_model(inputs, output_hidden_states=True)
+
+        mse = self.get_mse(output_lora, output_loha)
+        assert 0.0 < mse < 0.1
+
+    def test_loha_save_as_lora(self, tmp_path):
+        torch.manual_seed(0)
+        config = LoHaConfig(r=4, init_weights=False, target_modules=["q_proj", "v_proj"])
+        loha_model = get_peft_model(self.get_base_model(), config).eval()
+
+        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+        with torch.inference_mode():
+            output_loha = loha_model(inputs).logits
+
+        save_as_lora(tmp_path, loha_model, rank=16)
+        base_model = self.get_base_model()
+        loaded_model = PeftModel.from_pretrained(base_model, tmp_path).to(self.torch_device)
+
+        with torch.inference_mode():
+            output_loaded = loaded_model(inputs).logits
+
+        atol, rtol = 1e-5, 1e-5
+        assert torch.allclose(output_loha, output_loaded, atol=atol, rtol=rtol)
 
 
 class TestKasaLoraConversion:

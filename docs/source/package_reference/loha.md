@@ -70,6 +70,10 @@ pipeline.unet = get_peft_model(pipeline.unet, config_unet)
 pipeline.unet.print_trainable_parameters()
 ```
 
+### Khatri-Rao factored execution
+
+By default, LoHa materializes the full delta weight $\Delta W$ on each forward pass, which costs roughly as much as a second base layer matmul. By passing `use_khatri_rao=True`, the forward pass is instead computed in factored form via the Khatri-Rao identity (as used by [ABBA](https://huggingface.co/papers/2505.14238)): the Hadamard product of two low-rank products is exactly the product of two factor-sized matrices, so LoHa runs like a rank $r^2$ LoRA. This is faster, uses less memory, and does not change the results (up to numerical precision); the full delta weight is only built when merging. Additionally, when `init_weights=True` (the default), a LoRA-anchored initialization is used, where training starts out exactly like a plain LoRA and higher-rank directions are only learned gradually. Convolution layers with `use_effective_conv2d=True` use the Tucker decomposition, to which the identity does not apply, and keep the default execution path; if no targeted layer supports the factored path at all, an error is raised.
+
 ## Benchmark overview
 
 <iframe
