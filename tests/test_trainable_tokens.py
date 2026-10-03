@@ -652,51 +652,41 @@ class TestTrainableTokens:
         model.base_model.set_adapter(active_adapters)
 
         inputs = {"x_text": torch.tensor([[0, 1, 2]]), "x_image": torch.tensor([[0, 1, 2]])}
-        expected_model = copy.deepcopy(original_model)
-        with torch.no_grad():
-            if "default" in active_adapters:
-                expected_model.emb_text.weight[:2].copy_(model.model.emb_text.trainable_tokens_delta["default"])
-            if "other" in active_adapters:
-                expected_model.emb_image.weight[:2].copy_(model.model.emb_image.trainable_tokens_delta["other"])
-        return model, original_model, expected_model, inputs
+        return model, original_model, inputs
 
     def test_disjoint_adapters_forward(self, disjoint_adapters):
-        model, original_model, expected_model, inputs = disjoint_adapters
-        expected = expected_model(**inputs)
-        assert not torch.allclose(expected[0], original_model(**inputs)[0])
-        torch.testing.assert_close(model(**inputs), expected)
-
-    def test_disjoint_adapters_merged_weights(self, disjoint_adapters):
-        model, _, expected_model, _ = disjoint_adapters
-        torch.testing.assert_close(
-            model.model.emb_text.get_merged_weights(model.active_adapters), expected_model.emb_text.weight
-        )
-        torch.testing.assert_close(
-            model.model.emb_image.get_merged_weights(model.active_adapters), expected_model.emb_image.weight
-        )
+        model, original_model, inputs = disjoint_adapters
+        _, (original_text, original_image) = original_model(**inputs)
+        _, (adapted_text, adapted_image) = model(**inputs)
+        assert torch.allclose(adapted_text[:, :2], original_text[:, :2]) == ("default" not in model.active_adapters)
+        assert torch.allclose(adapted_image[:, :2], original_image[:, :2]) == ("other" not in model.active_adapters)
+        torch.testing.assert_close(adapted_text[:, 2:], original_text[:, 2:])
+        torch.testing.assert_close(adapted_image[:, 2:], original_image[:, 2:])
 
     def test_disjoint_adapters_disable(self, disjoint_adapters):
-        model, original_model, _, inputs = disjoint_adapters
+        model, original_model, inputs = disjoint_adapters
         with model.disable_adapter():
             torch.testing.assert_close(model(**inputs), original_model(**inputs))
 
     @pytest.mark.parametrize("safe_merge", [False, True])
     def test_disjoint_adapters_merge_unmerge(self, disjoint_adapters, safe_merge):
-        model, original_model, expected_model, inputs = disjoint_adapters
+        model, original_model, inputs = disjoint_adapters
+        expected = model(**inputs)
         model.merge_adapter(safe_merge=safe_merge, adapter_names=model.active_adapters)
         assert model.model.emb_text.merged_adapters == (["default"] if "default" in model.active_adapters else [])
         assert model.model.emb_image.merged_adapters == (["other"] if "other" in model.active_adapters else [])
-        torch.testing.assert_close(model(**inputs), expected_model(**inputs))
+        torch.testing.assert_close(model(**inputs), expected)
         model.unmerge_adapter()
-        torch.testing.assert_close(model(**inputs), expected_model(**inputs))
+        torch.testing.assert_close(model(**inputs), expected)
         torch.testing.assert_close(model.model.emb_text.get_base_layer().weight, original_model.emb_text.weight)
         torch.testing.assert_close(model.model.emb_image.get_base_layer().weight, original_model.emb_image.weight)
 
     @pytest.mark.parametrize("safe_merge", [False, True])
     def test_disjoint_adapters_merge_and_unload(self, disjoint_adapters, safe_merge):
-        model, _, expected_model, inputs = disjoint_adapters
+        model, _, inputs = disjoint_adapters
+        expected = model(**inputs)
         merged_model = model.merge_and_unload(safe_merge=safe_merge, adapter_names=model.active_adapters)
-        torch.testing.assert_close(merged_model(**inputs), expected_model(**inputs))
+        torch.testing.assert_close(merged_model(**inputs), expected)
 
     @pytest.mark.parametrize(
         "peft_config",
