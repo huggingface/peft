@@ -1087,6 +1087,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     "This is most likely unintentional. After exiting the disable_adapter context, all adapters "
                     "will be enabled"
                 )
+            # With FSDP2, the parameters registered on entry are the shards, or unsharded copies with the same
+            # `requires_grad`. If they are still registered after re-enabling, with unchanged `requires_grad`, the
+            # shards are already right; otherwise re-enabling is repeated after a reshard.
+            entry_params = (
+                {name: (param, param.requires_grad) for name, param in self.named_parameters()}
+                if model_status.enabled is not False and get_fsdp_modules(self)
+                else {}
+            )
             try:
                 self.base_model.disable_adapter_layers()
                 self._adapters_disabled = True
@@ -1094,10 +1102,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             finally:
                 if model_status.enabled is not False:
                     # model_status.enabled is `True` or `"irregular"`
-                    # with FSDP2, re-enabling has to reach the sharded parameters; it decides the final state, so
-                    # disabling doesn't need to reshard
-                    self._reshard_fsdp_modules()
                     self.base_model.enable_adapter_layers()
+                    params = dict(self.named_parameters()) if entry_params else {}
+                    if any(
+                        params.get(name) is not param or param.requires_grad != requires_grad
+                        for name, (param, requires_grad) in entry_params.items()
+                    ):
+                        self._reshard_fsdp_modules()
+                        self.base_model.enable_adapter_layers()
                 self._adapters_disabled = was_disabled
 
     def get_base_model(self) -> torch.nn.Module:
