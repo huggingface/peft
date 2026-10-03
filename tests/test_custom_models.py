@@ -4484,11 +4484,11 @@ class TestPeftCustomModel(PeftCommonTester):
         with pytest.raises(ValueError, match=msg):
             model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
 
-    @pytest.mark.parametrize(
-        "config_cls", [IA3Config, BeftConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, MissConfig]
-    )
-    def test_add_weighted_adapter_cat_with_rank_pattern(self, config_cls):
-        # Fixes a bug described in #2512, which resulted from the rank_pattern not being taken into account
+    def test_add_weighted_adapter_cat_with_rank_pattern(self):
+        # Fixes a bug described in #2512, which resulted from the rank_pattern not being taken into account.
+        # See #3761: this used to parametrize over seven config classes without using config_cls in the body. Of
+        # those, only LoraModel and IA3Model have a working add_weighted_adapter, and IA3Config has no rank_pattern,
+        # so LoRA is the only case this can run.
         config0 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 2})
         config1 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 16})
         model = MLP()
@@ -5125,6 +5125,50 @@ class TestPeftCustomModel(PeftCommonTester):
         model = get_peft_model(MLP(), config).to(self.torch_device)
 
         assert model.base_model.model.lin0.pvera_generator["default"] is None
+
+    @pytest.mark.parametrize(
+        "model_cls, module_name",
+        [(MLP, "lin0"), (ModelConv2D, "conv2d")],
+    )
+    @pytest.mark.parametrize("combination_type", ["cat", "svd", "linear"])
+    def test_add_weighted_adapter_with_lora_bias_identity(self, model_cls, module_name, combination_type):
+        # See #3761
+        # Combining a single adapter with weight 1.0 has to reproduce that adapter. The bias of lora_B contributes
+        # bias * scaling to the output but was never combined, so the new adapter kept the bias it was initialized
+        # with and the outputs differed.
+        torch.manual_seed(0)
+
+        model = model_cls().to(self.torch_device).eval()
+        X = self.prepare_inputs_for_testing()
+        config = LoraConfig(r=8, lora_alpha=16, target_modules=[module_name], init_lora_weights=False, lora_bias=True)
+        peft_model = get_peft_model(model, config, adapter_name="source").eval()
+
+        peft_model.set_adapter("source")
+        source_output = peft_model(**X)
+
+        peft_model.add_weighted_adapter(
+            adapters=["source"], weights=[1.0], adapter_name="combined", combination_type=combination_type
+        )
+        peft_model.set_adapter("combined")
+        assert torch.allclose(peft_model(**X), source_output, atol=1e-4)
+
+    @pytest.mark.parametrize(
+        "extra_kwargs",
+        [{"use_dora": True}, {"kasa_config": KasaConfig(), "r": 4}],
+    )
+    def test_add_weighted_adapter_rejects_variants_with_extra_state(self, extra_kwargs):
+        # See #3761
+        # DoRA and KaSA learn state besides lora_A and lora_B, the magnitude vector and lora_diag. There is no
+        # defined way to combine it, and add_weighted_adapter never did, so the result silently differed from its
+        # sources. The check is on the config, so one model type is enough.
+        torch.manual_seed(0)
+
+        model = MLP().to(self.torch_device)
+        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False, **extra_kwargs)
+        peft_model = get_peft_model(model, config, adapter_name="source")
+
+        with pytest.raises(ValueError, match="add_weighted_adapter does not support"):
+            peft_model.add_weighted_adapter(adapters=["source"], weights=[1.0], adapter_name="combined")
 
 
 class TestMultiRankAdapter:
