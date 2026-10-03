@@ -24,7 +24,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME
-from peft.utils.other import ModulesToSaveWrapper
+from peft.utils.other import AuxiliaryTrainingWrapper
 
 from .config import LoraConfig
 
@@ -220,13 +220,20 @@ def convert_to_lora(
     elif rank == 0:
         raise ValueError("Passing a rank of 0 doesn't make sense, please pass a valid value.")
 
+    auxiliary_wrapper_names = {
+        name for name, module in model.named_modules() if isinstance(module, AuxiliaryTrainingWrapper)
+    }
+
+    # Auxiliary wrappers own their adapter state; nested tuner layers are not independent conversion targets.
     # check if LoRA conversion is supported at all
     modules_not_supporting_lora = []
     num_modules_with_support = 0
     num_modules_total = 0
-    for module in model.modules():
+    for name, module in model.named_modules():
         num_modules_total += 1
         if not isinstance(module, BaseTunerLayer):
+            continue
+        if any(name.startswith(f"{wrapper_name}.") for wrapper_name in auxiliary_wrapper_names):
             continue
 
         if module.supports_lora_conversion(adapter_name):
@@ -301,6 +308,8 @@ def convert_to_lora(
     ):
         if not isinstance(module, BaseTunerLayer):
             continue
+        if any(name.startswith(f"{wrapper_name}.") for wrapper_name in auxiliary_wrapper_names):
+            continue
         if not hasattr(module, "get_delta_weight"):
             # if we arrive here, it means that the layer actually does not support LoRA conversion, which should not
             # happen
@@ -343,18 +352,32 @@ def convert_to_lora(
     # NON-LORA PARTS #
     ##################
 
-    if (peft_config is not None) and getattr(peft_config, "modules_to_save", None):
-        # logic to take care of modules_to_save; might not cover all edge cases, like sharded model
-        lora_config.modules_to_save = copy.copy(peft_config.modules_to_save)
+    # Preserve the configuration needed to recreate auxiliary wrappers in the converted LoRA model.
+    if peft_config is not None:
+        if getattr(peft_config, "modules_to_save", None):
+            lora_config.modules_to_save = copy.copy(peft_config.modules_to_save)
+        if getattr(peft_config, "trainable_token_indices", None) is not None:
+            lora_config.trainable_token_indices = copy.copy(peft_config.trainable_token_indices)
 
-        for module_name, module in model.named_modules():
-            if isinstance(module, ModulesToSaveWrapper):
-                for param_name, param in module.modules_to_save.named_parameters():
-                    # it is expected that '.modules_to_save.' is not part of the key
-                    prefix, _, _ = module_name.partition(".modules_to_save.")
-                    # remove the adapter name
-                    _, _, suffix = param_name.rpartition(".")
-                    state_dict[f"{prefix}.{suffix}"] = param.data
+    # Use the full model state dict so wrapper serialization includes buffers and accelerator-gathered parameters.
+    model_state_dict = model.state_dict()
+    for module_name, module in model.named_modules():
+        if isinstance(module, AuxiliaryTrainingWrapper):
+            # FSDP state dicts omit this wrapper prefix, so align the module name before selecting its keys.
+            if module_name.startswith("_fsdp_wrapped_module."):
+                module_name = module_name.removeprefix("_fsdp_wrapped_module.")
+            # Each wrapper defines its own adapter-specific serialization contract.
+            module_state_dict = {
+                key.removeprefix(f"{module_name}."): value
+                for key, value in model_state_dict.items()
+                if key.startswith(f"{module_name}.")
+            }
+            state_dict.update(
+                {
+                    f"{module_name}.{key}": value
+                    for key, value in module.adapter_state_dict(adapter_name, module_state_dict).items()
+                }
+            )
 
     return lora_config, state_dict
 
