@@ -326,6 +326,9 @@ if is_bnb_4bit_available():
             self.fan_in_fan_out = False
 
             self._active_adapter = adapter_name
+            # Exact pre-merge Params4bit objects, keyed by adapter. Re-quantizing on unmerge drifts
+            # (see #3878); restore the stashed handle instead when available.
+            self._bnb4bit_weight_on_merge: dict[str, torch.nn.Parameter] = {}
             self.update_layer(
                 adapter_name,
                 r,
@@ -399,6 +402,8 @@ if is_bnb_4bit_available():
                 kwargs.pop("data", None)
                 # torch.compile can introduce attributes preceded by '_', remove them
                 kwargs = {k: v for k, v in kwargs.items() if not k.startswith("_")}
+                # Keep the pre-merge Params4bit so unmerge can restore it exactly (dequant→requant drifts).
+                self._bnb4bit_weight_on_merge[active_adapter] = weight
                 self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
 
                 if self.lora_bias[active_adapter]:
@@ -423,25 +428,32 @@ if is_bnb_4bit_available():
                 active_adapter = self.merged_adapters.pop()
                 if active_adapter not in self.lora_A.keys():
                     continue
-                warnings.warn(
-                    "Unmerge lora module to 4-bit linear may get different generations due to rounding errors."
-                )
 
-                weight = self.get_base_layer().weight
-                kwargs = weight.__dict__
-                output = dequantize_bnb_weight(weight, state=weight.quant_state)
-
-                if active_adapter not in self.lora_variant:  # vanilla LoRA
-                    lora_data = self.get_delta_weight(active_adapter)
-                    w_data = output - lora_data
+                # Prefer the Params4bit captured before this adapter was merged. Re-quantizing the
+                # dequantized (merged - delta) weight permanently drifts and replaces the object (#3878).
+                cached_weight = self._bnb4bit_weight_on_merge.pop(active_adapter, None)
+                if cached_weight is not None:
+                    self.get_base_layer().weight = cached_weight
                 else:
-                    w_data = self.lora_variant[active_adapter].unmerge(self, active_adapter, output)
+                    warnings.warn(
+                        "Unmerge lora module to 4-bit linear may get different generations due to rounding errors."
+                    )
 
-                if "bnb_quantized" in kwargs:
-                    kwargs["bnb_quantized"] = False
-                kwargs["requires_grad"] = False
-                kwargs.pop("data", None)
-                self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
+                    weight = self.get_base_layer().weight
+                    kwargs = weight.__dict__
+                    output = dequantize_bnb_weight(weight, state=weight.quant_state)
+
+                    if active_adapter not in self.lora_variant:  # vanilla LoRA
+                        lora_data = self.get_delta_weight(active_adapter)
+                        w_data = output - lora_data
+                    else:
+                        w_data = self.lora_variant[active_adapter].unmerge(self, active_adapter, output)
+
+                    if "bnb_quantized" in kwargs:
+                        kwargs["bnb_quantized"] = False
+                    kwargs["requires_grad"] = False
+                    kwargs.pop("data", None)
+                    self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
 
                 if self.lora_bias[active_adapter]:
                     self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias
