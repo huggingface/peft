@@ -224,7 +224,8 @@ def convert_to_lora(
         name for name, module in model.named_modules() if isinstance(module, AuxiliaryTrainingWrapper)
     }
 
-    # Auxiliary wrappers own their adapter state; nested tuner layers are not independent conversion targets.
+    # Auxiliary wrappers own the adapter state for all modules they contain, so nested tuner layers are skipped as
+    # separate conversion targets.
     # check if LoRA conversion is supported at all
     modules_not_supporting_lora = []
     num_modules_with_support = 0
