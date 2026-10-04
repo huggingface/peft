@@ -380,3 +380,36 @@ class TestQuantization:
             out_unloaded = model(dummy_input).logits
 
         check_outputs_similar(out_before, out_unloaded)
+
+    @pytest.mark.parametrize("quant", QUANTIZATION_BACKENDS, ids=_quant_id)
+    def test_4bit_merge_unmerge_exact_restore(self, quant, dummy_input):
+        """Regression test: 4-bit merge/unmerge must restore the original Params4bit exactly.
+
+        Before the fix, each cycle went through dequantize-subtract-requantize, accumulating
+        rounding errors. The fix stashes the pre-merge Params4bit and restores it on unmerge.
+        """
+        if not isinstance(quant, Bnb4bitLoader):
+            pytest.skip("Only tests the 4-bit exact restore fix")
+        if not quant.supports_merge:
+            pytest.skip(f"{quant.name} does not support merging")
+
+        from peft import LoraConfig
+
+        model = quant.load_model()
+        config = LoraConfig(r=4, target_modules=["q_proj", "v_proj"], init_lora_weights=False)
+        torch.manual_seed(SEED)
+        model = get_peft_model(model, config).eval()
+
+        with torch.inference_mode():
+            out_original = model(dummy_input).logits
+
+        for _ in range(10):
+            model.merge_adapter()
+            model.unmerge_adapter()
+
+        with torch.inference_mode():
+            out_after_cycles = model(dummy_input).logits
+
+        assert torch.equal(out_original, out_after_cycles), (
+            "4-bit merge/unmerge should restore weights exactly, but outputs diverged after 10 cycles"
+        )

@@ -381,6 +381,11 @@ if is_bnb_4bit_available():
                 weight = self.get_base_layer().weight
                 kwargs = weight.__dict__
 
+                # Stash the pre-merge Params4bit so unmerge can restore exactly.
+                if not hasattr(self, "_pre_merge_weight_stack"):
+                    self._pre_merge_weight_stack = []
+                self._pre_merge_weight_stack.append(weight)
+
                 output = dequantize_bnb_weight(weight, state=weight.quant_state)
                 if active_adapter not in self.lora_variant:  # vanilla LoRA
                     lora_data = self.get_delta_weight(active_adapter)
@@ -423,25 +428,30 @@ if is_bnb_4bit_available():
                 active_adapter = self.merged_adapters.pop()
                 if active_adapter not in self.lora_A.keys():
                     continue
-                warnings.warn(
-                    "Unmerge lora module to 4-bit linear may get different generations due to rounding errors."
-                )
 
-                weight = self.get_base_layer().weight
-                kwargs = weight.__dict__
-                output = dequantize_bnb_weight(weight, state=weight.quant_state)
-
-                if active_adapter not in self.lora_variant:  # vanilla LoRA
-                    lora_data = self.get_delta_weight(active_adapter)
-                    w_data = output - lora_data
+                # Restore the stashed pre-merge weight for exact unmerge, avoiding
+                # the dequant-subtract-requant cycle that drifts on every call.
+                if hasattr(self, "_pre_merge_weight_stack") and self._pre_merge_weight_stack:
+                    self.get_base_layer().weight = self._pre_merge_weight_stack.pop()
                 else:
-                    w_data = self.lora_variant[active_adapter].unmerge(self, active_adapter, output)
+                    warnings.warn(
+                        "Unmerge lora module to 4-bit linear may get different generations due to rounding errors."
+                    )
+                    weight = self.get_base_layer().weight
+                    kwargs = weight.__dict__
+                    output = dequantize_bnb_weight(weight, state=weight.quant_state)
 
-                if "bnb_quantized" in kwargs:
-                    kwargs["bnb_quantized"] = False
-                kwargs["requires_grad"] = False
-                kwargs.pop("data", None)
-                self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
+                    if active_adapter not in self.lora_variant:  # vanilla LoRA
+                        lora_data = self.get_delta_weight(active_adapter)
+                        w_data = output - lora_data
+                    else:
+                        w_data = self.lora_variant[active_adapter].unmerge(self, active_adapter, output)
+
+                    if "bnb_quantized" in kwargs:
+                        kwargs["bnb_quantized"] = False
+                    kwargs["requires_grad"] = False
+                    kwargs.pop("data", None)
+                    self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
 
                 if self.lora_bias[active_adapter]:
                     self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias
