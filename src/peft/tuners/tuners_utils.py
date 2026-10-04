@@ -2041,6 +2041,15 @@ class BaseTunerLayer(ABC):
         return self.active_adapter
 
     def set_training(self, adapter_names: str | Sequence[str], training: bool = True) -> None:
+        """
+        Enable or disable training mode on the given adapter modules.
+
+        Args:
+            adapter_names (`str` or `Sequence[str]`):
+                The name of the adapter(s) whose training mode should be updated.
+            training (`bool`, *optional*) :
+                Whether to enable (`True`, default) or disable (`False`) training mode.
+        """
         if isinstance(adapter_names, str):
             adapter_names = [adapter_names]
 
@@ -2839,7 +2848,17 @@ def set_requires_grad(model, adapter_names: str | Sequence[str], requires_grad: 
 
 
 def set_training(model, adapter_names: str | Sequence[str], training: bool = True) -> None:
-    """Set the training mode of the given adapter modules."""
+    """
+    Enable or disable training mode on the given adapter modules.
+
+    Args:
+        model (`nn.Module`):
+            The model whose adapter module training modes should be updated.
+        adapter_names (`str` or `Sequence[str]`):
+            The name of the adapter(s) whose training mode should be updated.
+        training (`bool`, *optional*) :
+            Whether to enable (`True`, default) or disable (`False`) training mode.
+    """
     for module in model.modules():
         if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
             module.set_training(adapter_names=adapter_names, training=training)

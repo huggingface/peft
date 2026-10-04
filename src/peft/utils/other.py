@@ -526,6 +526,15 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         raise NotImplementedError
 
     def set_training(self, adapter_names: str | Sequence[str], training: bool = True) -> None:
+        """
+        Enable or disable training mode on the given adapter modules.
+
+        Args:
+            adapter_names (`str` or `Sequence[str]`):
+                The name of the adapter(s) whose training mode should be updated.
+            training (`bool`, *optional*) :
+                Whether to enable (`True`, default) or disable (`False`) training mode.
+        """
         if isinstance(adapter_names, str):
             adapter_names = [adapter_names]
 
