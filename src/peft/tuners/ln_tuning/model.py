@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+import torch
 from torch.nn.modules import Module
 from tqdm import tqdm
 
@@ -64,6 +65,36 @@ class LNTuningModel(BaseTuner):
     prefix: str = "ln_tuning_"
     tuner_layer_cls = LNTuningLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING
+
+    @classmethod
+    def _get_adapter_state_dict(
+        cls,
+        model: Module,
+        config: PeftConfig,
+        adapter_name: str,
+        state_dict: dict[str, torch.Tensor],
+        unwanted_adapter_names: list[str],
+    ) -> dict[str, torch.Tensor]:
+        state_dict_to_return = super()._get_adapter_state_dict(
+            model, config, adapter_name, state_dict, unwanted_adapter_names
+        )
+        # Merging swaps `base_layer` and `ln_tuning_layers[adapter_name]`, so once merged, the
+        # trained weights live in `base_layer` while `ln_tuning_layers[adapter_name]` holds the
+        # original base weights. Save the swapped (trained) values under the adapter keys so that
+        # the checkpoint round-trips instead of silently storing the untouched base weights.
+        for name, module in model.named_modules():
+            if not isinstance(module, LNTuningLayer):
+                continue
+            if adapter_name not in module.ln_tuning_layers or not module.merged:
+                continue
+            base_prefix = f"{name}.base_layer."
+            adapter_prefix = f"{name}.ln_tuning_layers.{adapter_name}."
+            for key, value in state_dict.items():
+                if key.startswith(base_prefix):
+                    adapter_key = adapter_prefix + key[len(base_prefix) :]
+                    if adapter_key in state_dict_to_return:
+                        state_dict_to_return[adapter_key] = value
+        return state_dict_to_return
 
     def _create_and_replace(
         self,
