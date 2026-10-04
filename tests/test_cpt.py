@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 from typing import Any, Union
 
 import pytest
@@ -23,6 +24,8 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     DataCollatorForLanguageModeling,
+    GPT2Config,
+    GPT2LMHeadModel,
     Trainer,
     TrainingArguments,
 )
@@ -360,3 +363,63 @@ def test_cpt_forward_loss_matches_reference():
         output.logits[:, :-1].reshape(-1, vocab_size).float(), cpt_labels[:, 1:].reshape(-1), ignore_index=-100
     )
     assert torch.allclose(output.loss, expected_loss, atol=1e-4, rtol=1e-4)
+
+
+def test_cpt_labeled_forward_uses_active_adapter_config():
+    """CPT loss uses the active adapter config, not peft_config["default"].
+
+    A custom adapter name must not KeyError, and switching adapters must apply that adapter's loss weights.
+    See https://github.com/huggingface/peft/issues/3879.
+    """
+    torch.manual_seed(10)
+    base = GPT2LMHeadModel(
+        GPT2Config(
+            vocab_size=32,
+            n_embd=16,
+            n_layer=1,
+            n_head=2,
+            n_positions=32,
+            bos_token_id=0,
+            eos_token_id=0,
+        )
+    ).eval()
+    input_ids = torch.tensor([[5, 6, 7, 8]])
+
+    def config(decay=1.0):
+        return CPTConfig(
+            task_type=TaskType.CAUSAL_LM,
+            cpt_token_ids=[1, 2, 3, 4],
+            cpt_tokens_type_mask=[1, 2, 3, 4],
+            opt_weighted_loss_type="decay",
+            opt_loss_decay_factor=decay,
+        )
+
+    def labeled_forward(model):
+        return model(
+            input_ids=input_ids,
+            attention_mask=torch.ones_like(input_ids),
+            labels=input_ids,
+            input_type_mask=torch.full_like(input_ids, 4),
+        )
+
+    with torch.no_grad():
+        named = get_peft_model(copy.deepcopy(base), config(), adapter_name="experiment").eval()
+        named_output = labeled_forward(named)
+
+        decay_one = get_peft_model(copy.deepcopy(base), config(decay=1.0)).eval()
+        decay_one_output = labeled_forward(decay_one)
+
+        switched = get_peft_model(copy.deepcopy(base), config(decay=1.0)).eval()
+        switched.add_adapter("weighted", config(decay=0.25))
+        switched.set_adapter("weighted")
+        switched_output = labeled_forward(switched)
+
+        control = get_peft_model(copy.deepcopy(base), config(decay=0.25)).eval()
+        control_output = labeled_forward(control)
+
+    assert torch.isfinite(named_output.loss)
+    assert torch.isfinite(decay_one_output.loss)
+    # different decay factors must change the loss, otherwise the switch check below is vacuous
+    assert not torch.allclose(decay_one_output.loss, control_output.loss)
+    assert torch.allclose(switched_output.logits, control_output.logits)
+    assert torch.allclose(switched_output.loss, control_output.loss)

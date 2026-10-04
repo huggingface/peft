@@ -2272,9 +2272,8 @@ class PeftModelForCausalLM(PeftModel):
         else:
             # Calculate the loss using the custom CPT loss function
             cpt_embedding = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
-            base_model_output = cpt_embedding.calculate_loss(
-                base_model_output, cpt_labels, cpt_type_mask, self.peft_config["default"]
-            )
+            # peft_config is the active adapter; "default" may be missing or inactive
+            base_model_output = cpt_embedding.calculate_loss(base_model_output, cpt_labels, cpt_type_mask, peft_config)
             return base_model_output
 
     def generate(self, *args, **kwargs):
