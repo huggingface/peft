@@ -87,3 +87,27 @@ def test_osf_merge_and_unload_and_unmerge_behavior():
     # merge_and_unload should return the base model (no OSF wrappers)
     merged_model = wrapped.merge_and_unload()
     assert isinstance(merged_model.linear, torch.nn.Linear)
+
+
+def test_osf_remerge_adapter():
+    torch.manual_seed(0)
+    model = DummyModel(DummyConfig())
+    cfg = OSFConfig(target_modules=["linear"], effective_rank=2)
+    wrapped = get_peft_model(model, cfg)
+    osf_linear = wrapped.base_model.model.linear
+
+    wrapped.merge_adapter()
+    assert osf_linear.merged
+    assert osf_linear.merged_adapters == ["default"]
+    weight_after_first_merge = osf_linear.get_base_layer().weight.data.clone()
+
+    # Re-merging should warn and not modify weight again or duplicate merged_adapters
+    with pytest.warns(UserWarning, match="All adapters are already merged, nothing to do."):
+        wrapped.merge_adapter()
+
+    assert_close(osf_linear.get_base_layer().weight.data, weight_after_first_merge)
+    assert osf_linear.merged_adapters == ["default"]
+
+    # Passing a string instead of a list of strings should raise TypeError
+    with pytest.raises(TypeError, match="adapter_names should be a list of strings"):
+        osf_linear.merge(adapter_names="default")
