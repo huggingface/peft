@@ -2599,10 +2599,14 @@ class ParamWrapper(nn.Module, LoraLayer):
             if any(p.device == meta for p in adapter_layer.parameters()):
                 continue
 
+            item = adapter_layer[adapter_name]
+            requires_grad_before = getattr(item, "requires_grad", None)
             if param.dtype.is_floating_point or param.dtype.is_complex:
-                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device, dtype=param.dtype)
+                adapter_layer[adapter_name] = item.to(device, dtype=param.dtype)
             else:
-                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device)
+                adapter_layer[adapter_name] = item.to(device)
+            if requires_grad_before is not None:
+                adapter_layer[adapter_name].requires_grad = requires_grad_before
 
     def get_param(self):
         param = getattr(self.get_base_layer(), self.parameter_name)

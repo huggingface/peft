@@ -7341,6 +7341,7 @@ class TestRequiresGrad:
         if is_trainable:
             for name, param in model.named_parameters():
                 if skip_ranknum and "ranknum" in name:
+                    assert not param.requires_grad
                     continue
                 if ".default" in name:
                     assert param.requires_grad
@@ -7496,6 +7497,54 @@ class TestRequiresGrad:
                     assert not param.requires_grad
         else:
             assert all(not p.requires_grad for p in model.parameters())
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    @pytest.mark.parametrize(
+        "low_cpu_mem_usage", [False, True], ids=["low_cpu_mem_usage=False", "low_cpu_mem_usage=True"]
+    )
+    @pytest.mark.parametrize(
+        "autocast_adapter_dtype", [False, True], ids=["autocast_adapter_dtype=False", "autocast_adapter_dtype=True"]
+    )
+    def test_loading_model_requires_grad_set_correctly_moving_parameters(
+        self, test_name, model_id, config_cls, config_kwargs, low_cpu_mem_usage, autocast_adapter_dtype
+    ):
+        # Ensure that the requires_grad attribute of the model parameters is not affected by possible
+        # movement/recreation of the parameters. To be more concrete, there was a bug before that
+        # _move_adapter_to_device_of_base_layer and cast_adapter_dtype would reassign parameters if the device or dtype
+        # were changed. This leads to the creation and registration of a new nn.Parameter in PyTorch, which by default
+        # has requires_grad=True, no matter what the previous value was. This can be triggered by changing the device or
+        # the dtype. As CI always runs on CPU, we trigger this via the dtype in this test. We test low_cpu_mem_usage and
+        # autocast_adapter_dtype, as they can affect the movement/creation of adapters.
+        if model_id != "MLP":
+            pytest.skip("Running this test only for MLP")
+
+        model = MLP()
+        config = config_cls(**config_kwargs)
+        model = get_peft_model(model, config)
+
+        requires_grad_before = {name: param.requires_grad for name, param in model.named_parameters()}
+        is_monteclora = config_kwargs.get("monteclora_config", None) is not None
+        if is_monteclora and low_cpu_mem_usage:
+            # When using MonteCLoRA with low_cpu_mem_usage, the sampler creation is deferred until after the first forward
+            requires_grad_before = {k: v for k, v in requires_grad_before.items() if "prior" not in k}
+
+        del model
+
+        model = MLP().half()  # <= this is needed to trigger recreation of the parameter
+        config = config_cls(**config_kwargs)
+        model = get_peft_model(
+            model, config, low_cpu_mem_usage=low_cpu_mem_usage, autocast_adapter_dtype=autocast_adapter_dtype
+        )
+
+        requires_grad_after = {name: param.requires_grad for name, param in model.named_parameters()}
+        del model
+
+        assert requires_grad_before.keys() == requires_grad_after.keys()
+        for key, val_before in requires_grad_before.items():
+            val_after = requires_grad_after[key]
+            assert val_before is val_after, (
+                f"requires_grad changed from {val_before} to {val_after} on {key} for {test_name}"
+            )
 
 
 # this is for PEFT methods that support mixed adapter batches.
