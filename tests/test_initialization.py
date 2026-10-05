@@ -1826,6 +1826,23 @@ class TestLoraInitialization:
             "matching pattern key should not warn"
         )
 
+    def test_pattern_keys_matching_target_parameters_do_not_warn(self):
+        # Pattern keys can refer to parameters targeted with target_parameters, e.g. MoE experts, see #3874
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            model = get_peft_model(
+                self.get_model(),
+                LoraConfig(
+                    target_modules=[],
+                    target_parameters=["linear.weight"],
+                    rank_pattern={"linear.weight": 2},
+                    alpha_pattern={"linear.weight": 100},
+                ),
+            )
+
+        assert not [w for w in caught if "did not match any targeted module" in str(w.message)]
+        assert model.base_model.model.linear.r["default"] == 2
+
     def test_partially_matched_pattern_warns_for_unmatched_keys_only(self):
         # When some keys match and others don't, the warning names exactly the unmatched ones.
         with pytest.warns(RuntimeWarning, match=r"\['typo_key'\]") as record:
