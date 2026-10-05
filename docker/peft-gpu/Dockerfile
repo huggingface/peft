@@ -41,12 +41,14 @@ SHELL ["/bin/bash", "-c"]
 
 RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum
 
+# TODO check if still needed
 # Note: we are hard-coding CUDA_ARCH_LIST here since `gptqmodel` requires either nvidia-smi
 # or CUDA_ARCH_LIST for compute capability information. Since the docker build is unlikely
 # to have compute hardware available we use the information from the CI runner (which hosts
 # a NVIDIA L4). So we fix the compute capability to 8.9. In the future we might extend this
 # to a list of compute capabilities (separated by ;).
 # TODO pcre, which is used by gptqmodel, is resulting in a core dump, remove once it's resolved
+# When uncommenting this to include gptqmodel, ensure that it doesn't downgrade tokenizers, as this would break Transformers
 # RUN CUDA_ARCH_LIST=8.9 conda run -n peft pip install "gptqmodel>=7.0.0"
 
 # TODO: EETQ uses `-std=c++17` but starting with PyTorch 2.14, the min C++ version is 20. Therefore, don't install
