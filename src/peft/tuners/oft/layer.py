@@ -83,6 +83,7 @@ class OFTRotationModule(nn.Module):
         kernel_size=(0, 0),
         use_cayley_neumann=True,
         num_cayley_neumann_terms=5,
+        dropout: Optional[nn.Module] = None,
     ):
         super().__init__()
         self.r = r
@@ -93,6 +94,9 @@ class OFTRotationModule(nn.Module):
         self.coft = coft
         self.eps = eps
         self.block_share = block_share
+        # Multiplicative dropout applied to the rotation blocks during training. This restores the
+        # module_dropout behavior that was lost when the Cayley transform moved here in #2575 (#3830).
+        self.oft_module_dropout = dropout if dropout is not None else nn.Identity()
         # Conv2d specific parameters
         self.kernel_size = kernel_size
         self.use_cayley_neumann = use_cayley_neumann
@@ -260,6 +264,9 @@ class OFTRotationModule(nn.Module):
         orth_rotate = self._cayley_batch(
             self.weight, self.block_size, self.use_cayley_neumann, self.num_cayley_neumann_terms
         )
+        # Apply multiplicative dropout to the rotation blocks during training, as documented for
+        # module_dropout (this call was lost when the Cayley transform moved here in #2575, see #3830).
+        orth_rotate = self.oft_module_dropout(orth_rotate)
 
         # Unfold the input for Conv2d layer
         if len(orig_shape) == 4:
@@ -449,6 +456,7 @@ class OFTLayer(BaseTunerLayer):
             block_share=block_share,
             use_cayley_neumann=use_cayley_neumann,
             num_cayley_neumann_terms=num_cayley_neumann_terms,
+            dropout=oft_dropout_layer,
         )
 
         # Initialize weights
@@ -757,6 +765,7 @@ class Conv2d(nn.Module, OFTLayer):
             kernel_size=base_layer.kernel_size,
             use_cayley_neumann=use_cayley_neumann,
             num_cayley_neumann_terms=num_cayley_neumann_terms,
+            dropout=oft_dropout_layer,
         )
 
         # Initialize weights
