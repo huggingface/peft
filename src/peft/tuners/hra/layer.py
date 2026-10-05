@@ -453,13 +453,7 @@ class HRAConv2d(nn.Module, HRALayer):
                 x = self._cast_input_dtype(x, new_weight.dtype)
             else:
                 x = x.to(self.get_base_layer().weight.data.dtype)
-            result = F.conv2d(
-                input=x,
-                weight=new_weight,
-                bias=bias,
-                padding=self.base_layer.padding[0],
-                stride=self.base_layer.stride[0],
-            )
+            result = self.base_layer._conv_forward(x, new_weight, bias)
 
         result = result.to(previous_dtype)
         return result
