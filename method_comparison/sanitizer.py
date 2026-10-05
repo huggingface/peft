@@ -1,4 +1,6 @@
 import ast
+from fnmatch import fnmatch
+from functools import partial
 
 import pandas as pd
 
@@ -25,12 +27,18 @@ def _evaluate_node(df, node):
         except ValueError:
             raise ValueError("Right side of comparison must be a literal (number, string, list).")
 
+        def pattern_match(df, c, v):
+            """string values are compared using fnmatch pattern matching."""
+            if isinstance(df.dtypes[c], pd.StringDtype):
+                return df[c].apply(partial(fnmatch, pat=v))
+            return df[c] == v
+
         operator_map = {
             ast.Gt:    lambda c, v: df[c] > v,
             ast.GtE:   lambda c, v: df[c] >= v,
             ast.Lt:    lambda c, v: df[c] < v,
             ast.LtE:   lambda c, v: df[c] <= v,
-            ast.Eq:    lambda c, v: df[c] == v,
+            ast.Eq:    lambda c, v: pattern_match(df, c, v),
             ast.NotEq: lambda c, v: df[c] != v,
             ast.In:    lambda c, v: df[c].isin(v),
             ast.NotIn: lambda c, v: ~df[c].isin(v)
