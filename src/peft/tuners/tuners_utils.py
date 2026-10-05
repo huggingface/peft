@@ -545,8 +545,8 @@ class BaseTuner(nn.Module, ABC):
     def _get_adapter_modules_training(self, model: nn.Module) -> list[tuple[nn.Module, bool]]:
         """Return `(adapter_module, training)` pairs for adapter-owned module roots in `model`.
 
-        The saved state is only the root module's state. Restoring it with `Module.train` also updates all
-        descendants, so a subtree with manually mixed training states is normalized to the root state.
+        The saved state is only the root module's state. Restoring it with `Module.train` also updates all descendants,
+        so a subtree with manually mixed training states is normalized to the root state.
         """
         adapter_modules_training = []
         for module in model.modules():
