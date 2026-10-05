@@ -143,6 +143,10 @@ QLoRA adds trainable weights to all the linear layers in the transformer archite
 config = LoraConfig(target_modules="all-linear", ...)
 ```
 
+### Caveats:
+
+- [`~LoraModel.merge_adapter`] on an 8-bit or 4-bit bitsandbytes model dequantizes the base weight, adds the adapter weights, and quantizes the result again. [`~LoraModel.unmerge_adapter`] does the same in reverse, so it does not restore the original quantized weights, and repeated merge and unmerge cycles can accumulate rounding error. To get the original weights back, reload the base model. To switch between the base model and the adapter without merging, use the [`~PeftModel.disable_adapter`] context manager.
+
 ## GPTQ quantization
 
 You can learn more about GPTQ-based `[2, 3, 4, 8]` bit quantization at [GPT-QModel](https://github.com/ModelCloud/GPTQModel) and in the Transformers [GPTQ](https://huggingface.co/docs/transformers/quantization/gptq) documentation. PEFT supports GPTQ post-training through GPT-QModel.
