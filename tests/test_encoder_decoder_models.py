@@ -35,6 +35,7 @@ from peft import (
     LilyConfig,
     LoraConfig,
     MissConfig,
+    MultitaskPromptTuningConfig,
     OFTConfig,
     OSFConfig,
     PeanutConfig,
@@ -716,3 +717,23 @@ class TestEncoderDecoderModels(PeftCommonTester):
                     inputs_embeds=inputs_embeds, attention_mask=attention_mask, decoder_input_ids=decoder_input_ids
                 )
             assert torch.allclose(output_ids.logits, output_embeds.logits, atol=1e-5, rtol=1e-5)
+
+    @pytest.mark.parametrize(
+        "config_cls,config_kwargs",
+        [
+            (PromptTuningConfig, {"task_type": "SEQ_2_SEQ_LM", "num_virtual_tokens": 4}),
+            (PromptEncoderConfig, {"task_type": "SEQ_2_SEQ_LM", "num_virtual_tokens": 4, "encoder_hidden_size": 32}),
+            (MultitaskPromptTuningConfig, {"task_type": "SEQ_2_SEQ_LM", "num_virtual_tokens": 4, "num_tasks": 1}),
+        ],
+    )
+    def test_prepare_inputs_for_generation_restored_after_generation(self, config_cls, config_kwargs):
+        model_id = PEFT_ENCODER_DECODER_MODELS_TO_TEST[0]
+        with hub_online_once(model_id):
+            base_model = AutoModelForSeq2SeqLM.from_pretrained(model_id).to(self.torch_device)
+            original_prepare = base_model.prepare_inputs_for_generation
+            model = get_peft_model(base_model, config_cls(base_model_name_or_path=model_id, **config_kwargs))
+            model.eval()
+
+            input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
+            model.generate(input_ids=input_ids, max_new_tokens=3)
+            assert base_model.prepare_inputs_for_generation == original_prepare
