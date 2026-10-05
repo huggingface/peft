@@ -5054,22 +5054,26 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize(
         "peft_version, factor",
-        [(None, 2), ("0.21.0", 2), ("0.21.2", 2), ("0.21.3.dev0@abc123", 1), ("0.22.0", 1)],
+        [
+            ("0.19.0.dev0", 2),
+            ("0.21.0", 2),
+            ("0.21.2", 2),
+            ("0.21.3.dev0@abc123", 1),
+            ("0.22.0.dev0@abc123", 1),
+            ("0.22.0", 1),
+        ],
     )
     def test_mha_load_adapter_from_older_peft_version(self, peft_version, factor, tmp_path):
         # Before PEFT 0.22.0, the out_proj delta weight of MHA was applied twice (#3774), so when loading such an
-        # adapter, the out_proj lora_B is doubled to keep its outputs unchanged. Configs from before PEFT 0.18.0 have
-        # no version. Dev versions come from main, which contains the fix.
+        # adapter, the out_proj lora_B is doubled to keep its outputs unchanged. Dev versions after 0.21.0 come from
+        # main, which stays on 0.21.x dev versions after the fix, so they are not adjusted.
         config = LoraConfig(target_modules=["mha"], init_lora_weights=False)
         model = get_peft_model(ModelMha(), config)
         model.save_pretrained(tmp_path)
 
         config_path = tmp_path / "adapter_config.json"
         config_dict = json.loads(config_path.read_text())
-        if peft_version is None:
-            del config_dict["peft_version"]
-        else:
-            config_dict["peft_version"] = peft_version
+        config_dict["peft_version"] = peft_version
         config_path.write_text(json.dumps(config_dict))
 
         loaded = PeftModel.from_pretrained(ModelMha(), tmp_path)

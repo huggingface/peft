@@ -2078,8 +2078,8 @@ class MultiheadAttention(nn.Module, LoraLayer):
                     del base_layer.in_proj_weight
                     base_layer.in_proj_weight = orig_weight_in
 
-                    # out_proj.merge handles lora_bias and marks the adapter as merged, but its weight is replaced, as
-                    # otherwise the delta weight would be applied twice
+                    # Call out_proj.merge to handle lora_bias if present and mark the adapter as merged. Don't use the
+                    # merged weight though but the weight computed above.
                     base_layer.out_proj.merge(safe_merge=True, adapter_names=[active_adapter])
                     del base_layer.out_proj.get_base_layer().weight
                     base_layer.out_proj.get_base_layer().weight = orig_weight_out
@@ -2097,8 +2097,8 @@ class MultiheadAttention(nn.Module, LoraLayer):
                     # merging out_proj (subclass of nn.Linear)
                     delta_weight = base_layer.out_proj.get_delta_weight(active_adapter).to(orig_dtype)
                     weight_merged = base_layer.out_proj.weight.data.detach() + delta_weight
-                    # out_proj.merge handles lora_bias and marks the adapter as merged, but its weight is replaced, as
-                    # otherwise the delta weight would be applied twice and gradients would not reach the LoRA weights
+                    # Call out_proj.merge to handle lora_bias if present and mark the adapter as merged. Don't use the
+                    # merged weight though but the weight computed above.
                     base_layer.out_proj.merge(adapter_names=[active_adapter])
                     del base_layer.out_proj.get_base_layer().weight
                     base_layer.out_proj.get_base_layer().weight = weight_merged
