@@ -404,6 +404,28 @@ This keeps the total LoRA parameter budget similar to dense layers (see [LoRA Wi
 
 Accelerated inference with the fine-tuned model is possible with, for example, [vLLM](https://vllm.ai/) which supports fused MoE expert layers since v0.11.2.
 
+<Tip warning={true}>
+
+At the time of writing, vLLM applies a single scaling of `lora_alpha / r` to all LoRA weights and ignores `rank_pattern` and `alpha_pattern`, so the experts above would be served with an update that is `r / effective_r` times too small. This may be fixed in future vLLM versions (see [vllm-project/vllm#59799](https://github.com/vllm-project/vllm/issues/59799) and, for a proposed fix, [vllm-project/vllm#59801](https://github.com/vllm-project/vllm/pull/59801)), so check whether it still applies to the version you use. If it does, fold the scaling of each module into its `lora_B` weight and save a copy of the adapter without the patterns:
+
+```python
+from peft import PeftModel
+from peft.tuners.lora import LoraLayer
+
+model = PeftModel.from_pretrained(base_model, "path/to/adapter")
+config = model.peft_config["default"]
+global_scaling = config.lora_alpha / (config.r**0.5 if config.use_rslora else config.r)
+for module in model.modules():
+    if isinstance(module, LoraLayer) and "default" in module.scaling:
+        module.lora_B["default"].weight.data *= module.scaling["default"] / global_scaling
+config.rank_pattern, config.alpha_pattern = {}, {}
+model.save_pretrained("path/to/adapter-for-vllm")
+```
+
+Also at the time of writing, for MoE models whose fused experts vLLM does not load in this layout by default (for example OLMoE, Qwen3-MoE or Mixtral), start vLLM with `enable_mixed_moe_lora_format=True` and pass `is_3d_lora_weight=True` to the `LoRARequest`.
+
+</Tip>
+
 ### Efficiently train tokens alongside LoRA
 
 PEFT LoRA adapters support adding new tokens with the `trainable_token_indices` parameter. This allows tuning of other tokens alongside fine-tuning specific layers. Only the specified tokens are trained and all other tokens are untouched. It saves memory and doesn't throw away learned context from existing token embeddings unlike training the whole embedding matrix. Under the hood this method uses the layer of [`TrainableTokensModel`].
