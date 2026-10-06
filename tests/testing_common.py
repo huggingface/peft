@@ -211,6 +211,17 @@ class PeftCommonTester:
 
             assert correctly_converted
 
+            # Regression test for https://github.com/huggingface/peft/issues/3723
+            msg = (
+                "PeftModel.set_adapter only supports a single adapter name as a string. "
+                "To activate multiple adapters, use model.base_model.set_adapter(adapter_names) "
+                "if the PEFT method supports it."
+            )
+            for adapter_name in (["test-adapter"], ("test-adapter",), None):
+                with pytest.raises(TypeError, match=re.escape(msg)):
+                    model.set_adapter(adapter_name)
+                assert model.active_adapter == "test-adapter"
+
     def _test_prepare_for_training(self, model_id, config_cls, config_kwargs):
         if config_kwargs.get("trainable_token_indices", None) is not None:
             # incompatible because trainable tokens is marking embeddings as trainable
