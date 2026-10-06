@@ -35,6 +35,7 @@ from peft import (
     LilyConfig,
     LoraConfig,
     MissConfig,
+    MultitaskPromptTuningConfig,
     OFTConfig,
     OSFConfig,
     PeanutConfig,
@@ -479,6 +480,35 @@ class TestEncoderDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_generate(self, model_id, config_cls, config_kwargs):
         self._test_generate(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize(
+        "config_cls", [PromptTuningConfig, PromptEncoderConfig, MultitaskPromptTuningConfig, PrefixTuningConfig]
+    )
+    @pytest.mark.parametrize("generation_succeeds", [True, False])
+    def test_prompt_generate_restores_base_generation_method(self, model_id, config_cls, generation_succeeds):
+        # Regression for #3883: generation must not leave the base model calling into a deleted prompt adapter.
+        with hub_online_once(model_id):
+            base_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        original_prepare_inputs = base_model.prepare_inputs_for_generation
+        config = config_cls(task_type=TaskType.SEQ_2_SEQ_LM, num_virtual_tokens=4)
+        model = get_peft_model(base_model, config)
+        inputs = self.prepare_inputs_for_testing()
+        generation_kwargs = {"max_new_tokens": 3 if generation_succeeds else 0}
+        if config_cls is MultitaskPromptTuningConfig:
+            generation_kwargs["task_ids"] = torch.zeros(2, dtype=torch.long, device=self.torch_device)
+
+        if generation_succeeds:
+            output = model.generate(**inputs, **generation_kwargs)
+            assert output.shape[0] == inputs["input_ids"].shape[0]
+        else:
+            with pytest.raises(ValueError, match="max_new_tokens"):
+                model.generate(**inputs, **generation_kwargs)
+
+        assert base_model.prepare_inputs_for_generation == original_prepare_inputs
+        model.delete_adapter("default")
+        output = base_model.generate(**inputs, max_new_tokens=3)
+        assert output.shape[0] == inputs["input_ids"].shape[0]
 
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
