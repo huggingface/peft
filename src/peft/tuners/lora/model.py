@@ -1143,7 +1143,8 @@ class LoraModel(BaseTuner):
         # Before PEFT 0.22.0, the out_proj delta weight of MultiheadAttention was applied twice (#3774). To keep the
         # outputs of these adapters unchanged, lora_B is doubled and the version is updated so this happens only once.
         # Dev versions after 0.21.0 are not adjusted, since main stays on 0.21.x dev versions after the fix; otherwise,
-        # adapters saved from main would be doubled each time they are loaded.
+        # adapters saved from main would be doubled each time they are loaded. A config without peft_version is from
+        # before PEFT 0.18.0 and is adjusted too.
         suffix = f".base_layer.out_proj.lora_B.{adapter_name}.weight"
         out_proj_keys = [
             key
@@ -1154,13 +1155,16 @@ class LoraModel(BaseTuner):
         if out_proj_keys:
             peft_version = packaging.version.Version(config.peft_version.partition("@")[0])
             release = packaging.version.Version(peft_version.base_version)
-            needs_doubling = release < packaging.version.Version("0.21.1") or (
-                not peft_version.is_devrelease and release < packaging.version.Version("0.22.0")
+            needs_doubling = (
+                getattr(config, "_peft_version_missing", False)
+                or release < packaging.version.Version("0.21.1")
+                or (not peft_version.is_devrelease and release < packaging.version.Version("0.22.0"))
             )
         if needs_doubling:
             for key in out_proj_keys:
                 peft_model_state_dict[key] = 2 * peft_model_state_dict[key]
             config.peft_version = config._get_peft_version()
+            config._peft_version_missing = False
             warnings.warn(
                 f"Adapter '{adapter_name}' was saved with PEFT < 0.22.0, which applied the out_proj LoRA weights of "
                 "MultiheadAttention twice. They were doubled to keep the outputs of the adapter unchanged."

@@ -265,7 +265,12 @@ class PeftConfigMixin(PushToHubMixin):
         loaded_attributes = cls.from_json_file(config_file)
         kwargs = {**class_kwargs, **loaded_attributes}
         kwargs = cls.check_kwargs(**kwargs)
-        return cls.from_peft_type(**kwargs)
+        config = cls.from_peft_type(**kwargs)
+        # peft_version is stored in the config since PEFT 0.18.0. When it is missing, it is still set to the current
+        # version, so this private attribute records that it was missing at load time, which means that the config is
+        # from before PEFT 0.18.0. It is not saved with the config.
+        config._peft_version_missing = "peft_version" not in loaded_attributes
+        return config
 
     @classmethod
     def from_json_file(cls, path_json_file: str, **kwargs):

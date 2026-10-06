@@ -671,6 +671,28 @@ class TestPeftConfig:
             peft_config = config_class(**mandatory_kwargs)
         assert peft_config.peft_version == version + "@UNKNOWN"
 
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_peft_version_missing_is_recorded(self, config_class, mandatory_kwargs, tmp_path):
+        # Configs from before PEFT 0.18.0 have no peft_version. When loading them, peft_version is set to the current
+        # version, but the private _peft_version_missing attribute records that it was missing. It must not be saved.
+        peft_config = config_class(**mandatory_kwargs)
+        peft_config.save_pretrained(tmp_path)
+        assert config_class.from_pretrained(tmp_path)._peft_version_missing is False
+
+        config_path = tmp_path / "adapter_config.json"
+        config_dict = json.loads(config_path.read_text())
+        del config_dict["peft_version"]
+        config_path.write_text(json.dumps(config_dict))
+
+        for config_loaded in (config_class.from_pretrained(tmp_path), PeftConfig.from_pretrained(tmp_path)):
+            assert config_loaded._peft_version_missing is True
+            assert config_loaded.peft_version == peft_config.peft_version
+
+        config_loaded.save_pretrained(tmp_path / "resaved")
+        config_dict = json.loads((tmp_path / "resaved" / "adapter_config.json").read_text())
+        assert "_peft_version_missing" not in config_dict
+        assert config_dict["peft_version"] == peft_config.peft_version
+
 
 class TestLoraNestedConfigRoundTrip:
     # Regression tests for https://github.com/huggingface/peft/issues/3583:
