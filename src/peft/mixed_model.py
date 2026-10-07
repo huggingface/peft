@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from contextlib import contextmanager
 from typing import Any, Optional, Union
 
@@ -29,7 +30,7 @@ from .config import PeftConfig
 from .peft_model import PeftModel
 from .tuners import MixedModel
 from .tuners.tuners_utils import BaseTunerLayer
-from .utils import _set_adapter, _set_trainable
+from .utils import AuxiliaryTrainingWrapper, _set_adapter, _set_trainable
 
 
 def _prepare_model_for_gradient_checkpointing(model: nn.Module) -> None:
@@ -195,14 +196,22 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         """
         Disables the adapter module.
         """
-        was_enabled = any(
-            not module.disable_adapters for module in self.modules() if isinstance(module, BaseTunerLayer)
-        )
+        enabled_states = {
+            not module.disable_adapters
+            for module in self.modules()
+            if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper))
+        }
+        if len(enabled_states) > 1:
+            warnings.warn(
+                "The model contains some adapter layers that are enabled and others that are disabled. "
+                "This is most likely unintentional. After exiting the disable_adapter context, all adapters "
+                "will be enabled"
+            )
         try:
             self.base_model.disable_adapter_layers()
             yield
         finally:
-            if was_enabled:
+            if True in enabled_states:
                 self.base_model.enable_adapter_layers()
 
     def add_adapter(

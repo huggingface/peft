@@ -38,6 +38,7 @@ from peft import (
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
+from peft.utils.constants import DUMMY_TARGET_MODULES
 
 
 class SimpleNet(nn.Module):
@@ -588,35 +589,91 @@ class TestMixedAdapterTypes(unittest.TestCase):
         assert torch.isfinite(output_unloaded).all()
         assert torch.allclose(output_base, output_unloaded, atol=atol, rtol=rtol)
 
-    def test_disable_adapter_restores_state(self):
-        # Regression test for #3507: PeftMixedModel.disable_adapter() must restore the
-        # adapter-enabled state that existed on entry, instead of unconditionally
-        # re-enabling. Covers (a) nested contexts and (b) an already-disabled model.
+    @parameterized.expand([False, True])
+    def test_disable_adapter_restores_state(self, modules_to_save):
+        # Regression test for #3507: nested contexts and initially disabled adapters.
         atol = 1e-5
         rtol = 1e-5
         input = torch.arange(90).reshape(9, 10).to(self.torch_device)
 
-        config = LoraConfig(r=4, lora_alpha=4, target_modules=["lin0", "lin1"], init_lora_weights=False)
+        config = LoraConfig(
+            r=4,
+            lora_alpha=4,
+            target_modules=["lin0"],
+            modules_to_save=["lin1"] if modules_to_save else None,
+            init_lora_weights=False,
+        )
         peft_model = self._get_model(SimpleNet, config, "adapter0", seed=0)
+        adapter_layers = [m for m in peft_model.modules() if isinstance(m, (BaseTunerLayer, AuxiliaryTrainingWrapper))]
 
         output_adapter = peft_model(input)
 
         with peft_model.disable_adapter():
             output_base = peft_model(input)
             with peft_model.disable_adapter():
-                pass
+                assert all(m.disable_adapters for m in adapter_layers)
+                assert torch.allclose(peft_model(input), output_base, atol=atol, rtol=rtol)
             output_after_inner = peft_model(input)
+            assert all(m.disable_adapters for m in adapter_layers)
+
+        assert all(not m.disable_adapters for m in adapter_layers)
+        assert torch.allclose(peft_model(input), output_adapter, atol=atol, rtol=rtol)
 
         assert not torch.allclose(output_adapter, output_base, atol=atol, rtol=rtol)
         assert torch.allclose(output_after_inner, output_base, atol=atol, rtol=rtol)
         assert not torch.allclose(output_after_inner, output_adapter, atol=atol, rtol=rtol)
 
         peft_model.base_model.disable_adapter_layers()
-        before = {m.disable_adapters for m in peft_model.modules() if hasattr(m, "disable_adapters")}
+        assert all(m.disable_adapters for m in adapter_layers)
         with peft_model.disable_adapter():
-            pass
-        after = {m.disable_adapters for m in peft_model.modules() if hasattr(m, "disable_adapters")}
-        assert before == after == {True}
+            assert all(m.disable_adapters for m in adapter_layers)
+        assert all(m.disable_adapters for m in adapter_layers)
+        assert torch.allclose(peft_model(input), output_base, atol=atol, rtol=rtol)
+
+    @parameterized.expand(itertools.product([False, True], [False, True]))
+    def test_disable_adapter_restores_state_after_exception(self, initially_disabled, modules_to_save):
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"] if modules_to_save else None)
+        peft_model = self._get_model(SimpleNet, config, "adapter0")
+        adapter_layers = [m for m in peft_model.modules() if isinstance(m, (BaseTunerLayer, AuxiliaryTrainingWrapper))]
+        if initially_disabled:
+            peft_model.base_model.disable_adapter_layers()
+
+        with pytest.raises(RuntimeError, match="outer context"):
+            with peft_model.disable_adapter():
+                with pytest.raises(RuntimeError, match="inner context"):
+                    with peft_model.disable_adapter():
+                        raise RuntimeError("inner context")
+                assert all(m.disable_adapters for m in adapter_layers)
+                raise RuntimeError("outer context")
+
+        assert all(m.disable_adapters == initially_disabled for m in adapter_layers)
+
+    @parameterized.expand(["lin0", "lin1"])
+    def test_disable_adapter_irregular_state(self, disabled_module):
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = self._get_model(SimpleNet, config, "adapter0")
+        adapter_layers = [m for m in peft_model.modules() if isinstance(m, (BaseTunerLayer, AuxiliaryTrainingWrapper))]
+        getattr(peft_model.base_model.model, disabled_module).enable_adapters(False)
+        assert {m.disable_adapters for m in adapter_layers} == {False, True}
+
+        with pytest.warns(UserWarning, match="some adapter layers that are enabled and others that are disabled"):
+            with peft_model.disable_adapter():
+                assert all(m.disable_adapters for m in adapter_layers)
+
+        # Like PeftModel, normalize inconsistent tuner and auxiliary states to enabled.
+        assert all(not m.disable_adapters for m in adapter_layers)
+
+    def test_disable_adapter_modules_to_save_without_tuner(self):
+        # The dummy target permits a model whose only adapter is an auxiliary wrapper.
+        config = LoraConfig(target_modules=DUMMY_TARGET_MODULES, modules_to_save=["lin1"])
+        peft_model = self._get_model(SimpleNet, config, "adapter0")
+        saved_module = peft_model.base_model.model.lin1
+        assert not saved_module.disable_adapters
+
+        with peft_model.disable_adapter():
+            assert saved_module.disable_adapters
+
+        assert not saved_module.disable_adapters
 
     def test_delete_adapter(self):
         atol = 1e-5
