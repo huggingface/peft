@@ -655,11 +655,10 @@ def set_peft_model_state_dict(
 
         load_result = model.load_state_dict(peft_model_state_dict, strict=False, assign=True)
 
-        for name, tensor in list(model.named_parameters()) + list(model.named_buffers()):
-            expected = expected_dtype_device.get(name)
-            if expected is None:
-                continue
-            dtype, device = expected
+        # assign=True replaced the tensor objects, so look the new ones up by name
+        for name, (dtype, device) in expected_dtype_device.items():
+            module_name, _, attr = name.rpartition(".")
+            tensor = getattr(model.get_submodule(module_name), attr)
             if tensor.dtype != dtype or tensor.device != device:
                 tensor.data = tensor.data.to(device=device, dtype=dtype)
 

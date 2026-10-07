@@ -367,13 +367,15 @@ class TestInjectAdapterFromStateDict:
 
     @pytest.mark.parametrize("save_dtype, load_dtype", _DTYPE_PAIRS)
     def test_load_low_cpu_mem_usage_keeps_modules_to_save_dtype(self, save_dtype, load_dtype, tmp_path):
-        # `assign=True` swaps the checkpoint tensor object into the module, so the loaded
+        # Make sure that in-place loading of weights doesn't change the dtype of the weights
+        # to the dtype from the checkpoint.
+        #
+        # See #3509: `low_cpu_mem_usage` uses `load_state_dict(..., assign=True)` under the
+        # hood which swaps the checkpoint tensor object into the module, so the loaded
         # weight takes the checkpoint's dtype rather than the model's. That is what makes
         # the fast path fast for freshly injected adapter weights, which sit on meta until
-        # they are replaced, but modules_to_save weights already exist as real tensors on
-        # the model. Loading an adapter saved in one dtype into a base model in another
-        # left them at the checkpoint dtype, and the first forward raised
-        # "mat1 and mat2 must have the same dtype".
+        # they are replaced, but e.g. `modules_to_save` weights already exist as real tensors on
+        # the model.
         config = LoraConfig(r=4, target_modules=["linear"], modules_to_save=["lm_head"])
         inputs = torch.randint(0, 9, (2, 4))
         tmp_dir = tmp_path / f"{save_dtype}_{load_dtype}"
@@ -395,13 +397,13 @@ class TestInjectAdapterFromStateDict:
 
     @pytest.mark.parametrize("save_dtype, load_dtype", _DTYPE_PAIRS)
     def test_load_low_cpu_mem_usage_keeps_base_embedding_dtype(self, save_dtype, load_dtype, tmp_path):
-        # Same statement, different class of key. When the adapter targets an embedding,
+        # When the adapter targets an embedding,
         # save_embedding_layers writes the BASE embedding weight into the checkpoint, so
         # `assign=True` replaced the base model's own embedding with the checkpoint tensor.
         # In the checkpoint-lower-precision direction there is no error at all, and the
         # whole embedding table quietly changes dtype.
         #
-        # This one cannot use DummyModel: save_embedding_layers auto-detection bails out on
+        # This test cannot use DummyModel: save_embedding_layers auto-detection bails out on
         # a plain nn.Module ("Could not identify embedding layer(s) because the model is not
         # a transformers model"), so no base embedding reaches the checkpoint and the test
         # would assert nothing. It is built in process rather than pulled from the hub so the
