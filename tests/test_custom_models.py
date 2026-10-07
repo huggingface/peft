@@ -3617,6 +3617,23 @@ class TestPeftCustomModel(PeftCommonTester):
         for key, value in state_dict_before.items():
             assert torch.equal(state_dict_after[key], value)
 
+    def test_set_adapter_on_merged_model_warns_and_unmerges(self):
+        # Regression test for the review on #3895 (fixing #3872): PeftModel.set_adapter() now unmerges a merged
+        # layer itself, before base_model.set_adapter() gets a chance to, so that the latter never sees a merged
+        # layer. That must not silently drop the "model is merged" warning that base_model.set_adapter() used to
+        # emit, and the layer must still end up unmerged with the new adapter active.
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False))
+        model.add_adapter("other", LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False))
+        model.merge_adapter()
+        assert model.base_model.model.lin0.merged
+
+        msg = "Adapter cannot be set when the model is merged. Unmerging the model first."
+        with pytest.warns(UserWarning, match=msg):
+            model.set_adapter("other")
+
+        assert not model.base_model.model.lin0.merged
+        assert model.active_adapter == "other"
+
     @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
     def test_set_adapter_non_overlapping_modules(self, config_cls):
         # Ensure that when setting multiple adapters, the active adapters are correctly being set, even if

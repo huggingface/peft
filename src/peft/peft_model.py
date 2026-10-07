@@ -1651,7 +1651,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             # drop the merged weights), so _reshard_fsdp_modules() below would skip it, and the requires_grad
             # change that follows would then land on a transient unsharded copy that the next reshard silently
             # drops, leaving the newly active adapter frozen (#3872). base_model.set_adapter() below already
-            # unmerges a merged layer before setting it active, but only after the reshard attempt already ran.
+            # unmerges a merged layer before setting it active, but only after the reshard attempt already ran,
+            # and by unmerging here first, that call never sees a merged layer to warn about, so warn here instead.
+            warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
             self.base_model.unmerge_adapter()
         self._reshard_fsdp_modules()
         self.active_adapter = adapter_name
