@@ -128,8 +128,7 @@ Use the [`get_peft_model`] function to create a [`PeftModel`] from the base face
 from peft import get_peft_model
 
 lora_model = get_peft_model(model, lora_config)
-lora_model.print_trainable_parameters()
-"trainable params: 1,572,864 || all params: 332,769,280 || trainable%: 0.472659014678278"
+lora_model.print_healthcheck()
 ```
 
 > [!WARNING]

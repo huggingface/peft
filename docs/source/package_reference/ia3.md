@@ -69,7 +69,7 @@ peft_config = IA3Config(
     feedforward_modules=["down_proj"],
 )
 model = get_peft_model(model, peft_config)
-model.print_trainable_parameters()
+model.print_healthcheck()
 ```
 
 

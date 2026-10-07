@@ -90,7 +90,7 @@ glora_config = GloraConfig(
     task_type="CAUSAL_LM",
 )
 model = get_peft_model(model, glora_config)
-model.print_trainable_parameters()
+model.print_healthcheck()
 
 # Switch adapters, merge, etc.
 model.set_adapter("default")
