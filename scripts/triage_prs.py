@@ -150,11 +150,21 @@ def strip_html_comments(body):
 def extract_issue_numbers(body, repository):
     """Extract local #123, owner/repo#123 and GitHub issue URLs in description order."""
     numbers = []
+    body = strip_html_comments(body)
+    # Ignore reference-like text in labels, e.g. `discussion #3521` in
+    # `[discussion #3521](https://github.com/huggingface/peft/discussions/3521)`.
+    markdown_link = re.compile(
+        r"""
+        \[[^\]]*\]                            # display label
+        \( (?P<destination>https?://[^)\s]+)  # destination URL
+        (?:\s+[^)]*)? \)                      # optional title and closing parenthesis
+        """,
+        re.VERBOSE,
+    )
+    body = markdown_link.sub(r"\g<destination>", body)
     # Consume whole URLs and qualified references so foreign references cannot be
     # mistaken for local issue numbers (including URL fragments).
-    references = re.finditer(
-        r"https?://[^\s<>`]+|(?<![\w/.-])(?:[\w.-]+/[\w.-]+)?#[1-9][0-9]*", strip_html_comments(body)
-    )
+    references = re.finditer(r"https?://[^\s<>`]+|(?<![\w/.-])(?:[\w.-]+/[\w.-]+)?#[1-9][0-9]*", body)
     for reference in references:
         text = reference.group().rstrip(".,;:)]}")
         if text.startswith(("https://", "http://")):
@@ -274,7 +284,14 @@ class PullRequestTriage:
 
     def has_approved_issue(self, body):
         for number in extract_issue_numbers(body, self.repository):
-            issue = self.client.get(f"{self.path}/issues/{number}")
+            try:
+                issue = self.client.get(f"{self.path}/issues/{number}")
+            except requests.HTTPError as error:
+                if error.response is None or error.response.status_code != 404:
+                    raise
+                print(f"Ignoring missing issue reference #{number}; continuing triage.")
+                continue
+
             if "pull_request" in issue or issue.get("state") != "open":
                 continue
 

@@ -32,6 +32,7 @@ def test_exploit_fails(df_products):
     ("not price > 50", [102, 103, 105]),
     ("(price < 50) & (category == 'Electronics')", [103]),
     ("(stock < 100) | (category == 'Home Goods')", [101, 103, 104, 106]),
+    ("category == 'Elect*'", [101, 103, 106]),
 ])
 def test_operations(df_products, expression, ids):
     mask1 = parse_and_filter(df_products, expression)
