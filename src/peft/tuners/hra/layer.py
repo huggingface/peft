@@ -156,13 +156,13 @@ class HRALayer(BaseTunerLayer):
         else:
             # Without orthonormalized vectors, applying Householder projections to individual
             # vectors sequentially will introduce cross-terms. For example:
-            #    
+            #
             #    H_i = I - 2 v_i v_i^T
-            #    H = H_1 H_2 = (I - 2 v1 v1^T) (I - 2 v2 v2^T) 
+            #    H = H_1 H_2 = (I - 2 v1 v1^T) (I - 2 v2 v2^T)
             #                = I - 2v1v1^T - 2v2v2^T + 4v1(v1^Tv2)v2^T
             #                                          ^^^^^^^^^^^^^^
-            #  
-            # If we just compute I - V V^T to facilitate parallel computation, we will not get these 
+            #
+            # If we just compute I - V V^T to facilitate parallel computation, we will not get these
             # cross-terms, we therefore have to introduce a transformation T that reproduces them,
             # i.e. [v1  v2] [T11  T12] [v1^T] = (T11 v1 v1^T) + (T22 v2 v2^T) + (T12 v1 v2^T)
             #               [T21  T22] [v2^T]
