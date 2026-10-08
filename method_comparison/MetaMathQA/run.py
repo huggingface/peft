@@ -196,15 +196,8 @@ def train(
         initialize_kv_prefix_from_text(model, tokenizer, text=init_kv_cache_prefix)
 
     # print this after getting the optimizer, in case it modifies requires_gard
-    if hasattr(model, "get_nb_trainable_parameters"):
-        num_trainable_params, num_params = model.get_nb_trainable_parameters()
-    else:
-        num_params = model.num_parameters()
-        num_trainable_params = num_params
-    print_verbose(
-        f"trainable params: {num_trainable_params:,d} || all params: {num_params:,d} || "
-        f"trainable: {100 * num_trainable_params / num_params:.4f}%"
-    )
+    if hasattr(model, "print_healthcheck"):
+        model.print_healthcheck(sink=print_verbose)
 
     status = TrainStatus.FAILED
     tic_train = time.perf_counter()

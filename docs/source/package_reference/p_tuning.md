@@ -44,8 +44,7 @@ from peft import PromptEncoderConfig, get_peft_model
 
 peft_config = PromptEncoderConfig(task_type="CAUSAL_LM", num_virtual_tokens=20, encoder_hidden_size=128)
 model = get_peft_model(model, peft_config)
-model.print_trainable_parameters()
-"trainable params: 300,288 || all params: 559,514,880 || trainable%: 0.05366935013417338"
+model.print_healthcheck()
 ```
 
 ## Benchmark overview
@@ -67,4 +66,3 @@ model.print_trainable_parameters()
 ## PromptEncoder
 
 [[autodoc]] tuners.p_tuning.model.PromptEncoder
-

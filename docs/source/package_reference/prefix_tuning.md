@@ -42,8 +42,7 @@ from peft import PrefixTuningConfig, get_peft_model
 
 peft_config = PrefixTuningConfig(task_type="CAUSAL_LM", num_virtual_tokens=20)
 model = get_peft_model(model, peft_config)
-model.print_trainable_parameters()
-"trainable params: 983,040 || all params: 560,197,632 || trainable%: 0.1754809274167014"
+model.print_healthcheck()
 ```
 
 ## Possible Initializations

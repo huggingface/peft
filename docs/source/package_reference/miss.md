@@ -86,7 +86,7 @@ config = MissConfig(
 # )
 
 model = get_peft_model(model, config)
-model.print_trainable_parameters()
+model.print_healthcheck()
 ```
 
 For a full fine-tuning example including training and inference, see the [MiSS fine-tuning example](https://github.com/huggingface/peft/tree/main/examples/miss_finetuning).
