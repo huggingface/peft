@@ -71,6 +71,57 @@ class TestAdaptionPrompt:
             assert not dummy_output.requires_grad
 
     @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("adapter_name", ["default", "experiment"])
+    @pytest.mark.parametrize("load", [False, True], ids=["create", "load"])
+    def test_inference_parameters(self, model_id, adapter_name, load, tmp_path):
+        with hub_online_once(model_id):
+            config = AdaptionPromptConfig(adapter_layers=1, adapter_len=4, task_type="CAUSAL_LM")
+            model = get_peft_model(self.transformers_class.from_pretrained(model_id), config)
+            if load:
+                # A nonzero gate makes the output comparison sensitive to the loaded prompt.
+                with torch.no_grad():
+                    for name, param in model.named_parameters():
+                        if name.endswith("adaption_gate"):
+                            param.fill_(0.5)
+                model.save_pretrained(tmp_path)
+                frozen = PeftModel.from_pretrained(
+                    self.transformers_class.from_pretrained(model_id), tmp_path, adapter_name=adapter_name
+                )
+                assert not any(param.requires_grad for param in frozen.parameters())
+                trainable = PeftModel.from_pretrained(
+                    self.transformers_class.from_pretrained(model_id),
+                    tmp_path,
+                    adapter_name=adapter_name,
+                    is_trainable=True,
+                )
+                assert any(param.requires_grad for param in trainable.parameters())
+                model.load_adapter(tmp_path, adapter_name="frozen")
+            else:
+                frozen_config = AdaptionPromptConfig(
+                    adapter_layers=1, adapter_len=4, task_type="CAUSAL_LM", inference_mode=True
+                )
+                frozen = get_peft_model(
+                    self.transformers_class.from_pretrained(model_id), frozen_config, adapter_name=adapter_name
+                )
+                assert not any(param.requires_grad for param in frozen.parameters())
+                model.add_adapter("frozen", frozen_config)
+
+            assert model.active_adapter == "default"
+            inputs = {"input_ids": torch.tensor([[1, 2, 3]])}
+            model.eval()
+            output = model(**inputs)
+            output.logits.sum().backward()
+            assert any(param.grad is not None for param in model.parameters())
+            assert not frozen(**inputs).logits.requires_grad
+            if load:
+                assert_close(frozen(**inputs).logits, output.logits)
+
+            model.set_adapter("frozen")
+            assert not any(param.requires_grad for param in model.parameters())
+            model.set_adapter("default")
+            assert any(param.requires_grad for param in model.parameters())
+
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
     def test_prepare_for_int8_training(self, model_id):
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)

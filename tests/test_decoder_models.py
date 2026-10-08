@@ -49,8 +49,10 @@ from peft import (
     IA3Config,
     LoraConfig,
     MissConfig,
+    MultitaskPromptTuningConfig,
     OFTConfig,
     OSFConfig,
+    PeftModel,
     PrefixTuningConfig,
     PromptEmbedding,
     PromptEncoderConfig,
@@ -687,6 +689,47 @@ class TestDecoderModels(PeftCommonTester):
     def test_from_pretrained_config_construction(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs.copy())
+
+    @pytest.mark.parametrize(
+        "config_cls", [PromptTuningConfig, PromptEncoderConfig, PrefixTuningConfig, MultitaskPromptTuningConfig]
+    )
+    @pytest.mark.parametrize("adapter_name", ["default", "experiment"])
+    @pytest.mark.parametrize("load", [False, True], ids=["create", "load"])
+    def test_prompt_inference_parameters(self, config_cls, adapter_name, load, tmp_path):
+        model_id = "hf-internal-testing/tiny-random-gpt2"
+        with hub_online_once(model_id):
+            config = config_cls(task_type="CAUSAL_LM", num_virtual_tokens=4)
+            model = get_peft_model(self.transformers_class.from_pretrained(model_id), config)
+            assert all(param.requires_grad for param in model.prompt_encoder["default"].parameters())
+
+            if load:
+                model.save_pretrained(tmp_path)
+                frozen = PeftModel.from_pretrained(
+                    self.transformers_class.from_pretrained(model_id), tmp_path, adapter_name=adapter_name
+                )
+                assert not any(param.requires_grad for param in frozen.parameters())
+                model.load_adapter(tmp_path, adapter_name="frozen")
+            else:
+                frozen_config = config_cls(task_type="CAUSAL_LM", num_virtual_tokens=4, inference_mode=True)
+                frozen = get_peft_model(
+                    self.transformers_class.from_pretrained(model_id), frozen_config, adapter_name=adapter_name
+                )
+                assert not any(param.requires_grad for param in frozen.parameters())
+                model.add_adapter("frozen", frozen_config)
+
+            assert not any(param.requires_grad for param in model.prompt_encoder["frozen"].parameters())
+            assert all(param.requires_grad for param in model.prompt_encoder["default"].parameters())
+
+            inputs = {"input_ids": torch.tensor([[1, 2, 3]]), "task_ids": torch.tensor([0])}
+            if config_cls != MultitaskPromptTuningConfig:
+                inputs.pop("task_ids")
+            model.eval()
+            output = model(**inputs)
+            output.logits.sum().backward()
+            assert any(param.grad is not None for param in model.prompt_encoder["default"].parameters())
+            assert not frozen(**inputs).logits.requires_grad
+            if load:
+                torch.testing.assert_close(frozen(**inputs).logits, output.logits)
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)

@@ -729,6 +729,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             raise ValueError("Not supported")
 
         prompt_encoder = prompt_encoder.to(self.device)
+        if config.inference_mode:
+            prompt_encoder.requires_grad_(False)
         self.prompt_encoder.update(torch.nn.ModuleDict({adapter_name: prompt_encoder}))
         self.prompt_tokens[adapter_name] = torch.arange(
             config.num_virtual_tokens * config.num_transformer_submodules
