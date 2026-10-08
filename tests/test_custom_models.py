@@ -3617,17 +3617,21 @@ class TestPeftCustomModel(PeftCommonTester):
         for key, value in state_dict_before.items():
             assert torch.equal(state_dict_after[key], value)
 
-    def test_set_adapter_on_merged_model_warns_and_unmerges(self):
-        # Regression test for the review on #3895 (fixing #3872): PeftModel.set_adapter() now unmerges a merged
-        # layer itself, before base_model.set_adapter() gets a chance to, so that the latter never sees a merged
-        # layer. That must not silently drop the "model is merged" warning that base_model.set_adapter() used to
-        # emit, and the layer must still end up unmerged with the new adapter active.
+    def test_set_adapter_on_merged_model_warns_and_unmerges(self, recwarn):
+        # Switching the active adapter on a model with a merged layer has to unmerge that layer first, a merge
+        # and a newly active adapter can't coexist, and it should warn about doing so, since the caller may not
+        # expect their merge to be undone as a side effect of switching adapters.
         model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False))
         model.add_adapter("other", LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False))
+        msg = "Adapter cannot be set when the model is merged. Unmerging the model first."
+
+        # sanity check: nothing is merged yet, so switching the adapter should not warn about a merge
+        model.set_adapter("default")
+        assert not any(msg in str(warning.message) for warning in recwarn.list)
+
         model.merge_adapter()
         assert model.base_model.model.lin0.merged
 
-        msg = "Adapter cannot be set when the model is merged. Unmerging the model first."
         with pytest.warns(UserWarning, match=msg):
             model.set_adapter("other")
 
