@@ -494,6 +494,9 @@ class TestEncoderDecoderModels(PeftCommonTester):
         config = config_cls(task_type=TaskType.SEQ_2_SEQ_LM, num_virtual_tokens=4)
         model = get_peft_model(base_model, config)
         inputs = self.prepare_inputs_for_testing()
+        # max_new_tokens=0 makes the base model's generation validation raise after PEFT temporarily replaces
+        # prepare_inputs_for_generation. This exercises the exception cleanup without mocking generation;
+        # the failure case relies on Transformers rejecting this value inside the base model's generate method.
         generation_kwargs = {"max_new_tokens": 3 if generation_succeeds else 0}
         if config_cls is MultitaskPromptTuningConfig:
             generation_kwargs["task_ids"] = torch.zeros(2, dtype=torch.long, device=self.torch_device)
