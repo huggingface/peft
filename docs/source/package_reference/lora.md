@@ -94,6 +94,27 @@ config = LoraConfig(init_lora_weights=False, ...)
 ```
 
 <hfoptions id="initializations">
+<hfoption id="NoRA">
+[Normalized Low-Rank Adaptation (NoRA)](https://huggingface.co/papers/2608.31036) supports normalizing the down-projection matrices only at initialization. This initialization option normalizes each column of the randomly initialized LoRA A weight across the rank dimension, with the L2 norm clamped to a minimum of `1e-6`, and sets the LoRA B weight to zero. The base weights are left unchanged by initialization. Both A and B remain trainable.
+
+```py
+from peft import LoraConfig
+
+config = LoraConfig(
+    init_lora_weights="nora",
+    r=8,
+    lora_alpha=8,
+    use_rslora=False,
+    target_modules=["q_proj", "v_proj"],
+)
+```
+
+> [!IMPORTANT]
+> For NoRA, keep `lora_alpha` and `r` at a 1:1 ratio. Set `use_rslora=False` so that `lora_alpha / r` gives a scaling factor of 1.
+
+Nora currently supports linear layers. See the [Nora documentation](nora) for initialization details and a complete example.
+</hfoption>
+
 <hfoption id="PiSSA">
 [PiSSA](https://huggingface.co/papers/2404.02948) initializes the LoRA adapter using the principal singular values and singular vectors. This straightforward modification allows PiSSA to converge more rapidly than LoRA and ultimately attain superior performance. Moreover, PiSSA reduces the quantization error compared to QLoRA, leading to further enhancements.
 

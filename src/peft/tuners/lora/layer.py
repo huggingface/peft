@@ -311,8 +311,12 @@ class LoraLayer(BaseTunerLayer):
         elif init_lora_weights == "lora_ga":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.lora_ga_init(adapter_name, config.lora_ga_config)
+        elif init_lora_weights == "nora":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.nora_init(adapter_name)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
+
         # call this before init of the lora variants
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
@@ -331,6 +335,16 @@ class LoraLayer(BaseTunerLayer):
             for adapter in self.lora_variant:
                 if adapter in self.lora_arrow:
                     self.lora_arrow[adapter].on_adapter_change(self.lora_A, self.lora_B)
+
+    def nora_init(self, adapter_name):
+        weight = self.get_base_layer().weight
+        with torch.no_grad():
+            A = self.lora_A[adapter_name].weight
+            A.div_(A.norm(dim=0, keepdim=True).clamp_min(1e-6))
+
+        self.lora_B[adapter_name].weight = nn.Parameter(
+            torch.zeros_like(self.lora_B[adapter_name].weight, dtype=weight.dtype)
+        )
 
     def reset_lora_parameters(self, adapter_name, init_lora_weights):
         if init_lora_weights is not False:
@@ -2572,6 +2586,9 @@ class ParamWrapper(nn.Module, LoraLayer):
         elif init_lora_weights == "lora_ga":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.lora_ga_init(adapter_name, config.lora_ga_config)
+        elif init_lora_weights == "nora":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.nora_init(adapter_name)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
         # call this before init of the lora variants
