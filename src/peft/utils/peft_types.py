@@ -50,6 +50,7 @@ class PeftType(str, enum.Enum):
     - WAVEFT
     - OSF
     - DELORA
+    - EWORA
     - GRALORA
     - ADAMSS
     - SHADOW
@@ -93,6 +94,7 @@ class PeftType(str, enum.Enum):
     WAVEFT = "WAVEFT"
     OSF = "OSF"
     DELORA = "DELORA"
+    EWORA = "EWORA"
     GRALORA = "GRALORA"
     CARTRIDGE = "CARTRIDGE"
     TINYLORA = "TINYLORA"
