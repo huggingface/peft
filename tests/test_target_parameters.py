@@ -809,33 +809,22 @@ class TestTargetParameters:
         return DeepseekV3ForCausalLM(config)
 
     @pytest.mark.parametrize(
-        "target_parameters,target_modules",
+        "target_parameters",
         [
-            pytest.param(
-                target_parameters,
-                target_modules,
-                # Bare module names without parameter targets still use legacy MoE conversion, this is not fixed (yet)
-                # but also not very likely to to be used an issue in practice; users can qualify the module names if
-                # needed
-                marks=(
-                    pytest.mark.xfail(strict=True, reason="Bare targets without parameters use legacy MoE conversion")
-                    if not target_parameters and all("." not in name for name in target_modules)
-                    else ()
-                ),
-            )
-            for target_parameters in [
-                [],
-                ["experts.down_proj"],
-                ["experts.gate_up_proj", "experts.down_proj"],
-            ]
-            for target_modules in [
-                ["down_proj"],  # this xfails for target_parameters=[]
-                ["gate_proj", "down_proj"],  # this xfails for target_parameters=[]
-                ["shared_experts.down_proj"],
-                ["shared_experts.gate_proj", "shared_experts.down_proj"],
-                ["mlp.shared_experts.down_proj"],
-                ["mlp.shared_experts.gate_proj", "mlp.shared_experts.down_proj"],
-            ]
+            [],
+            ["experts.down_proj"],
+            ["experts.gate_up_proj", "experts.down_proj"],
+        ],
+    )
+    @pytest.mark.parametrize(
+        "target_modules",
+        [
+            ["down_proj"],
+            ["gate_proj", "down_proj"],
+            ["shared_experts.down_proj"],
+            ["shared_experts.gate_proj", "shared_experts.down_proj"],
+            ["mlp.shared_experts.down_proj"],
+            ["mlp.shared_experts.gate_proj", "mlp.shared_experts.down_proj"],
         ],
     )
     def test_deepseek_v3_target_modules_and_target_parameters_name_overlap(
