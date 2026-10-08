@@ -147,12 +147,26 @@ class HRALayer(BaseTunerLayer):
         eye = torch.eye(rank, device=opt_u.device, dtype=compute_dtype)
 
         if self.hra_apply_GS[adapter_name]:
-            # The reflection is I - 2 @ Q @ Q.T for an orthonormal basis Q of span(u). The projector Q @ Q.T does
-            # not depend on the choice of basis, so QR is equivalent to Gram-Schmidt orthonormalization while being
-            # faster and numerically more stable.
+            # Apply Gram-Schmidt orthonormalization to the weight vectors u.
+            #
+            # Since our goal is to produce V and T in H = I - 2V @ V.T = I - V @ T @ V.T and V is orthonormal,
+            # we can simply write T = 2 I and be done at the cost of doing the orthonormalization step.
             v = torch.linalg.qr(opt_u.to(compute_dtype), mode="reduced").Q
             t = 2 * eye
         else:
+            # Without orthonormalized vectors, applying Householder projections to individual
+            # vectors sequentially will introduce cross-terms. For example:
+            #    
+            #    H_i = I - 2 v_i v_i^T
+            #    H = H_1 H_2 = (I - 2 v1 v1^T) (I - 2 v2 v2^T) 
+            #                = I - 2v1v1^T - 2v2v2^T + 4v1(v1^Tv2)v2^T
+            #                                          ^^^^^^^^^^^^^^
+            #  
+            # If we just compute I - V V^T to facilitate parallel computation, we will not get these 
+            # cross-terms, we therefore have to introduce a transformation T that reproduces them,
+            # i.e. [v1  v2] [T11  T12] [v1^T] = (T11 v1 v1^T) + (T22 v2 v2^T) + (T12 v1 v2^T)
+            #               [T21  T22] [v2^T]
+            #
             # Product of the Householder reflections P_i = I - 2 @ u_i @ u_i.T of the normalized columns u_i:
             # P_0 @ ... @ P_{r-1} = I - V @ T @ V.T with T^-1 = I/2 + triu(V.T @ V, 1)
             # (compact WY representation, cf. Schreiber & Van Loan, 1989).
