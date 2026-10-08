@@ -449,3 +449,56 @@ def test_lorafa_respects_layer_specific_scaling_patterns(monkeypatch):
     assert torch.allclose(lin0_state["exp_avg_B"], expected_exp_avg_B(lin0, lin0_grad), rtol=1e-5, atol=1e-6), (
         "lin0 exp_avg_B does not match the expected layer-specific scaling"
     )
+
+
+def test_lorafa_step_skips_lora_pair_without_b_gradient():
+    """
+    Regression test for https://github.com/huggingface/peft/issues/3900: when a layer does not participate in
+    the forward pass (e.g. dropped by LayerDrop), its lora_B gradient is None. step() must skip that A/B pair
+    instead of crashing, without updating its weights, applying weight decay, or initializing/advancing its
+    optimizer state.
+    """
+    lora_rank = 16
+    lora_alpha = 32
+    lr = 7e-5
+    weight_decay = 1.0  # nonzero so that wrongly applied weight decay would be visible
+
+    model = SimpleNet()
+    config = LoraConfig(r=lora_rank, lora_alpha=lora_alpha, target_modules=["lin0", "lin1"], bias="none")
+    model = get_peft_model(model, config).to(torch_device)
+    optimizer = create_lorafa_optimizer(
+        model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr, weight_decay=weight_decay
+    )
+    loss = torch.nn.CrossEntropyLoss()
+
+    torch.manual_seed(0)
+    x = torch.randint(100, (2, 4, 10)).to(torch_device)
+    output = model(x).permute(0, 3, 1, 2)
+    label = torch.randint(16, (2, 4, 10)).to(torch_device)
+    loss(output, label).backward()
+
+    # Simulate a LayerDrop-skipped layer: clear the gradient of one lora_B
+    skipped_B_name = next(name for name, _ in model.named_parameters() if "lin1" in name and "lora_B" in name)
+    for name, param in model.named_parameters():
+        if name == skipped_B_name:
+            param.grad = None
+
+    initial_params = {name: param.detach().clone() for name, param in model.named_parameters()}
+
+    optimizer.step()  # must not raise
+
+    params = dict(model.named_parameters())
+
+    # The skipped pair is untouched: no weight update and no weight decay
+    assert torch.equal(params[skipped_B_name], initial_params[skipped_B_name])
+    skipped_module_prefix = skipped_B_name[: skipped_B_name.find("lora")] + "lora"
+    # No optimizer state was initialized or advanced for the skipped pair
+    assert skipped_module_prefix not in optimizer.state
+
+    # The remaining pairs are still updated as usual
+    for name, param in params.items():
+        if "lora_B" in name and name != skipped_B_name:
+            assert torch.any(param != initial_params[name]), f"lora_B weights not updated for {name}"
+    for name, param in params.items():
+        if "lora_A" in name:
+            assert torch.equal(param, initial_params[name]), f"lora_A weights changed for {name}"

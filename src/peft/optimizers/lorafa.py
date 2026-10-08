@@ -123,6 +123,12 @@ class LoraFAOptimizer(Optimizer):
                     name_list.append(n)
                     if len(param_list) == 2:
                         name = n[: n.find("lora")] + "lora"
+                        # Skip A/B pairs without a gradient on B, e.g. a layer skipped by LayerDrop.
+                        # No weight update, weight decay, or optimizer state init/advance for such pairs.
+                        if param_list[1].grad is None:
+                            param_list = []
+                            name_list = []
+                            continue
                     elif len(param_list) == 1:
                         continue
                 else:
