@@ -1151,7 +1151,6 @@ class LoraModel(BaseTuner):
             for key in peft_model_state_dict
             if key.endswith(suffix) and isinstance(model.get_submodule(key.removesuffix(suffix)), MultiheadAttention)
         ]
-        needs_doubling = False
         if out_proj_keys:
             peft_version = packaging.version.Version(config.peft_version.partition("@")[0])
             release = packaging.version.Version(peft_version.base_version)
@@ -1160,15 +1159,15 @@ class LoraModel(BaseTuner):
                 or release < packaging.version.Version("0.21.1")
                 or (not peft_version.is_devrelease and release < packaging.version.Version("0.22.0"))
             )
-        if needs_doubling:
-            for key in out_proj_keys:
-                peft_model_state_dict[key] = 2 * peft_model_state_dict[key]
-            config.peft_version = config._get_peft_version()
-            config._peft_version_missing = False
-            warnings.warn(
-                f"Adapter '{adapter_name}' was saved with PEFT < 0.22.0, which applied the out_proj LoRA weights of "
-                "MultiheadAttention twice. They were doubled to keep the outputs of the adapter unchanged."
-            )
+            if needs_doubling:
+                for key in out_proj_keys:
+                    peft_model_state_dict[key] = 2 * peft_model_state_dict[key]
+                config.peft_version = config._get_peft_version()
+                config._peft_version_missing = False
+                warnings.warn(
+                    f"Adapter '{adapter_name}' was saved with PEFT < 0.22.0, which applied the out_proj LoRA weights "
+                    "of MultiheadAttention twice. They were doubled to keep the outputs of the adapter unchanged."
+                )
 
         if not is_transformers_dtensor_tp and torch.distributed.is_available() and torch.distributed.is_initialized():
             _maybe_shard_state_dict_for_tp(model, peft_model_state_dict, adapter_name)

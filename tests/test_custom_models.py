@@ -5090,7 +5090,7 @@ class TestPeftCustomModel(PeftCommonTester):
         loaded.save_pretrained(tmp_path / "new")
         reloaded = PeftModel.from_pretrained(ModelMha(), tmp_path / "new")
         lora_B_reloaded = reloaded.base_model.model.mha.base_layer.out_proj.lora_B["default"].weight
-        assert torch.allclose(lora_B_reloaded, factor * lora_B)
+        assert torch.allclose(lora_B_reloaded, lora_B_loaded)
 
     def test_monteclora_variational_loss_computation(self):
         config = LoraConfig(
