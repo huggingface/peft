@@ -4670,6 +4670,46 @@ class TestPeftCustomModel(PeftCommonTester):
                 if max_mse is not None:
                     assert mse < max_mse
 
+    @pytest.mark.parametrize(
+        "conv_layer",
+        [
+            nn.Conv1d(10, 10, 3),
+            nn.Conv2d(10, 10, 3),
+            nn.Conv2d(10, 10, 1),
+            nn.Conv3d(10, 10, 3),
+        ],
+    )
+    def test_add_weighted_adapter_svd_conv_layers(self, conv_layer):
+        # SVD based combination types used to flatten the delta weight only for Conv2d, so Conv1d and Conv3d failed
+        torch.manual_seed(0)
+
+        class ConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = conv_layer
+
+            def forward(self, X):
+                return self.conv(X)
+
+        config = LoraConfig(target_modules=["conv"], r=4, init_lora_weights=False)
+        model = get_peft_model(ConvModel(), config, adapter_name="adapter1")
+        model.add_adapter("adapter2", config)
+        # with r1 + r2 <= svd_rank <= min(out_channels, in_channels * prod(kernel_size)) the SVD is exact and the
+        # merged delta weight must equal the weighted sum
+        model.add_weighted_adapter(
+            adapters=["adapter1", "adapter2"],
+            weights=[0.5, 0.5],
+            adapter_name="merged",
+            combination_type="svd",
+            svd_rank=8,
+        )
+
+        module = model.base_model.model.conv
+        expected = 0.5 * module.get_delta_weight("adapter1") + 0.5 * module.get_delta_weight("adapter2")
+        dw_merged = module.get_delta_weight("merged")
+        assert dw_merged.shape == module.base_layer.weight.shape
+        assert torch.allclose(dw_merged, expected, atol=1e-5, rtol=1e-5)
+
     def test_multiple_adapters_no_needless_copy_modules_to_save(self):
         # See 2206
         # The problem was that we keep a "global" modules_to_save on the model which contains all possible
