@@ -2452,6 +2452,10 @@ class PeftModelForCausalLM(PeftModel):
                     # 2d attention mask
                     model_kwargs["attention_mask"] = torch.cat((prefix_attention_mask, attention_mask), dim=1)
 
+            if peft_config.peft_type not in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
+                # `generate` builds position_ids itself; prompt learning methods ignore them
+                model_kwargs["position_ids"] = None
+
             self._adjust_prompt_learning_kwargs(
                 peft_config,
                 kwargs=model_kwargs,
