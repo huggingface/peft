@@ -348,6 +348,10 @@ When Transformer Engine is installed, PEFT automatically dispatches matching lay
 
 A complete ESM2 token-classification example is available under `examples/lora_finetuning_transformer_engine/`.
 
+## Merging adapters into quantized weights
+
+For any quantization method that supports it, [`~LoraModel.merge_adapter`] dequantizes the base weight, adds the adapter weights, and quantizes the result again. [`~LoraModel.unmerge_adapter`] does the same in reverse, so it does not restore the original quantized weights, and repeated merge and unmerge cycles can accumulate rounding error. To get the original weights back, reload the base model. To switch between the base model and the adapter without merging, use the [`~PeftModel.disable_adapter`] context manager.
+
 ## Next steps
 
 If you're interested in learning more about quantization, the following may be helpful:
