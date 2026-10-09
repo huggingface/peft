@@ -1719,9 +1719,22 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         if adapter_name not in self.peft_config:
             raise ValueError(f"Adapter {adapter_name} not found.")
+        is_prompt_learning = self.peft_config[adapter_name].is_prompt_learning
+        # Prompt learning methods have no BaseTunerLayer modules, so they can never be merged; skip the check.
+        if not is_prompt_learning and any(
+            isinstance(module, BaseTunerLayer) and module.merged for module in self.modules()
+        ):
+            # Unmerge before resharding. FSDP2 can't reshard an FSDP unit that still holds a merge (it would
+            # drop the merged weights), so _reshard_fsdp_modules() below would skip it, and the requires_grad
+            # change that follows would then land on a transient unsharded copy that the next reshard silently
+            # drops, leaving the newly active adapter frozen (#3872). base_model.set_adapter() below already
+            # unmerges a merged layer before setting it active, but only after the reshard attempt already ran,
+            # and by unmerging here first, that call never sees a merged layer to warn about, so warn here instead.
+            warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
+            self.base_model.unmerge_adapter()
         self._reshard_fsdp_modules()
         self.active_adapter = adapter_name
-        if not self.peft_config[adapter_name].is_prompt_learning:
+        if not is_prompt_learning:
             # _set_adapter does not need to be called, since it's called through the BaseTuner class.
             self.base_model.set_adapter(adapter_name, inference_mode=inference_mode)
         else:
