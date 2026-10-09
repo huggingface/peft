@@ -4930,6 +4930,61 @@ class TestPeftCustomModel(PeftCommonTester):
         assert torch.allclose(output_custom1, output_custom2)
         assert torch.allclose(output_default, output_custom1)
 
+    @pytest.mark.parametrize(
+        "config",
+        [
+            LoraConfig(target_modules=["lin0"], init_lora_weights=False),
+            LoKrConfig(target_modules=["lin0"], init_weights=False),
+            LoHaConfig(target_modules=["lin0"], init_weights=False),
+            AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
+            IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
+            BeftConfig(target_modules=["lin0"], init_weights=False),
+            FrodConfig(target_modules=["lin0"], init_weights=False),
+            OFTConfig(target_modules=["lin0"], init_weights=False, r=2, oft_block_size=0),
+            BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
+            HRAConfig(target_modules=["lin0"], init_weights=False),
+            MissConfig(target_modules=["lin0"], init_weights=False, r=2),
+        ],
+    )
+    def test_deleting_the_last_adapter_leaves_usable_state(self, config, tmp_path):
+        # After deleting the last adapter, the PeftModel used to keep the stale adapter name around, so
+        # active_peft_config raised a KeyError and even a plain forward pass crashed.
+        model = get_peft_model(MLP().to(self.torch_device), config)
+        model.delete_adapter("default")
+
+        inputs = torch.arange(90).reshape(9, 10).to(self.torch_device)
+        assert model(inputs).shape == (9, 2)
+        assert model.get_base_model().__class__ is MLP
+
+        with pytest.raises(ValueError, match="no adapters left to save"):
+            model.save_pretrained(tmp_path)
+
+    @pytest.mark.parametrize(
+        "config",
+        [
+            LoraConfig(target_modules=["lin0"], init_lora_weights=False),
+            LoKrConfig(target_modules=["lin0"], init_weights=False),
+            LoHaConfig(target_modules=["lin0"], init_weights=False),
+            AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
+            IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
+            BeftConfig(target_modules=["lin0"], init_weights=False),
+            FrodConfig(target_modules=["lin0"], init_weights=False),
+            OFTConfig(target_modules=["lin0"], init_weights=False, r=2, oft_block_size=0),
+            BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
+            HRAConfig(target_modules=["lin0"], init_weights=False),
+            MissConfig(target_modules=["lin0"], init_weights=False, r=2),
+        ],
+    )
+    def test_deleting_one_of_two_adapters_still_saves(self, config, tmp_path):
+        _skip_tests_with_multiple_adapters_with_target_parameters(type(config), {})
+        model = get_peft_model(MLP().to(self.torch_device), config)
+        model.add_adapter("other", copy.deepcopy(config))
+        model.delete_adapter("default")
+
+        # The remaining adapter must still save without crashing on the deleted adapter's stale state.
+        model.save_pretrained(tmp_path)
+        assert (tmp_path / "other" / "adapter_config.json").exists()
+
     def test_gpt2_dora_merge_and_unload(self):
         # see https://github.com/huggingface/peft/pull/1588#discussion_r1537914207
         model = AutoModelForCausalLM.from_pretrained("gpt2")
