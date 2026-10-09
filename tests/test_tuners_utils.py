@@ -1729,6 +1729,19 @@ class TestHealthcheck:
         assert "Environment:" in output
         assert "findings" not in output.lower()
 
+    def test_format_healthcheck_sep_indent_and_multiple_adapters(self):
+        model = self.get_peft_model()
+        model.add_adapter("other", LoraConfig(target_modules=["lin0"], r=4))
+        model.merge_adapter()  # adds a finding
+        healthcheck = model.healthcheck()
+
+        output = format_healthcheck(healthcheck, sep=" | ", indent="    ")
+
+        assert "Model:\n    ID: other | type: SmallModel | adapters: default (LORA), other (LORA)" in output
+        # every adapter in the layer types section starts on its own line
+        assert "Layer types:\n    default:\n        lora.Linear=2\n    other:\n        lora.Linear=1\n" in output
+        assert "Findings:\n    WARNING: Adapter(s) 'default' is/are merged" in output
+
     def test_print_healthcheck(self):
         model = self.get_peft_model()
 
