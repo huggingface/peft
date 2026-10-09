@@ -443,9 +443,10 @@ def _convert_peft_config_moe(peft_config: PeftConfig, model: torch.nn.Module) ->
 
     named_modules = list(model.named_modules())
     for target in peft_config.target_modules:
-        # In this loop, we use the target_module_mapping to convert from module targets to parameter targets. However,
-        # target_module_mapping can be too broad, namely when the same name can refer to both a module and a parameter
-        # in the new architecture (e.g. "down_proj" in DeepSeek v3). To prevent this, we check if all the targets would
+        # In this loop, we use the target_module_mapping to rename target modules or to convert from module targets to
+        # parameter targets. For the latter, however, we have to be careful since the same name in target_module_mapping
+        # can refer to both a module and a parameter in the new architecture (e.g. "down_proj" in DeepSeek v3). To
+        # prevent accidentally converting a valid target_module to a target_parameter, we check if all the targets would
         # be nn.Linear layers, in which case we *don't convert*. See #3711.
         target_config = copy.copy(peft_config)
         target_config.target_modules = {target}
