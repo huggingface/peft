@@ -289,6 +289,17 @@ CASES = [
         {"task_type": "CAUSAL_LM", "target_modules": ["self_attn_layer_norm", "final_layer_norm"]},
     ),
     Case("loha", LoHaConfig, {"target_modules": ["q_proj", "v_proj"]}),
+    Case(
+        "loha_rank_alpha_pattern_overlap",
+        LoHaConfig,
+        {
+            "target_modules": ["q_proj", "v_proj"],
+            # Overlapping keys (#3818), given in sorted order as in lora_rank_alpha_pattern_overlap: the general "q_proj"
+            # wins over "self_attn.q_proj", the specific "layers.1.self_attn.v_proj" wins over "v_proj".
+            "rank_pattern": {"layers.1.self_attn.v_proj": 16, "q_proj": 4, "self_attn.q_proj": 16, "v_proj": 4},
+            "alpha_pattern": {"layers.1.self_attn.v_proj": 32, "q_proj": 8, "self_attn.q_proj": 32, "v_proj": 8},
+        },
+    ),
     Case("lokr", LoKrConfig, {"target_modules": ["q_proj", "v_proj"]}),
     Case("lora", LoraConfig, {"task_type": "CAUSAL_LM", "r": 8, "lora_alpha": 16}),
     Case(
@@ -314,6 +325,25 @@ CASES = [
             "r": 8,
             "rank_pattern": {"layers.1.self_attn.k_proj": 16, "layers.2.self_attn.k_proj": 32},
             "alpha_pattern": {"layers.2.self_attn.k_proj": 4, "layers.3.self_attn.k_proj": 16},
+        },
+    ),
+    Case(
+        "lora_rank_alpha_pattern_overlap",
+        LoraConfig,
+        {
+            "target_modules": ["q_proj", "k_proj"],
+            "r": 8,
+            # Overlapping keys, where more than one key matches the same module (#3818). Currently the first match in
+            # dict order wins, and save_pretrained writes the keys sorted, so the dicts are given in sorted order here to
+            # get a checkpoint that loads correctly today. The general "k_proj" sorts before its override and wins; the
+            # specific "decoder.layers.1.self_attn.q_proj" sorts before "q_proj" and wins.
+            "rank_pattern": {
+                "decoder.layers.1.self_attn.q_proj": 16,
+                "k_proj": 4,
+                "layers.1.self_attn.k_proj": 16,
+                "q_proj": 4,
+            },
+            "alpha_pattern": {"k_proj": 8, "layers.2.self_attn.k_proj": 32},
         },
     ),
     Case("lora_gemma4", LoraConfig, {"task_type": "CAUSAL_LM"}, model_id=MODEL_GEMMA4),
