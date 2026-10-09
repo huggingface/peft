@@ -375,6 +375,8 @@ def _resolve_string_target_modules(
     # regex: leaf names of the real module/parameter keys it matches (q/k/v_proj, the router module, `down_proj`, ...)
     module_keys = [name for name, _ in model.named_modules()]
     param_keys = [name for name, _ in model.named_parameters()]
+    # TODO: by adding the leaf names here, we may match too broadly if only specific layers ara targeted,
+    # e.g. for target_modules=r"model\.layers\.0\.mlp"
     matched = {
         key.rsplit(".", 1)[-1]
         for key in itertools.chain(module_keys, param_keys)
@@ -387,7 +389,11 @@ def _resolve_string_target_modules(
     new_name_to_containers: dict[str, set[str]] = {}
     for name in param_keys:
         container, _, leaf = name.rpartition(".")
+        if leaf == "weight":
+            # "weight" is the general name for parameters (nn.Linear etc.) and would never be renamed
+            continue
         new_name_to_containers.setdefault(leaf, set()).add(container)
+
     for old_name, new_name in target_module_mapping.items():
         if old_name in matched:
             continue
@@ -481,6 +487,8 @@ def _convert_peft_config_moe(peft_config: PeftConfig, model: torch.nn.Module) ->
 
         new_target_name = str_rreplace(target, mapped_old_name, mapped_new_name)
         new_target_parameters.add(new_target_name)
+
+        # check if the parameter is fused
         if mapped_new_name in fused_targets and mapped_old_name is not None:
             matched_fused_targets.setdefault(mapped_new_name, set()).add(mapped_old_name)
 
