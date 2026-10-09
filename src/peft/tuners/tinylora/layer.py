@@ -45,7 +45,8 @@ class TinyLoraLayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weights
     # Note: tinylora_v is a reference to the per-adapter ParameterDict (shared across layers in the same group)
     adapter_layer_names = ("tinylora_v",)
-    other_param_names = ("tinylora_A", "tinylora_B", "tinylora_P")
+    # Keep the per-adapter dropout visible to BaseTunerLayer's shared inference-mode handling.
+    other_param_names = ("tinylora_A", "tinylora_B", "tinylora_P", "tinylora_dropout")
 
     def __init__(self, base_layer: nn.Module, layer_idx: int, **kwargs):
         self.base_layer = base_layer
