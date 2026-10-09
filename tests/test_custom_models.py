@@ -5219,8 +5219,39 @@ class TestPeftCustomModel(PeftCommonTester):
         )
         peft_model.add_adapter("other", LoraConfig(target_modules=["lin0"], init_lora_weights=False, lora_bias=True))
 
-        with pytest.raises(ValueError, match="does not support lora_bias when an nn.Embedding is targeted"):
+        msg = (
+            "add_weighted_adapter does not support lora_bias combined with nn.Embedding targeting: adapter 'other' "
+            "uses lora_bias=True while adapter 'source' targets an nn.Embedding"
+        )
+        with pytest.raises(ValueError, match=re.escape(msg)):
             peft_model.add_weighted_adapter(adapters=["source", "other"], weights=[1.0, 1.0], adapter_name="combined")
+
+    @pytest.mark.parametrize("lora_bias", [False, True])
+    @pytest.mark.parametrize("num_adapters", [2, 3])
+    def test_add_weighted_adapter_cat_matches_merging_the_sources(self, num_adapters, lora_bias):
+        # See #3761. combination_type="cat" concatenates the sources along the rank dimension, so lora_B @ lora_A
+        # comes out as the sum of the individual deltas and the combined adapter has to match the sources merged
+        # into the base weights one after the other. The other combination types only approximate that sum.
+        torch.manual_seed(0)
+
+        X = self.prepare_inputs_for_testing()
+        adapters = [f"source{i}" for i in range(num_adapters)]
+        config = LoraConfig(r=8, lora_alpha=16, target_modules=["lin0"], init_lora_weights=False, lora_bias=lora_bias)
+        peft_model = get_peft_model(MLP().to(self.torch_device), config, adapter_name=adapters[0])
+        for adapter in adapters[1:]:
+            peft_model.add_adapter(adapter, config)
+        peft_model.eval()
+
+        merged_model = copy.deepcopy(peft_model)
+        merged_model.base_model.set_adapter(adapters)
+        merged_model.base_model.merge_adapter(adapter_names=adapters)
+        merged_output = merged_model(**X)
+
+        peft_model.add_weighted_adapter(
+            adapters=adapters, weights=[1.0] * num_adapters, adapter_name="combined", combination_type="cat"
+        )
+        peft_model.set_adapter("combined")
+        assert torch.allclose(peft_model(**X), merged_output, atol=1e-4, rtol=1e-4)
 
 
 class TestMultiRankAdapter:
