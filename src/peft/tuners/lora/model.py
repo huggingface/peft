@@ -725,14 +725,21 @@ class LoraModel(BaseTuner):
             if self.peft_config[adapter].kasa_config is not None:
                 raise ValueError(f"add_weighted_adapter does not support KaSA (problematic adapter '{adapter}')")
 
-        # lora_bias has nowhere to go on an embedding, which rejects it outright, so combining the two cannot work
-        if any(self.peft_config[adapter].lora_bias for adapter in adapters):
-            targets_embedding = any(
-                isinstance(module, Embedding) and any(adapter in module.lora_embedding_A for adapter in adapters)
-                for module in self.modules()
-            )
-            if targets_embedding:
-                raise ValueError("add_weighted_adapter does not support lora_bias when an nn.Embedding is targeted")
+        # the combined adapter needs lora_bias as soon as one source has it, but an embedding rejects it outright
+        bias_adapters = [adapter for adapter in adapters if self.peft_config[adapter].lora_bias]
+        if bias_adapters:
+            embedding_modules = [module for module in self.modules() if isinstance(module, Embedding)]
+            embedding_adapters = [
+                adapter
+                for adapter in adapters
+                if any(adapter in module.lora_embedding_A for module in embedding_modules)
+            ]
+            if embedding_adapters:
+                raise ValueError(
+                    f"add_weighted_adapter does not support lora_bias combined with nn.Embedding targeting: adapter "
+                    f"'{bias_adapters[0]}' uses lora_bias=True while adapter '{embedding_adapters[0]}' targets an "
+                    f"nn.Embedding, which does not support a bias. Leave either adapter out of the call."
+                )
 
         # If more than one of the adapters targets the same module with modules_to_save, raise an error, as these
         # modules cannot be merged. First, find the ModulesToSaveWrapper instances in the model, then check if they
