@@ -935,11 +935,15 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         super().update(active_adapter)
 
     def adapter_state_dict_load_map(self, adapter_name):
-        if self.token_adapter.tied_adapter:
+        if adapter_name not in self._adapters or self.token_adapter.tied_adapter:
             return {}
         return {"token_adapter.trainable_tokens_delta": f"token_adapter.trainable_tokens_delta.{adapter_name}"}
 
     def adapter_state_dict(self, adapter_name, state_dict):
+        if adapter_name not in self._adapters:
+            # not every wrapper is obliged to serve every adapter, see ModulesToSaveWrapper
+            return {}
+
         if self.token_adapter.tied_adapter:
             # storing of weight-tied layers is not up to us and will be handled by
             # transformers. we're just here to keep those layers in sync during training.

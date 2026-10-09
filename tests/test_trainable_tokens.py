@@ -710,6 +710,24 @@ class TestTrainableTokens:
         embedding_keys = [n for n in state_dict.keys() if "embed_tokens" in n]
         assert embedding_keys == ["base_model.model.model.embed_tokens.token_adapter.trainable_tokens_delta"]
 
+    def test_save_load_multiple_adapters_only_one_with_trainable_tokens(self, tmp_path):
+        # only the first adapter uses trainable tokens, the second one must still be savable and loadable
+        config_tokens = LoraConfig(target_modules=["lin0"], trainable_token_indices={"emb": [1, 2]})
+        config_plain = LoraConfig(target_modules=["lin0"])
+
+        peft_model = get_peft_model(ModelEmb(), config_tokens)
+        peft_model.add_adapter("other", config_plain)
+        peft_model.save_pretrained(tmp_path / "both")
+        assert (tmp_path / "both" / "other").exists()
+
+        plain_model = get_peft_model(ModelEmb(), config_plain)
+        plain_model.save_pretrained(tmp_path / "plain")
+
+        peft_model.save_pretrained(tmp_path / "tokens", selected_adapters=["default"])
+        loaded = PeftModel.from_pretrained(ModelEmb(), tmp_path / "tokens")
+        loaded.load_adapter(tmp_path / "plain", adapter_name="other")
+        assert set(loaded.peft_config) == {"default", "other"}
+
     @pytest.fixture()
     def model_weight_untied(self, model):
         return model
