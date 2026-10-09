@@ -375,6 +375,8 @@ def _resolve_string_target_modules(
     # regex: leaf names of the real module/parameter keys it matches (q/k/v_proj, the router module, `down_proj`, ...)
     module_keys = [name for name, _ in model.named_modules()]
     param_keys = [name for name, _ in model.named_parameters()]
+    # TODO: by adding the leaf names here, we may match too broadly if only specific layers ara targeted,
+    # e.g. for target_modules=r"model\.layers\.0\.mlp"
     matched = {
         key.rsplit(".", 1)[-1]
         for key in itertools.chain(module_keys, param_keys)
@@ -387,7 +389,11 @@ def _resolve_string_target_modules(
     new_name_to_containers: dict[str, set[str]] = {}
     for name in param_keys:
         container, _, leaf = name.rpartition(".")
+        if leaf == "weight":
+            # "weight" is the general name for parameters (nn.Linear etc.) and would never be renamed
+            continue
         new_name_to_containers.setdefault(leaf, set()).add(container)
+
     for old_name, new_name in target_module_mapping.items():
         if old_name in matched:
             continue
@@ -439,9 +445,12 @@ def _convert_peft_config_moe(peft_config: PeftConfig, model: torch.nn.Module) ->
 
     new_target_parameters = peft_config.target_parameters.copy()
     remaining_target_modules = set()
-    matched_targets: dict[str, set[str]] = {new_name: set() for new_name in fused_targets}
+    matched_fused_targets: dict[str, set[str]] = {new_name: set() for new_name in fused_targets}
 
+    named_modules = list(model.named_modules())
     for target in peft_config.target_modules:
+        # In this loop, we use the target_module_mapping to rename target modules or to convert from module targets to
+        # parameter targets.
         mapped_new_name = None
         mapped_old_name = None
         for old_name, new_name in target_module_mapping.items():
@@ -454,12 +463,37 @@ def _convert_peft_config_moe(peft_config: PeftConfig, model: torch.nn.Module) ->
             remaining_target_modules.add(target)
             continue
 
-        new_target_parameters.add(mapped_new_name)
+        # For the target module to target parameter conversion, we have to be careful since the same name in
+        # target_module_mapping can refer to both a module and a parameter in the new architecture (e.g. "down_proj" in
+        # DeepSeek v3). To prevent accidentally converting a valid target_module to a target_parameter, we check if all
+        # the targets would be nn.Linear layers, in which case we *don't convert*. See #3711.
+        target_config = copy.copy(peft_config)
+        target_config.target_modules = {target}
+        matching_modules = [
+            module for name, module in named_modules if check_target_module_exists(target_config, name)
+        ]
+        all_matching_modules_are_linear = all(isinstance(module, torch.nn.Linear) for module in matching_modules)
+        if matching_modules and all_matching_modules_are_linear:
+            remaining_target_modules.add(target)
+            continue
+
+        # Now perform replacement, e.g.:
+        # target_module=gate -> target_parameter=gate.weight
+        # target_module=layers.0.gate -> target_parameter=layers.0.gate.weight
+
+        def str_rreplace(s, old, new, count=-1):
+            # this is the same as str.replace(...) but counting from the right side instead of left side
+            return new.join(s.rsplit(old, count))
+
+        new_target_name = str_rreplace(target, mapped_old_name, mapped_new_name, count=-1)
+        new_target_parameters.add(new_target_name)
+
+        # check if the parameter is fused
         if mapped_new_name in fused_targets and mapped_old_name is not None:
-            matched_targets.setdefault(mapped_new_name, set()).add(mapped_old_name)
+            matched_fused_targets.setdefault(mapped_new_name, set()).add(mapped_old_name)
 
     for new_name, required_old_targets in fused_targets.items():
-        present_targets = matched_targets.get(new_name, set())
+        present_targets = matched_fused_targets.get(new_name, set())
         if 0 < len(present_targets) < len(required_old_targets):
             missing = ", ".join(sorted(set(required_old_targets) - present_targets))
             present = ", ".join(sorted(present_targets))
