@@ -436,7 +436,7 @@ class BaseTuner(nn.Module, ABC):
         A helper method to check if the passed module's key name matches any of the tied modules
 
         Args:
-            config (`PeftConfig`):
+            peft_config (`PeftConfig`):
                 A config to match target modules from.
             key (`str`):
                 A key to search any matches in config.
@@ -457,7 +457,7 @@ class BaseTuner(nn.Module, ABC):
         adapter_config.
 
         Args:
-            config (`PeftConfig`):
+            peft_config (`PeftConfig`):
                 A config to match target modules from.
             key (`str`):
                 A key to search any matches in config.
@@ -1378,8 +1378,6 @@ class BaseTuner(nn.Module, ABC):
         Args:
             model (`nn.Module`):
                 Model to get the config from.
-            default (`dict|None`, *optional*)::
-                What to return if model does not have a config attribute.
         """
         model_config = getattr(model, "config", DUMMY_MODEL_CONFIG)
         if hasattr(model_config, "to_dict"):
