@@ -327,6 +327,12 @@ def train(
     )
 
     # print this after getting the optimizer, in case it modifies requires_gard
+    if hasattr(transformer, "get_nb_trainable_parameters"):
+        num_trainable_params, num_params = transformer.get_nb_trainable_parameters()
+    else:
+        num_params = sum(param.numel() for param in transformer.parameters())
+        num_trainable_params = sum(param.numel() for param in transformer.parameters() if param.requires_grad)
+
     if hasattr(transformer, "print_healthcheck"):
         transformer.print_healthcheck(sink=print_verbose)
 
