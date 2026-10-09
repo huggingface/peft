@@ -5214,17 +5214,21 @@ class TestPeftCustomModel(PeftCommonTester):
         torch.manual_seed(0)
 
         model = ModelEmbConv1D().to(self.torch_device)
-        peft_model = get_peft_model(
-            model, LoraConfig(target_modules=["emb"], init_lora_weights=False), adapter_name="source"
-        )
-        peft_model.add_adapter("other", LoraConfig(target_modules=["lin0"], init_lora_weights=False, lora_bias=True))
+        emb_config = LoraConfig(target_modules=["emb"], init_lora_weights=False)
+        bias_config = LoraConfig(target_modules=["lin0"], init_lora_weights=False, lora_bias=True)
+        peft_model = get_peft_model(model, emb_config, adapter_name="emb0")
+        peft_model.add_adapter("bias0", bias_config)
+        peft_model.add_adapter("emb1", emb_config)
+        peft_model.add_adapter("bias1", bias_config)
 
         msg = (
-            "add_weighted_adapter does not support lora_bias combined with nn.Embedding targeting: adapter 'other' "
-            "uses lora_bias=True while adapter 'source' targets an nn.Embedding"
+            "add_weighted_adapter does not support lora_bias combined with nn.Embedding targeting: adapters "
+            "['bias0', 'bias1'] use lora_bias=True while adapters ['emb0', 'emb1'] target an nn.Embedding"
         )
         with pytest.raises(ValueError, match=re.escape(msg)):
-            peft_model.add_weighted_adapter(adapters=["source", "other"], weights=[1.0, 1.0], adapter_name="combined")
+            peft_model.add_weighted_adapter(
+                adapters=["emb0", "bias0", "emb1", "bias1"], weights=[1.0] * 4, adapter_name="combined"
+            )
 
     @pytest.mark.parametrize("lora_bias", [False, True])
     @pytest.mark.parametrize("num_adapters", [2, 3])
