@@ -5287,6 +5287,20 @@ class TestMultipleActiveAdapters:
             return MLP(bias=False)
         return MLP(bias=True)
 
+    @pytest.mark.parametrize("adapter_name", [["test-adapter"], ("test-adapter",), None])
+    def test_peft_model_multi_adapter_raises(self, adapter_name):
+        # Regression test for https://github.com/huggingface/peft/issues/3723
+        config = LoraConfig(target_modules=["lin0"])
+        model = get_peft_model(MLP(), config, adapter_name="test-adapter")
+        msg = (
+            "PeftModel.set_adapter only supports a single adapter name as a string. "
+            "To activate multiple adapters, use model.base_model.set_adapter(adapter_names) "
+            "if the PEFT method supports it."
+        )
+        with pytest.raises(TypeError, match=re.escape(msg)):
+            model.set_adapter(adapter_name)
+        assert model.active_adapter == "test-adapter"
+
     @pytest.mark.parametrize(
         "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
     )
