@@ -450,20 +450,7 @@ def _convert_peft_config_moe(peft_config: PeftConfig, model: torch.nn.Module) ->
     named_modules = list(model.named_modules())
     for target in peft_config.target_modules:
         # In this loop, we use the target_module_mapping to rename target modules or to convert from module targets to
-        # parameter targets. For the latter, however, we have to be careful since the same name in target_module_mapping
-        # can refer to both a module and a parameter in the new architecture (e.g. "down_proj" in DeepSeek v3). To
-        # prevent accidentally converting a valid target_module to a target_parameter, we check if all the targets would
-        # be nn.Linear layers, in which case we *don't convert*. See #3711.
-        target_config = copy.copy(peft_config)
-        target_config.target_modules = {target}
-        matching_modules = [
-            module for name, module in named_modules if check_target_module_exists(target_config, name)
-        ]
-        all_matching_modules_are_linear = all(isinstance(module, torch.nn.Linear) for module in matching_modules)
-        if matching_modules and all_matching_modules_are_linear:
-            remaining_target_modules.add(target)
-            continue
-
+        # parameter targets.
         mapped_new_name = None
         mapped_old_name = None
         for old_name, new_name in target_module_mapping.items():
@@ -476,8 +463,21 @@ def _convert_peft_config_moe(peft_config: PeftConfig, model: torch.nn.Module) ->
             remaining_target_modules.add(target)
             continue
 
-        new_target_parameters.add(mapped_new_name)
-        # example replacements:
+        # For the target module to target parameter conversion, we have to be careful since the same name in
+        # target_module_mapping can refer to both a module and a parameter in the new architecture (e.g. "down_proj" in
+        # DeepSeek v3). To prevent accidentally converting a valid target_module to a target_parameter, we check if all
+        # the targets would be nn.Linear layers, in which case we *don't convert*. See #3711.
+        target_config = copy.copy(peft_config)
+        target_config.target_modules = {target}
+        matching_modules = [
+            module for name, module in named_modules if check_target_module_exists(target_config, name)
+        ]
+        all_matching_modules_are_linear = all(isinstance(module, torch.nn.Linear) for module in matching_modules)
+        if matching_modules and all_matching_modules_are_linear:
+            remaining_target_modules.add(target)
+            continue
+
+        # Now perform replacement, e.g.:
         # target_module=gate -> target_parameter=gate.weight
         # target_module=layers.0.gate -> target_parameter=layers.0.gate.weight
 
@@ -485,7 +485,7 @@ def _convert_peft_config_moe(peft_config: PeftConfig, model: torch.nn.Module) ->
             # this is the same as str.replace(...) but counting from the right side instead of left side
             return new.join(s.rsplit(old, count))
 
-        new_target_name = str_rreplace(target, mapped_old_name, mapped_new_name)
+        new_target_name = str_rreplace(target, mapped_old_name, mapped_new_name, count=-1)
         new_target_parameters.add(new_target_name)
 
         # check if the parameter is fused

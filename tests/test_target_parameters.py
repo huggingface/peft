@@ -812,6 +812,7 @@ class TestTargetParameters:
         "target_parameters",
         [
             [],
+            ["down_proj"],
             ["experts.down_proj"],
             ["experts.gate_up_proj", "experts.down_proj"],
         ],
