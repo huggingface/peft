@@ -439,7 +439,7 @@ def _convert_peft_config_moe(peft_config: PeftConfig, model: torch.nn.Module) ->
 
     new_target_parameters = peft_config.target_parameters.copy()
     remaining_target_modules = set()
-    matched_targets: dict[str, set[str]] = {new_name: set() for new_name in fused_targets}
+    matched_fused_targets: dict[str, set[str]] = {new_name: set() for new_name in fused_targets}
 
     named_modules = list(model.named_modules())
     for target in peft_config.target_modules:
@@ -471,11 +471,21 @@ def _convert_peft_config_moe(peft_config: PeftConfig, model: torch.nn.Module) ->
             continue
 
         new_target_parameters.add(mapped_new_name)
+        # example replacements:
+        # target_module=gate -> target_parameter=gate.weight
+        # target_module=layers.0.gate -> target_parameter=layers.0.gate.weight
+
+        def str_rreplace(s, old, new, count=-1):
+            # this is the same as str.replace(...) but counting from the right side instead of left side
+            return new.join(s.rsplit(old, count))
+
+        new_target_name = str_rreplace(target, mapped_old_name, mapped_new_name)
+        new_target_parameters.add(new_target_name)
         if mapped_new_name in fused_targets and mapped_old_name is not None:
-            matched_targets.setdefault(mapped_new_name, set()).add(mapped_old_name)
+            matched_fused_targets.setdefault(mapped_new_name, set()).add(mapped_old_name)
 
     for new_name, required_old_targets in fused_targets.items():
-        present_targets = matched_targets.get(new_name, set())
+        present_targets = matched_fused_targets.get(new_name, set())
         if 0 < len(present_targets) < len(required_old_targets):
             missing = ", ".join(sorted(set(required_old_targets) - present_targets))
             present = ", ".join(sorted(present_targets))

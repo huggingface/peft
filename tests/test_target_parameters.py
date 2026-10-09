@@ -966,25 +966,67 @@ class TestTargetParameters:
         assert not isinstance(layers[2].mlp.experts, LoraLayer)
         assert len([module for module in model.modules() if isinstance(module, LoraLayer)]) == 2
 
+    def test_qwen_legacy_targets_install_parameter_adapters_on_correct_layer(self, qwen_model):
+        # Check that we correctly target only layer 1, as indicated by the target_modules
+        target_modules = [
+            "1.self_attn.q_proj",
+            "1.mlp.gate",
+            "1.mlp.experts.gate_proj",
+            "1.mlp.experts.up_proj",
+            "1.mlp.experts.down_proj",
+        ]
+        config = LoraConfig(r=2, lora_alpha=2, target_modules=target_modules)
+        model = get_peft_model(qwen_model, config)
+
+        # only layer 1 should be targeted but right now, all layers are targeted -> xfail
+        assert config.target_parameters != {"down_proj", "gate_up_proj", "gate.weight"}
+
+        layers = model.get_base_model().model.layers
+        assert isinstance(layers[1].self_attn.q_proj, Linear)
+        assert isinstance(layers[1].mlp.gate, ParamWrapper)
+        assert layers[1].mlp.gate.parameter_name == "weight"
+
+        experts = layers[1].mlp.experts
+        assert isinstance(experts, ParamWrapper)
+        assert experts.parameter_name == "down_proj"
+        assert isinstance(experts.base_layer, ParamWrapper)
+        assert experts.base_layer.parameter_name == "gate_up_proj"
+        # fused weight:
+        assert experts.base_layer.r["default"] == 4
+        assert experts.base_layer.lora_alpha["default"] == 4
+
+        # layers[2] should not be updated but it is -> xfail
+        assert not isinstance(layers[2].mlp.experts, LoraLayer)
+        assert not isinstance(layers[2].mlp.gate, LoraLayer)
+        assert not isinstance(layers[0].mlp.down_proj, LoraLayer)
+
+        # expected: q_proj, gate, gate_up_proj, down_proj for one layer -> xfail
+        adapters = [module for module in model.modules() if isinstance(module, LoraLayer)]
+        assert len(adapters) == 4
+
+        # Resolve a fresh legacy config against the already wrapped architecture, without targeting adapter internals.
+        model.add_adapter("other", LoraConfig(r=2, lora_alpha=2, target_modules=target_modules))
+        # same issue as above: should be only 4 targets -> xfail
+        assert len([module for module in model.modules() if isinstance(module, LoraLayer)]) == 4
+        assert all("other" in adapter.lora_A for adapter in adapters)
+
     @pytest.mark.parametrize(
         "target_modules",
         [
-            [
-                "1.self_attn.q_proj",
-                "1.mlp.gate",
-                "1.mlp.experts.gate_proj",
-                "1.mlp.experts.up_proj",
-                "1.mlp.experts.down_proj",
-            ],
             r"model\.layers\.1\.(self_attn\.q_proj|mlp\.(gate|experts\.(gate_proj|up_proj|down_proj)))",
             r"model\.layers\.1\.(self_attn\.q_proj|mlp\.(gate|experts\.\d+\.(gate_proj|up_proj|down_proj)))",
         ],
-        ids=["suffixes", "regex", "numbered-expert-regex"],
+        ids=["regex", "numbered-expert-regex"],
     )
-    @pytest.mark.xfail(strict=True, reason="Legacy expert conversion still loses layer scope")
-    def test_qwen_legacy_targets_install_parameter_adapters_on_correct_layer(self, qwen_model, target_modules):
-        # Looking only at named_modules() would either reject the custom router or silently drop the expert targets
-        # while still adapting q_proj. Check actual wrappers and gradients, including the fused gate/up rank.
+    @pytest.mark.xfail(
+        strict=True, reason="Legacy expert conversion with regex target_modules still loses layer scope"
+    )
+    def test_qwen_legacy_targets_install_parameter_adapters_on_correct_layer_regex_target(
+        self, qwen_model, target_modules
+    ):
+        # Same test as test_qwen_legacy_targets_install_parameter_adapters_on_correct_layer above but with
+        # target_modules as string. This still fails because _resolve_string_target_modules does not correctly keep the
+        # layer index.
         config = LoraConfig(r=2, lora_alpha=2, target_modules=target_modules)
         model = get_peft_model(qwen_model, config)
 
