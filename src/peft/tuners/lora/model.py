@@ -736,9 +736,9 @@ class LoraModel(BaseTuner):
             ]
             if embedding_adapters:
                 raise ValueError(
-                    f"add_weighted_adapter does not support lora_bias combined with nn.Embedding targeting: adapter "
-                    f"'{bias_adapters[0]}' uses lora_bias=True while adapter '{embedding_adapters[0]}' targets an "
-                    f"nn.Embedding, which does not support a bias. Leave either adapter out of the call."
+                    f"add_weighted_adapter does not support lora_bias combined with nn.Embedding targeting: adapters "
+                    f"{bias_adapters} use lora_bias=True while adapters {embedding_adapters} target an nn.Embedding, "
+                    f"which does not support a bias. Leave either group out of the call."
                 )
 
         # If more than one of the adapters targets the same module with modules_to_save, raise an error, as these
