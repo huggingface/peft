@@ -2339,7 +2339,10 @@ class PeftModelForCausalLM(PeftModel):
             prefix_type_mask = torch.Tensor(cpt_tokens_type_mask).long().view(1, -1)
             prefix_type_mask = prefix_type_mask.repeat(batch_size, 1).to(labels.device)
             adjusted_input_type_mask = input_type_mask
-            adjusted_input_type_mask[adjusted_input_type_mask > 0] += prefix_type_mask.max()
+            # Shift by a multiple of 4 so each id keeps its role (id % 4) while staying above the prefix ids;
+            # shifting by the raw maximum turned the default label id 4 into 5 and dropped every label.
+            shift = -(-int(prefix_type_mask.max()) // 4) * 4
+            adjusted_input_type_mask[adjusted_input_type_mask > 0] += shift
             # Concatenate prefix and shifted input type masks
             cpt_type_mask = torch.cat((prefix_type_mask, adjusted_input_type_mask), dim=1)
             # Identify valid label positions and mask invalid ones with -100

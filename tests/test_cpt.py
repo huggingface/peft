@@ -360,3 +360,22 @@ def test_cpt_forward_loss_matches_reference():
         output.logits[:, :-1].reshape(-1, vocab_size).float(), cpt_labels[:, 1:].reshape(-1), ignore_index=-100
     )
     assert torch.allclose(output.loss, expected_loss, atol=1e-4, rtol=1e-4)
+
+
+def test_cpt_default_config_keeps_input_labels():
+    # Regression for #3899: with the default cpt_tokens_type_mask=[1], every input label was masked and the loss
+    # was NaN.
+    from transformers import GPT2Config, GPT2LMHeadModel
+
+    torch.manual_seed(0)
+    base = GPT2LMHeadModel(
+        GPT2Config(
+            vocab_size=32, n_layer=1, n_head=2, n_embd=16, n_positions=32, resid_pdrop=0, embd_pdrop=0, attn_pdrop=0
+        )
+    )
+    model = get_peft_model(base, CPTConfig(task_type=TaskType.CAUSAL_LM)).eval()
+    input_ids = torch.tensor([[5, 6, 7, 8]])
+    output = model(input_ids=input_ids, labels=input_ids.clone())
+
+    assert torch.isfinite(output.loss)
+    assert output.loss > 0
