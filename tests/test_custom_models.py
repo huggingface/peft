@@ -60,6 +60,7 @@ from peft import (
     MontecloraConfig,
     OFTConfig,
     OSFConfig,
+    PacaConfig,
     PeanutConfig,
     PeftModel,
     PeftWarning,
@@ -766,6 +767,17 @@ TEST_CASES = [
         ShiraConfig,
         {"r": 1, "target_modules": ["lin0"]},
     ),
+    ########
+    # PaCA #
+    ########
+    ("Vanilla MLP 1 PaCA", "MLP", PacaConfig, {"r": 2, "target_modules": "lin0"}),
+    ("Vanilla MLP 2 PaCA", "MLP", PacaConfig, {"r": 2, "target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 PaCA", "MLP", PacaConfig, {"r": 2, "target_modules": ["lin1"]}),
+    # PaCA only trains the selected input columns: with random_seed=0, lin1 selects two hidden units that the ReLU sets to
+    # zero for the whole test batch, so their columns receive no gradient. Seed 1 selects active units.
+    ("Vanilla MLP 4 PaCA", "MLP", PacaConfig, {"r": 2, "target_modules": ["lin0", "lin1"], "random_seed": 1}),
+    ("Vanilla MLP 5 PaCA", "MLP", PacaConfig, {"r": 2, "target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    ("Vanilla MLP 6 PaCA", "MLP", PacaConfig, {"r": 4, "paca_alpha": 8, "target_modules": ["lin0", "lin1"]}),
     ###############
     # Supertuning #
     ###############
@@ -1551,6 +1563,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         ShiraConfig,
         {"r": 1, "target_modules": ["lin0"], "init_weights": False},
         {"r": 1, "target_modules": ["lin1"], "init_weights": False},
+    ),
+    (
+        "PaCA Same",
+        "paca",
+        PacaConfig,
+        {"r": 2, "target_modules": ["lin0"], "init_weights": False},
+        {"r": 2, "target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "PaCA Different",
+        "paca",
+        PacaConfig,
+        {"r": 2, "target_modules": ["lin0"], "init_weights": False},
+        {"r": 2, "target_modules": ["lin1"], "init_weights": False},
     ),
     # Check Supra (r set) here: if the hybrid works with multiple adapters, pure Super does too.
     (

@@ -1,0 +1,15 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "exclude_modules": null,
+  "inference_mode": false,
+  "init_weights": true,
+  "modules_to_save": null,
+  "paca_alpha": 80,
+  "peft_type": "PACA",
+  "r": 80,
+  "random_seed": 0,
+  "revision": null,
+  "target_modules": null,
+  "task_type": "CAUSAL_LM"
+}
