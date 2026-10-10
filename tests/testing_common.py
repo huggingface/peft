@@ -80,6 +80,11 @@ from peft.utils import (
 from .testing_utils import get_state_dict, hub_online_once
 
 
+def skip_non_prompt_learning(config_cls):
+    if not issubclass(config_cls, PromptLearningConfig):
+        pytest.skip("Skip tests that are not prompt learning")
+
+
 def _skip_if_merging_not_supported(model_id, config_cls, config_kwargs):
     if issubclass(config_cls, PromptLearningConfig):
         pytest.skip("Prompt learning does not support merging, skipping this test.")
