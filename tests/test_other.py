@@ -28,7 +28,7 @@ from transformers import (
     LlavaForConditionalGeneration,
 )
 
-from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model, get_peft_model_state_dict
+from peft import IA3Config, LoHaConfig, LoraConfig, PeftModel, VeraConfig, get_peft_model, get_peft_model_state_dict
 from peft.import_utils import is_transformers_ge_v5_1_0, is_transformers_ge_v5_6_0
 from peft.utils.other import (
     ModulesToSaveWrapper,
@@ -385,6 +385,54 @@ class TestModulesToSaveUnloadNoActiveAdapter:
         else:
             # unloading without merging must restore the base model output
             assert torch.allclose(out_unloaded, out_base, atol=1e-6, rtol=1e-6)
+
+
+class TestModulesToSaveUnloadHeadWithoutWeight:
+    """Unloading a saved head that has no `.weight` should return that head. See #3918."""
+
+    @staticmethod
+    def _model():
+        class Head(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dense = nn.Linear(8, 8)
+                self.out_proj = nn.Linear(8, 2)
+
+            def forward(self, x):
+                return self.out_proj(torch.tanh(self.dense(x)))
+
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(8, 8)
+                self.classifier = Head()
+
+            def forward(self, x):
+                return self.classifier(self.lin(x))
+
+        torch.manual_seed(0)
+        return Net()
+
+    @pytest.mark.parametrize("config_name", ["ia3", "loha", "lora"])
+    @pytest.mark.parametrize("unload_method", ["unload", "merge_and_unload"])
+    def test_unload_returns_trained_head_without_weight(self, config_name, unload_method):
+        model = self._model()
+        original_weight = model.classifier.dense.weight.detach().clone()
+        configs = {
+            "ia3": IA3Config(target_modules=["lin"], feedforward_modules=["lin"], modules_to_save=["classifier"]),
+            "loha": LoHaConfig(target_modules=["lin"], modules_to_save=["classifier"]),
+            "lora": LoraConfig(target_modules=["lin"], modules_to_save=["classifier"]),
+        }
+        peft_model = get_peft_model(model, configs[config_name])
+        saved_head = peft_model.base_model.model.classifier.modules_to_save["default"]
+        saved_head.dense.weight.data.fill_(1.25)
+        trained_weight = saved_head.dense.weight.detach().clone()
+
+        unloaded = getattr(peft_model, unload_method)()
+
+        assert type(unloaded.classifier).__name__ == "Head"
+        assert torch.equal(unloaded.classifier.dense.weight, trained_weight)
+        assert not torch.equal(unloaded.classifier.dense.weight, original_weight)
 
 
 class TestModulesToSaveNameSubstringBug:

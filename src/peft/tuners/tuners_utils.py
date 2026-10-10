@@ -47,6 +47,7 @@ from peft.utils.error import NoMatchingPeftModuleError
 from peft.utils.integrations import init_empty_weights
 from peft.utils.other import (
     AuxiliaryTrainingWrapper,
+    ModulesToSaveWrapper,
     _get_module_names_tied_with_embedding,
     _set_adapter,
     _set_layer_requires_grad,
@@ -1276,6 +1277,12 @@ class BaseTuner(nn.Module, ABC):
         setattr(parent, child_name, new_module)
         # It's not necessary to set requires_grad here, as that is handled by
         # _mark_only_adapters_as_trainable
+
+        if isinstance(child, ModulesToSaveWrapper):
+            # Unloading ModulesToSaveWrapper already returns the saved module. Copying `.weight` from the
+            # wrapper forwards to that module and fails when it has no weight, for example
+            # RobertaClassificationHead. See #3918.
+            return
 
         # child layer wraps the original module, unpack it
         if hasattr(child, "base_layer"):
