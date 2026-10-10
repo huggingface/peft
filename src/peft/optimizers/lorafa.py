@@ -122,6 +122,13 @@ class LoraFAOptimizer(Optimizer):
                     param_list.append(p)
                     name_list.append(n)
                     if len(param_list) == 2:
+                        # A skipped layer (for example LayerDrop) leaves B.grad as None.
+                        # Drop the A/B pair instead of projecting that missing gradient, and
+                        # clear it so the next adapter is not paired with this A.
+                        if p.grad is None:
+                            param_list = []
+                            name_list = []
+                            continue
                         name = n[: n.find("lora")] + "lora"
                     elif len(param_list) == 1:
                         continue
