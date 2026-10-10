@@ -311,6 +311,63 @@ def test_LoraFAOptimizer_step():
             assert torch.any(param != 0), f"lora_B weights are still zero for {name}"
 
 
+def test_lorafa_skips_lora_b_without_gradient():
+    """A LoRA B matrix with no gradient is left unchanged, including weight decay. See #3900."""
+    torch.manual_seed(0)
+    lr = 1e-2
+    weight_decay = 0.5
+    model = get_peft_model(
+        SimpleNet(),
+        LoraConfig(r=4, lora_alpha=8, target_modules=["lin0", "lin1"], bias="none"),
+    ).to(torch_device)
+    optimizer = create_lorafa_optimizer(model=model, r=4, lora_alpha=8, lr=lr, weight_decay=weight_decay)
+    loss = torch.nn.CrossEntropyLoss()
+
+    x = torch.randint(100, (2, 4, 10)).to(torch_device)
+    label = torch.randint(16, (2, 4, 10)).to(torch_device)
+    loss(model(x).permute(0, 3, 1, 2), label).backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+    skipped = model.base_model.model.lin0.lora_B["default"].weight
+    updated = model.base_model.model.lin1.lora_B["default"].weight
+    loss(model(x).permute(0, 3, 1, 2), label).backward()
+    assert skipped.grad is not None
+    assert updated.grad is not None
+    skipped.grad = None
+
+    skipped_before = skipped.detach().clone()
+    updated_before = updated.detach().clone()
+    skipped_state = optimizer.state["base_model.model.lin0.lora"]
+    skipped_step = skipped_state["step"]
+    skipped_exp_avg = skipped_state["exp_avg_B"].detach().clone()
+    skipped_exp_avg_sq = skipped_state["exp_avg_sq_B"].detach().clone()
+
+    optimizer.step()
+
+    assert torch.equal(skipped, skipped_before)
+    assert not torch.equal(updated, updated_before)
+    assert skipped_state["step"] == skipped_step
+    assert torch.equal(skipped_state["exp_avg_B"], skipped_exp_avg)
+    assert torch.equal(skipped_state["exp_avg_sq_B"], skipped_exp_avg_sq)
+    assert optimizer.state["base_model.model.lin1.lora"]["step"] == skipped_step + 1
+
+    # The reported failure is also the first step, before that adapter has optimizer state.
+    fresh = get_peft_model(
+        SimpleNet(),
+        LoraConfig(r=4, lora_alpha=8, target_modules=["lin0", "lin1"], bias="none"),
+    ).to(torch_device)
+    fresh_optimizer = create_lorafa_optimizer(model=fresh, r=4, lora_alpha=8, lr=lr)
+    loss(fresh(x).permute(0, 3, 1, 2), label).backward()
+    fresh_skipped = fresh.base_model.model.lin0.lora_B["default"].weight
+    fresh_skipped.grad = None
+    fresh_before = fresh_skipped.detach().clone()
+    fresh_optimizer.step()
+    assert torch.equal(fresh_skipped, fresh_before)
+    assert "base_model.model.lin0.lora" not in fresh_optimizer.state
+    assert fresh_optimizer.state["base_model.model.lin1.lora"]["step"] == 1
+
+
 def test_lorafa_weight_decay_decoupled_update_lora_b():
     """
     Test that one optimizer step applies decoupled weight decay to LoRA B weights.
