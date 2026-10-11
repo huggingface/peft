@@ -360,3 +360,24 @@ def test_cpt_forward_loss_matches_reference():
         output.logits[:, :-1].reshape(-1, vocab_size).float(), cpt_labels[:, 1:].reshape(-1), ignore_index=-100
     )
     assert torch.allclose(output.loss, expected_loss, atol=1e-4, rtol=1e-4)
+
+
+def test_cpt_default_config_forward_loss_finite():
+    """
+    Ensure that CPT with default configuration (where cpt_tokens_type_mask defaults to [1])
+    does not mask out all input labels and returns a finite loss (regression test for #3899).
+    """
+    config = CPTConfig(task_type=TaskType.CAUSAL_LM)
+    base_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
+    model = get_peft_model(base_model, config)
+    model.eval()
+
+    torch.manual_seed(0)
+    input_ids = torch.tensor([[10, 20, 30, 40]])
+    labels = input_ids.clone()
+
+    with torch.no_grad():
+        output = model(input_ids=input_ids, labels=labels)
+
+    assert output.loss is not None
+    assert torch.isfinite(output.loss)
