@@ -221,12 +221,12 @@ def get_peft_model_state_dict(
         if keys_starting_with_prefix:
             tp_plan = {f"{prefix}{k}": v for k, v in tp_plan.items()}
         state_dict = gather_state_dict_for_save(state_dict, tp_plan, tp_info.device_mesh, tp_info.tp_size)
-    elif is_transformers_dtensor_tp and getattr(model, "_tp_size", None):
-        # DTensor TP integration: the adapter weights are already `DTensor` instances, so they carry their own
-        # device_mesh/placements and can be gathered without needing any `_tp_info`.
-        from transformers.integrations.tensor_parallel import gather_state_dict_for_save
 
-        state_dict = gather_state_dict_for_save(state_dict, {}, None, None)
+    # DTensor TP integration: the adapter weights are already `DTensor` instances, so they carry their own
+    # device_mesh/placements and can be gathered without needing any `_tp_info`. The gathering is deferred until the
+    # adapter entries have been selected below, as the state_dict still contains the sharded base model weights, which
+    # must not be gathered (they are not saved, and gathering them is expensive and hangs when only one rank saves).
+    gather_dtensors = tp_info is None and is_transformers_dtensor_tp and getattr(model, "_tp_size", None)
 
     # TUNER SPECIFIC CODE
     if config.peft_type not in PEFT_TYPE_TO_TUNER_MAPPING:
@@ -342,6 +342,11 @@ def get_peft_model_state_dict(
                     to_return.update({k: v for k, v in state_dict.items() if k.startswith(embedding_prefix)})
     elif save_embedding_layers:
         warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
+
+    if gather_dtensors:
+        from transformers.integrations.tensor_parallel import gather_state_dict_for_save
+
+        to_return = gather_state_dict_for_save(to_return, {}, None, None)
 
     # REMOVE ADAPTER NAME
     # Key formats can be method-specific, so the removal is delegated to the tuner class, see
