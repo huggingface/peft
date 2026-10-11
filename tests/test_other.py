@@ -609,6 +609,61 @@ class TestAuxiliaryTrainingWrapperParamsOnlyStateDict:
         assert sd_full.keys() == sd_params_only.keys()
 
 
+class TestDTensorTPGatherOnlyAdapterWeights:
+    """With the DTensor TP integration, get_peft_model_state_dict gathers the DTensors before returning the adapter
+    state_dict. It used to gather the whole model state_dict, including the sharded base model weights, which is
+    expensive and hangs when only one rank saves, e.g. the main process in Trainer.
+
+    This bug was reported in #3930.
+    """
+
+    def get_peft_model(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = nn.Embedding(10, 8)
+                self.proj = nn.Linear(8, 8)
+                self.head = nn.Linear(8, 4)
+
+            def forward(self, x):
+                return self.head(self.proj(self.emb(x)))
+
+        torch.manual_seed(0)
+        config = LoraConfig(target_modules=["proj"], modules_to_save=["head"], init_lora_weights=False)
+        return get_peft_model(MyModule(), config)
+
+    def test_only_adapter_entries_are_gathered(self):
+        model = self.get_peft_model()
+        expected = get_peft_model_state_dict(model)
+
+        gathered_keys = []
+
+        def gather_state_dict_for_save(state_dict, tp_plan, device_mesh, tp_size):
+            gathered_keys.extend(state_dict)
+            return state_dict
+
+        model._tp_size = 2
+        with (
+            patch("peft.utils.save_and_load.is_transformers_dtensor_tp", True),
+            patch(
+                "transformers.integrations.tensor_parallel.gather_state_dict_for_save",
+                gather_state_dict_for_save,
+                create=True,
+            ),
+        ):
+            state_dict = get_peft_model_state_dict(model)
+
+        assert gathered_keys
+        # the base model weights are not part of the adapter and must not be gathered
+        assert not any(
+            k.startswith(("base_model.model.emb.", "base_model.model.proj.base_layer.")) for k in gathered_keys
+        )
+        assert len(gathered_keys) == len(expected)
+        assert state_dict.keys() == expected.keys()
+        for key in expected:
+            assert torch.equal(state_dict[key], expected[key])
+
+
 class TestTargetingAuxiliaryTrainingWrapper:
     """AuxiliaryTrainingWrapper such as ModulesToSaveWrapper and TrainableTokensWrapper are
     in general not to be targeted by PEFT methods such as adapters. For example, a ModulesToSaveWrapper's children
