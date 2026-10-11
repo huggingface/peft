@@ -665,6 +665,8 @@ class TestMixedAdapterTypes(unittest.TestCase):
 
     def test_disable_adapter_modules_to_save_without_tuner(self):
         # The dummy target permits a model whose only adapter is an auxiliary wrapper.
+        # Guard against snapshotting only BaseTunerLayer states, which would leave the auxiliary wrapper disabled
+        # after exiting the context.
         config = LoraConfig(target_modules=DUMMY_TARGET_MODULES, modules_to_save=["lin1"])
         peft_model = self._get_model(SimpleNet, config, "adapter0")
         saved_module = peft_model.base_model.model.lin1
