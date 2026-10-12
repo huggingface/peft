@@ -123,7 +123,7 @@ trainer = SFTTrainer(
 trainer.accelerator.print(f"{trainer.model}")
 if model_args.use_peft_lora:
     # handle PEFT+FSDP case
-    trainer.model.print_trainable_parameters()
+    trainer.model.print_healthcheck()
     if getattr(trainer.accelerator.state, "fsdp_plugin", None):
         from peft.utils.other import fsdp_auto_wrap_policy
 

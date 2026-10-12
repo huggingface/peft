@@ -953,8 +953,8 @@ class TestPrepareModelForKbitTraining:
 # The task-type subclasses that add their head to modules_to_save. One tiny BERT checkpoint covers all three, since the
 # auto classes build the matching head from the same config.
 TASK_TYPE_CASES = [
-    ("SEQ_CLS", AutoModelForSequenceClassification, ["classifier", "score"]),
-    ("TOKEN_CLS", AutoModelForTokenClassification, ["classifier", "score"]),
+    ("SEQ_CLS", AutoModelForSequenceClassification, ["classifier", "score", "pre_classifier"]),
+    ("TOKEN_CLS", AutoModelForTokenClassification, ["classifier", "score", "pre_classifier"]),
     ("QUESTION_ANS", AutoModelForQuestionAnswering, ["qa_outputs"]),
 ]
 TASK_TYPE_MODEL_ID = "peft-internal-testing/tiny-random-BertForSequenceClassification"
