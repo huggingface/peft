@@ -2018,6 +2018,11 @@ class MultiheadAttention(nn.Module, LoraLayer):
             raise ValueError(f"{self.__class__.__name__} does not support KaSA, please set `kasa_config=None`.")
         if kwargs.get("use_alora", False):
             raise ValueError(f"{self.__class__.__name__} does not support aLoRA (yet), please set use_alora to False")
+        if config.lora_bias:
+            # lora_bias is not applied correctly for MHA and there is no use case for it, see #3935
+            raise ValueError(
+                f"{self.__class__.__name__} does not support lora_bias=True, please set lora_bias to False"
+            )
         super().__init__()
         LoraLayer.__init__(self, base_layer, **kwargs)
 
@@ -2096,10 +2101,15 @@ class MultiheadAttention(nn.Module, LoraLayer):
     def add_zero_attn(self) -> bool:
         return self.get_base_layer().add_zero_attn
 
-    def update_layer(self, *args, **kwargs) -> None:
-        super().update_layer(*args, **kwargs)
+    def update_layer(self, *args, config: LoraConfig, **kwargs) -> None:
+        # Also checked here, as adding another adapter to an existing layer doesn't go through __init__
+        if config.lora_bias:
+            raise ValueError(
+                f"{self.__class__.__name__} does not support lora_bias=True, please set lora_bias to False"
+            )
+        super().update_layer(*args, config=config, **kwargs)
         # Note: LoRA is applied to both in_proj and out_proj. There is currently no way to only specify one of them.
-        self.base_layer.out_proj.update_layer(*args, **kwargs)
+        self.base_layer.out_proj.update_layer(*args, config=config, **kwargs)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
