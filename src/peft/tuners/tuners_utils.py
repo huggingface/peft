@@ -42,6 +42,7 @@ from peft.utils.constants import (
     EMBEDDING_LAYER_NAMES,
     MIN_TARGET_MODULES_FOR_OPTIMIZATION,
     SEQ_CLS_HEAD_NAMES,
+    TP_MESH_DIM_NAMES,
 )
 from peft.utils.error import NoMatchingPeftModuleError
 from peft.utils.integrations import init_empty_weights
@@ -174,16 +175,14 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     """
     if isinstance(module, nn.Linear):
         if _torch_supports_distributed and isinstance(module.weight, torch.distributed.tensor.DTensor):
-            # Sharded weight. Under Tensor Parallel the module computes on its local shard, so the LoRA
-            # layers must match the local shape. Under FSDP2 (a mesh dimension named "fsdp") the storage is
-            # sharded but the module still computes the full projection, so the full shape is the right one.
-            # A mesh with no dimension names comes from plain `fully_shard(model)`, which builds its default
-            # mesh unnamed, so it is FSDP-sharded as well.
-            mesh_dim_names = module.weight.device_mesh.mesh_dim_names or ()
-            if set(mesh_dim_names) <= {"fsdp"}:
-                in_features, out_features = module.in_features, module.out_features
-            else:
+            # Use the full shape: FSDP2 computes the full projection, and the LoRA TP hooks shard the adapter of a
+            # layer with a Transformers TP plan (`_hf_tp_plan`). Only TP without a plan, detected by a mesh dimension
+            # in `TP_MESH_DIM_NAMES`, needs the local shard shape.
+            has_tp_dim = any(name in TP_MESH_DIM_NAMES for name in module.weight.device_mesh.mesh_dim_names or ())
+            if has_tp_dim and getattr(module, "_hf_tp_plan", None) is None:
                 out_features, in_features = module.weight.to_local().shape
+            else:
+                in_features, out_features = module.in_features, module.out_features
         else:
             in_features, out_features = module.in_features, module.out_features
     elif isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
