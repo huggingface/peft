@@ -1277,6 +1277,12 @@ class BaseTuner(nn.Module, ABC):
         # It's not necessary to set requires_grad here, as that is handled by
         # _mark_only_adapters_as_trainable
 
+        if isinstance(child, AuxiliaryTrainingWrapper):
+            # When unloading an auxiliary wrapper like ModulesToSaveWrapper, new_module is the module returned by the
+            # wrapper and there is nothing to copy over. The wrapper forwards attribute access to the wrapped module,
+            # which may be a composite module without a weight attribute, e.g. RobertaClassificationHead.
+            return
+
         # child layer wraps the original module, unpack it
         if hasattr(child, "base_layer"):
             child = child.base_layer

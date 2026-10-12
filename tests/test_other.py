@@ -28,7 +28,7 @@ from transformers import (
     LlavaForConditionalGeneration,
 )
 
-from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model, get_peft_model_state_dict
+from peft import LoHaConfig, LoraConfig, PeftModel, VeraConfig, get_peft_model, get_peft_model_state_dict
 from peft.import_utils import is_transformers_ge_v5_1_0, is_transformers_ge_v5_6_0
 from peft.utils.other import (
     ModulesToSaveWrapper,
@@ -385,6 +385,53 @@ class TestModulesToSaveUnloadNoActiveAdapter:
         else:
             # unloading without merging must restore the base model output
             assert torch.allclose(out_unloaded, out_base, atol=1e-6, rtol=1e-6)
+
+
+class TestModulesToSaveUnloadCompositeModule:
+    """Regression test for unloading a modules_to_save module that has no weight of its own.
+
+    For all PEFT methods that rely on BaseTuner._replace_module (i.e. all except a few like LoRA), unloading used to
+    raise an AttributeError when the modules_to_save module is a composite module without a weight attribute, e.g.
+    RobertaClassificationHead.
+    """
+
+    @pytest.fixture
+    def model(self):
+        class Head(nn.Module):
+            # composite module without a weight attribute
+            def __init__(self):
+                super().__init__()
+                self.dense = nn.Linear(8, 8)
+                self.out_proj = nn.Linear(8, 2)
+
+            def forward(self, x):
+                return self.out_proj(self.dense(x))
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(8, 8)
+                self.head = Head()
+
+            def forward(self, x):
+                return self.head(self.lin0(x))
+
+        torch.manual_seed(0)
+        return Model()
+
+    @pytest.mark.parametrize("unload_method", ["unload", "merge_and_unload"])
+    def test_unload_composite_modules_to_save(self, model, unload_method):
+        x = torch.randn(4, 8)
+        config = LoHaConfig(target_modules=["lin0"], modules_to_save=["head"], init_weights=False)
+        peft_model = get_peft_model(model, config).eval()
+        trained_head = peft_model.base_model.model.head.modules_to_save["default"]
+        out_peft = peft_model(x)
+
+        unloaded = getattr(peft_model, unload_method)()
+
+        assert unloaded.head is trained_head
+        if unload_method == "merge_and_unload":
+            assert torch.allclose(unloaded(x), out_peft, atol=1e-6, rtol=1e-6)
 
 
 class TestModulesToSaveNameSubstringBug:
