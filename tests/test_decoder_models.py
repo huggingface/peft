@@ -1015,6 +1015,23 @@ class TestDecoderModels(PeftCommonTester):
             _ = model(input_ids=input_ids, position_ids=position_ids)
         assert captured["position_ids"] is None
 
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_prompt_learning_generate_does_not_warn_about_position_ids(
+        self, model_id, config_cls, config_kwargs, recwarn
+    ):
+        # See 3911: generate builds position_ids itself, so dropping them must not warn at every decoding step
+        config = config_cls(**config_kwargs)
+        if not config.is_prompt_learning:
+            pytest.skip("Only checking prompt learning models")
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            input = self.prepare_inputs_for_testing()
+            model = get_peft_model(model, config)
+            model.generate(**input)
+            assert not any("Position ids are not supported" in str(w.message) for w in recwarn)
+
     def test_prompt_learning_token_type_ids_warns_and_drops(self, monkeypatch):
         # For causal LM, token_type_ids are not supported for prompt learning methods, PEFT warns and removes them.
         model_id = "peft-internal-testing/tiny-random-GPT2LMHeadModel"
@@ -1186,25 +1203,6 @@ class TestDecoderModels(PeftCommonTester):
         model.base_model_prepare_inputs_for_generation = fake_prepare_multiple_masks
         with pytest.raises(ValueError, match="Expected a single attention mask"):
             model.prepare_inputs_for_generation(input_ids)
-
-    @pytest.mark.parametrize(
-        "peft_config",
-        [
-            PromptTuningConfig(num_virtual_tokens=4, task_type="CAUSAL_LM"),
-            PromptEncoderConfig(num_virtual_tokens=4, encoder_hidden_size=8, task_type="CAUSAL_LM"),
-        ],
-    )
-    def test_prompt_learning_generate_does_not_warn_about_position_ids(self, peft_config, recwarn):
-        # See 3911: generate builds position_ids itself, so dropping them must not warn at every decoding step
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
-        with hub_online_once(model_id):
-            base = AutoModelForCausalLM.from_pretrained(model_id)
-        model = get_peft_model(base, peft_config)
-
-        input_ids = torch.tensor([[1, 2, 3]])
-        model.generate(input_ids=input_ids, attention_mask=torch.ones_like(input_ids), max_new_tokens=3)
-
-        assert not [w for w in recwarn if "Position ids are not supported" in str(w.message)]
 
     def test_prefix_tuning_mistral(self):
         # See issue 869, 1962
