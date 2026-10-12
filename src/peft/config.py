@@ -160,7 +160,9 @@ class PeftConfigMixin(PushToHubMixin):
 
         # save it
         with open(output_path, "w") as writer:
-            writer.write(json.dumps(output_dict, indent=2, sort_keys=True))
+            # only sort the top level keys: the order of nested dicts like rank_pattern and alpha_pattern matters
+            # when more than one key matches a module, so it has to survive a save/load round trip
+            writer.write(json.dumps(dict(sorted(output_dict.items())), indent=2))
 
     @classmethod
     def from_peft_type(cls, **kwargs):
