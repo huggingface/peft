@@ -800,6 +800,21 @@ from peft.utils.constants import TP_MESH_DIM_NAMES
 TP_MESH_DIM_NAMES.add("model")
 ```
 
+### Mixture-of-experts parameters
+
+For MoE models loaded with Transformers' DTensor tensor/expert parallelism, `target_parameters` aligns the LoRA factors with the expert parameter's placements. For example, with `transformers >= 5.19.0`:
+
+```py
+from transformers.distributed import DistributedConfig
+
+model = AutoModelForCausalLM.from_pretrained(
+    "Qwen/Qwen3-30B-A3B", distributed_config=DistributedConfig(tp_size=2, ep_size=2)
+)
+model = get_peft_model(model, LoraConfig(target_parameters=["experts.gate_up_proj", "experts.down_proj"]))
+```
+
+Adapter checkpoints retain the ordinary two-dimensional LoRA layout and can be loaded into an unsharded model. The expert-parallel B factor is replicated in storage to preserve its rank/expert-interleaved checkpoint layout; its reshaped expert factor is sharded for computation. A is also replicated along an uneven expert axis. These operations redistribute only low-rank factors, not the full expert weight. Additional FSDP sharding combined with TP/EP is outside this support scope.
+
 
 ## Inference
 

@@ -35,6 +35,7 @@ from peft.tuners.tuners_utils import (
     check_adapters_to_merge,
 )
 from peft.utils import ALLOWED_COMPUTE_DTYPES, UPCAST_DTYPES
+from peft.utils.constants import TP_MESH_DIM_NAMES
 from peft.utils.integrations import (
     dequantize_module_weight,
     gather_params_ctx,
@@ -2357,9 +2358,10 @@ class _LoraParameterProxy(nn.Module):
     Intended to be used in conjunction with `nn.utils.parametrize`, see `ParamWrapper`.
     """
 
-    def __init__(self, delta_weight):
+    def __init__(self, delta_weight, *, local_tensor=False):
         super().__init__()
         self.delta_weight = delta_weight
+        self.local_tensor = local_tensor
 
     @staticmethod
     def _low_prec_add(x, y):
@@ -2382,8 +2384,10 @@ class _LoraParameterProxy(nn.Module):
 
     def forward(self, W):
         if any(getattr(torch, dtype_name, None) == W.dtype for dtype_name in UPCAST_DTYPES):
-            return self._low_prec_add(W, self.delta_weight)
-        return W + self.delta_weight
+            result = self._low_prec_add(W, self.delta_weight)
+        else:
+            result = W + self.delta_weight
+        return result.to_local() if self.local_tensor else result
 
 
 class _LoraFactorsProxy(nn.Module):
@@ -2394,17 +2398,19 @@ class _LoraFactorsProxy(nn.Module):
     `ParamWrapper`.
     """
 
-    def __init__(self, lhs, rhs, scaling):
+    def __init__(self, lhs, rhs, scaling, *, local_tensor=False):
         super().__init__()
         self.lhs = lhs
         self.rhs = rhs
         self.scaling = scaling
+        self.local_tensor = local_tensor
 
     def forward(self, W):
         # autocast would cast the baddbmm down to the autocast dtype, but a parametrization may not change the dtype of
         # the parameter, so the fold is performed in the dtype of W (which is also what the non-folded path does).
         with torch.autocast(device_type=W.device.type, enabled=False):
-            return torch.baddbmm(W, self.lhs, self.rhs, alpha=self.scaling)
+            result = torch.baddbmm(W, self.lhs, self.rhs, alpha=self.scaling)
+        return result.to_local() if self.local_tensor else result
 
 
 # copied from:
@@ -2581,7 +2587,55 @@ class ParamWrapper(nn.Module, LoraLayer):
         if adapter_name in self.lora_variant:
             self.lora_variant[adapter_name].init(self, config=config, **kwargs)
 
+        self._parallelize_adapter(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
+
+    def _parallelize_adapter(self, adapter_name: str) -> None:
+        param = self.get_param()
+        mesh = getattr(param, "device_mesh", None)
+        if mesh is None:
+            return
+        # FSDP storage sharding alone is not tensor/expert parallel execution.
+        if not any(name in TP_MESH_DIM_NAMES | {"ep"} for name in (mesh.mesh_dim_names or ())):
+            if getattr(self.get_base_layer(), "_hf_tp_plan", None) is None:
+                return
+        from torch.distributed.tensor import DTensor, Replicate, Shard, distribute_tensor
+        from torch.distributed.tensor.placement_types import _StridedShard
+
+        if isinstance(self.lora_A[adapter_name].weight, DTensor):
+            return
+        input_dim = 1 if param.ndim == 2 or not self._did_swap_in_out_features else 2
+        output_dim = 0 if param.ndim == 2 else 3 - input_dim
+        placements_A, placements_B = [], []
+
+        def factor_shard(dim, placement):
+            if isinstance(placement, _StridedShard):
+                return _StridedShard(dim, split_factor=placement.split_factor)
+            return Shard(dim)
+
+        for mesh_dim, placement in enumerate(param.placements):
+            if isinstance(placement, Replicate):
+                placements_A.append(Replicate())
+                placements_B.append(Replicate())
+            elif isinstance(placement, (Shard, _StridedShard)):
+                if param.ndim == 3 and placement.dim == 0:
+                    # Uneven expert shards do not align with shards of the flattened expert/rank dimension.
+                    placements_A.append(Shard(0) if self.num_experts % mesh.size(mesh_dim) == 0 else Replicate())
+                    # B stores rank/expert interleaved columns in the canonical checkpoint layout. Shard the
+                    # reshaped expert factor at execution time instead of treating a column slice as expert-local.
+                    placements_B.append(Replicate())
+                else:
+                    placements_A.append(factor_shard(1, placement) if placement.dim == input_dim else Replicate())
+                    placements_B.append(factor_shard(0, placement) if placement.dim == output_dim else Replicate())
+            else:
+                raise TypeError("LoRA target_parameters requires replicated or sharded base parameter placements.")
+        for layer, placements in ((self.lora_A, placements_A), (self.lora_B, placements_B)):
+            weight = layer[adapter_name].weight
+            # The parameter is already registered. Avoid the empty-parameter constructor hook when loading on meta,
+            # since DTensor cannot be reconstructed by that hook from a single tensor argument.
+            layer[adapter_name]._parameters["weight"] = nn.Parameter(
+                distribute_tensor(weight.detach(), mesh, placements)
+            )
 
     def _move_adapter_to_device_of_base_layer(self, adapter_name: str, device: Optional[torch.device] = None) -> None:
         """
@@ -2626,9 +2680,25 @@ class ParamWrapper(nn.Module, LoraLayer):
         else:
             lhs, rhs = weight_B, weight_A
         param = self.get_param()
+        if getattr(weight_A, "device_mesh", None) is not None:
+            from torch.distributed.tensor import Replicate, Shard
+            from torch.distributed.tensor.placement_types import _StridedShard
+
+            # The contraction rank stays replicated; free dimensions follow the expert parameter's placements.
+            lhs_placements = [
+                Replicate() if isinstance(p, (Shard, _StridedShard)) and p.dim == 2 else p for p in param.placements
+            ]
+            rhs_placements = [
+                Replicate() if isinstance(p, (Shard, _StridedShard)) and p.dim == 1 else p for p in param.placements
+            ]
+            lhs = lhs.redistribute(param.device_mesh, lhs_placements)
+            rhs = rhs.redistribute(param.device_mesh, rhs_placements)
         return lhs.to(param.dtype), rhs.to(param.dtype), self.scaling[adapter_name]
 
     def get_delta_weight(self, adapter_name, *args, **kwargs):
+        if self._param_ndim == 3 and getattr(self.lora_A[adapter_name].weight, "device_mesh", None) is not None:
+            lhs, rhs, scaling = self.get_delta_factors(adapter_name)
+            return torch.bmm(lhs, rhs) * scaling
         if self.num_experts == 1:
             # could actually be a normal layer or experts stacked block-diagonally, acting like a single layer
             delta_weight = Linear.get_delta_weight(self, adapter_name, *args, **kwargs)
@@ -2664,9 +2734,17 @@ class ParamWrapper(nn.Module, LoraLayer):
 
         adapters = [a for a in active_adapters if a in self.lora_A]
         param = self.get_param()
+        base_layer = self.get_base_layer()
+        local_tensor = False
+        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+        if getattr(param, "device_mesh", None) is not None and tp_plan is not None and is_transformers_dtensor_tp:
+            from transformers.distributed.tensor_parallel import ALL_PARALLEL_STYLES
+
+            style = ALL_PARALLEL_STYLES[tp_plan]
+            local_tensor = style.should_use_local_tensors(base_layer)
         is_low_precision = any(getattr(torch, dtype_name, None) == param.dtype for dtype_name in UPCAST_DTYPES)
         if len(adapters) == 1 and self.num_experts > 1 and not is_low_precision:
-            proxy = _LoraFactorsProxy(*self.get_delta_factors(adapters[0]))
+            proxy = _LoraFactorsProxy(*self.get_delta_factors(adapters[0]), local_tensor=local_tensor)
         else:
             delta_weight = None
             for active_adapter in adapters:
@@ -2674,11 +2752,12 @@ class ParamWrapper(nn.Module, LoraLayer):
                     delta_weight = self.get_delta_weight(active_adapter)
                 else:
                     delta_weight = delta_weight + self.get_delta_weight(active_adapter)
-            proxy = _LoraParameterProxy(delta_weight)
+            proxy = _LoraParameterProxy(delta_weight, local_tensor=local_tensor)
 
-        base_layer = self.get_base_layer()
         requires_grad_before = param.requires_grad
-        nn.utils.parametrize.register_parametrization(base_layer, self.parameter_name, proxy)
+        # Transformers executes expert kernels on local tensors. The proxy returns the local updated shard, not a
+        # gathered full weight; its shape intentionally differs from the DTensor's logical global shape.
+        nn.utils.parametrize.register_parametrization(base_layer, self.parameter_name, proxy, unsafe=local_tensor)
         # set requires_grad, as it defaults to False
         base_layer.parametrizations[self.parameter_name].original.requires_grad_(requires_grad_before)
         try:
