@@ -123,7 +123,7 @@ trainer = SFTTrainer(
 trainer.accelerator.print(f"{trainer.model}")
 if model_args.use_peft_lora:
     # handle PEFT+FSDP case
-    trainer.model.print_trainable_parameters()
+    trainer.model.print_healthcheck()
     if getattr(trainer.accelerator.state, "fsdp_plugin", None):
         from peft.utils.other import fsdp_auto_wrap_policy
 
@@ -143,7 +143,7 @@ trainer.save_model()
 ```
 
 
-Here, one main thing to note currently when using FSDP with PEFT is that `use_orig_params` needs to be `False` to realize GPU memory savings. Due to `use_orig_params=False`, the auto wrap policy for FSDP needs to change so that trainable and non-trainable parameters are wrapped separately. This is done by the code snippt below which uses the util function `fsdp_auto_wrap_policy` from PEFT:
+Here, one main thing to note currently when using FSDP with PEFT is that `use_orig_params` needs to be `False` to realize GPU memory savings. Due to `use_orig_params=False`, the auto wrap policy for FSDP needs to change so that trainable and non-trainable parameters are wrapped separately. This is done by the code snippet below which uses the util function `fsdp_auto_wrap_policy` from PEFT:
 
 ```
 if getattr(trainer.accelerator.state, "fsdp_plugin", None):
@@ -283,3 +283,4 @@ You can also refer the [llama-recipes](https://github.com/facebookresearch/llama
 3. GPU Memory saving when using CPU Offloading is untested at present.
 4. When using FSDP+QLoRA, `paged_adamw_8bit` currently results in an error when saving a checkpoint.
 5. DoRA training with FSDP should work (albeit at lower speed than LoRA). If combined with bitsandbytes (QDoRA), 4-bit quantization should also work, but 8-bit quantization has known issues and is not recommended.
+6. With FSDP2, `set_adapter()`, `set_requires_grad()` and exiting `disable_adapter()` reshard the FSDP2 modules inside the [`PeftModel`], including the `PeftModel` itself, so that `requires_grad` changes reach the sharded parameters. FSDP2 modules that shard parameters of a merged adapter layer are not resharded, so unmerge before calling these methods. With `reshard_after_forward=False`, or for the root module with the default `None`, the next forward all-gathers again. FSDP2 modules that wrap the `PeftModel` are not resharded; call `reshard()` on them before these methods. Because these calls leave the base weights sharded, merging right after them doesn't work correctly (see 1). Prompt learning methods and adaption prompt are not covered yet.

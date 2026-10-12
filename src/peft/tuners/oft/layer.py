@@ -285,11 +285,10 @@ class OFTRotationModule(nn.Module):
 
     def get_weight(self):
         """
-        Compute the delta weight for the given adapter.
+        Compute the delta weight for the current layer.
 
-        Args:
-            adapter (str):
-                The name of the adapter for which the delta weight should be computed.
+        Returns:
+            `torch.Tensor`: The delta weight applied by this OFT layer.
         """
         weight = self.weight
 

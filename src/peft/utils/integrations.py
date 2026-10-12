@@ -33,6 +33,22 @@ class TpInfo:
     tp_size: int
 
 
+# Vendored from:
+# https://github.com/huggingface/transformers/blob/4815a0a6a064214f2d8208c094464a5a6b76ca8d/src/transformers/distributed/sharding_utils.py#L321
+def dtensor_from_local_like(local_tensor: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
+    """Wrap `local_tensor` as a DTensor mirroring `ref`'s mesh, placements, global shape and stride."""
+    from torch.distributed.tensor import DTensor
+
+    return DTensor.from_local(
+        local_tensor.contiguous(),
+        ref.device_mesh,
+        ref.placements,
+        run_check=False,
+        shape=ref.shape,
+        stride=tuple(ref.stride()),
+    )
+
+
 def check_deepspeed_zero3_enabled() -> bool:
     if packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.33.0"):
         from transformers.integrations import is_deepspeed_zero3_enabled
@@ -58,6 +74,20 @@ def gather_params_ctx(
     with deepspeed.zero.GatheredParameters(param, modifier_rank=modifier_rank, fwd_module=fwd_module):
         yield
     return
+
+
+def get_fsdp_modules(model: nn.Module) -> list[nn.Module]:
+    """Return the FSDP2 modules in `model`, including `model` itself."""
+    if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
+        return []
+
+    try:
+        from torch.distributed.fsdp import FSDPModule
+    except ImportError:
+        # FSDP2 is public from torch 2.6 on
+        return []
+
+    return [module for module in model.modules() if isinstance(module, FSDPModule)]
 
 
 def dequantize_module_weight(module: torch.nn.Module) -> torch.nn.Parameter:

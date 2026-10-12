@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import collections
+import contextlib
 import copy
 import inspect
 import os
@@ -40,10 +41,10 @@ from transformers.modeling_outputs import QuestionAnsweringModelOutput, Sequence
 from transformers.utils import PushToHubMixin
 
 from peft.tuners.lora.variants import get_alora_offsets_for_forward, get_alora_offsets_for_generate
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, _delete_auxiliary_adapter
 from peft.utils import AuxiliaryTrainingWrapper
 from peft.utils.constants import DUMMY_MODEL_CONFIG
-from peft.utils.integrations import init_empty_weights
+from peft.utils.integrations import get_fsdp_modules, init_empty_weights
 from peft.utils.other import TrainableTokensWrapper, create_attention_mask, set_additional_trainable_modules
 
 from . import __version__
@@ -114,6 +115,26 @@ def _get_return_dict_transformers_v4(config) -> bool:
     """
     # TODO: remove this function once Transformers v4 is no longer supported
     return getattr(config, "return_dict", True) and not getattr(config, "torchscript", False)
+
+
+# Task heads that sequence and token classification models add to `modules_to_save`. `pre_classifier` is randomly
+# initialized in DistilBERT-style sequence classification heads and thus has to be trained and saved alongside
+# `classifier`.
+CLASSIFIER_MODULE_NAMES = ("classifier", "score", "pre_classifier")
+
+
+def _add_modules_to_save(peft_config: PeftConfig, module_names: Sequence[str]) -> None:
+    """Add a task head's module names to `peft_config.modules_to_save`.
+
+    The config belongs to the caller and is stored by reference, so the list is rebound instead of extended in place,
+    and names that are already present are skipped. This way, reusing the same config (e.g. across cross-validation
+    folds) neither accumulates duplicates nor changes the configs of models that were already created from it.
+    """
+    if peft_config.modules_to_save is None:
+        peft_config.modules_to_save = list(module_names)
+    else:
+        existing = list(peft_config.modules_to_save)
+        peft_config.modules_to_save = existing + [name for name in module_names if name not in existing]
 
 
 class PeftModel(PushToHubMixin, torch.nn.Module):
@@ -306,6 +327,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 adapter_name=adapter_name,
                 save_embedding_layers=save_embedding_layers,
             )
+
             output_dir = os.path.join(save_directory, adapter_name) if adapter_name != "default" else save_directory
             os.makedirs(output_dir, exist_ok=True)
 
@@ -377,9 +399,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     if peft_config.is_prompt_learning
                     else self.base_model.model.__dict__.get("name_or_path", None)
                 ) or None
-            inference_mode = peft_config.inference_mode
-            peft_config.inference_mode = True
-
             if peft_config.task_type is None:
                 # deal with auto mapping
                 base_model_class = self._get_base_model_class(
@@ -409,8 +428,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     if peft_config.alpha_pattern:
                         peft_config.alpha_pattern = {key: 2 * val for key, val in peft_config.alpha_pattern.items()}
 
-                peft_config.save_pretrained(output_dir, auto_mapping_dict=auto_mapping_dict)
-            peft_config.inference_mode = inference_mode
+                inference_mode = peft_config.inference_mode
+                peft_config.inference_mode = True
+                try:
+                    peft_config.save_pretrained(output_dir, auto_mapping_dict=auto_mapping_dict)
+                finally:
+                    peft_config.inference_mode = inference_mode
 
     @classmethod
     def from_pretrained(
@@ -464,14 +487,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
                 Create empty adapter weights on meta device before loading the saved weights. Useful to speed up the
                 process.
-            torch_device (`str`, *optional*, defaults to None):
-                The device to load the adapter on. If `None`, the device will be inferred.
             key_mapping (dict, *optional*, defaults to None)
                 Extra mapping of PEFT `state_dict` keys applied before loading the `state_dict`. When this mapping is
                 applied, the PEFT-specific `"base_model.model"` prefix is removed beforehand and the adapter name (e.g.
                 `"default"`) is not inserted yet. Only pass this argument if you know what you're doing.
             kwargs: (`optional`):
-                Additional keyword arguments passed along to the specific PEFT configuration class.
+                Additional keyword arguments passed along to the specific PEFT configuration class. This includes
+                `torch_device` (`str`, *optional*): the device to load the adapter on (forwarded to
+                [`load_adapter`][PeftModel.load_adapter]); if `None`, the device will be inferred.
 
         """
         from .auto import MODEL_TYPE_TO_PEFT_MODEL_MAPPING
@@ -1071,6 +1094,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             finally:
                 if model_status.enabled is not False:
                     # model_status.enabled is `True` or `"irregular"`
+                    # with FSDP2, re-enabling has to reach the sharded parameters; it decides the final state, so
+                    # disabling doesn't need to reshard
+                    self._reshard_fsdp_modules()
                     self.base_model.enable_adapter_layers()
                 self._adapters_disabled = was_disabled
 
@@ -1171,6 +1197,28 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if adapter_name not in self.peft_config:
             raise ValueError(f"Adapter {adapter_name} does not exist")
 
+        if self.peft_config[adapter_name].is_prompt_learning:
+            # The state of prompt learning methods lives on the PeftModel itself, so deletion cannot be delegated to
+            # self.base_model, which is the base model and not a tuner.
+            del self.peft_config[adapter_name]
+            del self.prompt_encoder[adapter_name]
+            del self.prompt_tokens[adapter_name]
+            remaining_adapters = list(self.peft_config)
+            _delete_auxiliary_adapter(
+                self.base_model, adapter_name=adapter_name, new_active_adapters=remaining_adapters or None
+            )
+            if adapter_name in self.active_adapters:
+                if not remaining_adapters:
+                    self.active_adapter = []
+                else:
+                    new_active_adapter = remaining_adapters[0]
+                    warnings.warn(
+                        f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to "
+                        f"{new_active_adapter}."
+                    )
+                    self.active_adapter = new_active_adapter
+            return
+
         self.base_model.delete_adapter(adapter_name=adapter_name)
         new_active_adapters = self.active_adapters
         num_adapters = len(new_active_adapters)
@@ -1259,6 +1307,72 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         """
         return get_model_status(self)
+
+    def healthcheck(self, min_trainable_params: int = 1, max_trainable_params_percent=50) -> dict[str, Any]:
+        """Check this model for adapter states that are suspicious before training.
+
+        This function summarizes the model and layer status APIs, and includes findings for inconsistent adapter state,
+        merged adapters, and implausible numbers of trainable parameters. It does not validate the training loop,
+        optimizer, or dataset. A status will be reported as `"irregular"` if inconsistencies are found in the model,
+        e.g. when for the same adapter, some layers are enabled and some layers are disabled. This almost always means
+        that something went wrong and that you should check that you didn't accidentally change some attributes on the
+        model incorrectly.
+
+        If the check found something suspicious, it will be reported in the `"findings"` field. An empty `"findings""`
+        list means that no suspicious adapter state was detected, not that a training run is guaranteed to succeed.
+
+        Args:
+            min_trainable_params (`int`, *optional*, default=`1`)
+                Minimum expected number of parameters. If less than those are found, this is reported as an error.
+            max_trainable_params_percent (`int`, *optional*, default=`50`)
+                The maximum percentage of parameters that should be trainable. If more than those are found, this is
+                reported as a warning.
+
+        Returns:
+            result
+                Dictionary containing the different findings. The returned dictionary is JSON-serializable.
+        """
+        from .utils.healthcheck import run_healthcheck
+
+        return run_healthcheck(
+            self, min_trainable_params=min_trainable_params, max_trainable_params_percent=max_trainable_params_percent
+        )
+
+    def print_healthcheck(
+        self, sink=print, min_trainable_params: int = 1, max_trainable_params_percent=50, **kwargs
+    ) -> None:
+        """
+        Print a compact, human-readable healthcheck report.
+
+        The output summarizes the state of your PEFT model and includes findings for inconsistent adapter state, merged
+        adapters, and implausible numbers of trainable parameters. It does not validate the training loop, optimizer,
+        or dataset. A status will be reported as `"irregular"` if inconsistencies are found in the model, e.g. when for
+        the same adapter, some layers are enabled and some layers are disabled. This almost always means that something
+        went wrong and that you should check that you didn't accidentally change some attributes on the model
+        incorrectly.
+
+        If issues were detected, they will be shown in the last section under "findings". If no issues were detected,
+        it does mean that a training run is guaranteed to succeed.
+
+        Args:
+            sink (`callable`, *optional*, default=`print`)
+                Function which is called to print the output. By default, just the builtin `print` function, but can
+                also be something else like `logger.info`.
+            min_trainable_params (`int`, *optional*, default=`1`)
+                Minimum expected number of parameters. If less than those are found, this is reported as an error.
+            max_trainable_params_percent (`int`, *optional*, default=`50`)
+                The maximum percentage of parameters that should be trainable. If more than those are found, this is
+                reported as a warning.
+            kwargs
+                Further keyword arguments are passed along to `format_healthcheck`.
+        """
+        from .utils.healthcheck import format_healthcheck
+
+        healthcheck = self.healthcheck(
+            min_trainable_params=min_trainable_params,
+            max_trainable_params_percent=max_trainable_params_percent,
+        )
+        sink(format_healthcheck(healthcheck, **kwargs))
 
     @classmethod
     def _split_kwargs(cls, kwargs: dict[str, Any]):
@@ -1382,6 +1496,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     "https://github.com/huggingface/peft/tree/main/examples/corda_finetuning#convert-corda-to-lora"
                 )
                 warnings.warn(msg)
+            elif any(getattr(config, "init_lora_weights", None) == "astra" for config in all_configs):
+                msg = (
+                    "Astra changes the base weights of the model and should thus not be used with other adapters. "
+                    "Consider converting the Astra adapter into a normal LoRA adapter: "
+                    "https://github.com/huggingface/peft/tree/main/examples/astra_finetuning"
+                    "#convert-astra-to-a-standard-lora-adapter"
+                )
+                warnings.warn(msg)
             elif any(getattr(config, "init_lora_weights", None) == "olora" for config in all_configs):
                 msg = (
                     "OLoRA changes the base weights of the model and should thus not be used with other adapters. "
@@ -1478,13 +1600,20 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         # load the weights into the model
         ignore_mismatched_sizes = kwargs.get("ignore_mismatched_sizes", False)
-        load_result = set_peft_model_state_dict(
-            self,
-            adapters_weights,
-            adapter_name=adapter_name,
-            ignore_mismatched_sizes=ignore_mismatched_sizes,
-            low_cpu_mem_usage=low_cpu_mem_usage,
-        )
+        if self.peft_config[adapter_name].is_adaption_prompt:
+            # the modules of an inactive adaption prompt adapter are cached outside of the model, so they have to be
+            # swapped in before their weights can be loaded
+            load_context = self.base_model._temporarily_active(adapter_name)
+        else:
+            load_context = contextlib.nullcontext()
+        with load_context:
+            load_result = set_peft_model_state_dict(
+                self,
+                adapters_weights,
+                adapter_name=adapter_name,
+                ignore_mismatched_sizes=ignore_mismatched_sizes,
+                low_cpu_mem_usage=low_cpu_mem_usage,
+            )
 
         tuner = self.peft_config[adapter_name].peft_type
         tuner_prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(tuner, "")
@@ -1590,6 +1719,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         if adapter_name not in self.peft_config:
             raise ValueError(f"Adapter {adapter_name} not found.")
+        self._reshard_fsdp_modules()
         self.active_adapter = adapter_name
         if not self.peft_config[adapter_name].is_prompt_learning:
             # _set_adapter does not need to be called, since it's called through the BaseTuner class.
@@ -1616,7 +1746,38 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 f"{self.active_peft_config.peft_type.value}."
             )
 
+        self._reshard_fsdp_modules()
         self.base_model.set_requires_grad(adapter_names=adapter_names, requires_grad=requires_grad)
+
+    def _reshard_fsdp_modules(self) -> None:
+        """
+        Reshard the FSDP2 modules in this model, including itself, so that changes to `requires_grad` land on the
+        sharded parameters. Must be called on all ranks, since a resharded module is all-gathered again in its next
+        forward.
+        """
+        fsdp_modules = set(get_fsdp_modules(self))
+        if not fsdp_modules:
+            return
+
+        # resharding drops the unsharded parameters, including weights that were merged into them, so FSDP modules
+        # that shard parameters of a merged layer are skipped
+        merged_modules = {
+            submodule
+            for tuner_layer in self.modules()
+            if isinstance(tuner_layer, BaseTunerLayer) and tuner_layer.merged
+            for submodule in tuner_layer.modules()
+        }
+        for fsdp_module in fsdp_modules:
+            if merged_modules:
+                # an FSDP module shards the parameters of its submodules, except those inside nested FSDP modules
+                sharded_modules, stack = set(), [fsdp_module]
+                while stack:
+                    module = stack.pop()
+                    sharded_modules.add(module)
+                    stack.extend(child for child in module.children() if child not in fsdp_modules)
+                if not sharded_modules.isdisjoint(merged_modules):
+                    continue
+            fsdp_module.reshard()
 
     @property
     def base_model_torch_dtype(self):
@@ -1796,13 +1957,8 @@ class PeftModelForSequenceClassification(PeftModel):
     def __init__(
         self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default", **kwargs
     ) -> None:
-        classifier_module_names = ["classifier", "score"]
-
         if hasattr(peft_config, "modules_to_save"):
-            if peft_config.modules_to_save is None:
-                peft_config.modules_to_save = classifier_module_names[:]
-            else:
-                peft_config.modules_to_save.extend(classifier_module_names)
+            _add_modules_to_save(peft_config, CLASSIFIER_MODULE_NAMES)
 
         # The modification of peft_config must happen before the init call as the `modules_to_save` information
         # will be used to guard the target layer matching against matching `modules_to_save` layers. Only the
@@ -1856,13 +2012,14 @@ class PeftModelForSequenceClassification(PeftModel):
         """
         # ensure that additional adapters also add the classifier layer to modules_to_save
         if hasattr(peft_config, "modules_to_save"):
-            classifier_module_names = ["classifier", "score"]
-            if peft_config.modules_to_save is None:
-                peft_config.modules_to_save = classifier_module_names[:]
-            else:
-                peft_config.modules_to_save.extend(classifier_module_names)
+            _add_modules_to_save(peft_config, CLASSIFIER_MODULE_NAMES)
 
-        return super().add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
+        return super().add_adapter(
+            adapter_name,
+            peft_config,
+            low_cpu_mem_usage=low_cpu_mem_usage,
+            autocast_adapter_dtype=autocast_adapter_dtype,
+        )
 
     def forward(
         self,
@@ -2385,9 +2542,6 @@ class PeftModelForSeq2SeqLM(PeftModel):
     ) -> None:
         super().__init__(model, peft_config, adapter_name, **kwargs)
         self.base_model_prepare_inputs_for_generation = self.base_model.prepare_inputs_for_generation
-        self.base_model_prepare_encoder_decoder_kwargs_for_generation = (
-            self.base_model._prepare_encoder_decoder_kwargs_for_generation
-        )
 
     def forward(
         self,
@@ -2518,9 +2672,6 @@ class PeftModelForSeq2SeqLM(PeftModel):
     def generate(self, **kwargs):
         peft_config = self.active_peft_config
         self.base_model.prepare_inputs_for_generation = self.prepare_inputs_for_generation
-        self.base_model._prepare_encoder_decoder_kwargs_for_generation = (
-            self._prepare_encoder_decoder_kwargs_for_generation
-        )
         try:
             if not peft_config.is_prompt_learning:
                 with self._enable_peft_forward_hooks(**kwargs):
@@ -2564,20 +2715,14 @@ class PeftModelForSeq2SeqLM(PeftModel):
                         )
                         kwargs["attention_mask"] = torch.cat((prefix_attention_mask, kwargs["attention_mask"]), dim=1)
 
-                    return self.base_model.generate(**kwargs)
+                    outputs = self.base_model.generate(**kwargs)
                 else:
                     raise NotImplementedError
         except Exception:
             self.base_model.prepare_inputs_for_generation = self.base_model_prepare_inputs_for_generation
-            self.base_model._prepare_encoder_decoder_kwargs_for_generation = (
-                self.base_model_prepare_encoder_decoder_kwargs_for_generation
-            )
             raise
         else:
             self.base_model.prepare_inputs_for_generation = self.base_model_prepare_inputs_for_generation
-            self.base_model._prepare_encoder_decoder_kwargs_for_generation = (
-                self.base_model_prepare_encoder_decoder_kwargs_for_generation
-            )
             return outputs
 
     def prepare_inputs_for_generation(self, *args, task_ids: torch.Tensor = None, **kwargs):
@@ -2653,12 +2798,8 @@ class PeftModelForTokenClassification(PeftModel):
     ) -> None:
         super().__init__(model, peft_config, adapter_name, **kwargs)
 
-        classifier_module_names = ["classifier", "score"]
         if hasattr(peft_config, "modules_to_save"):
-            if peft_config.modules_to_save is None:
-                peft_config.modules_to_save = classifier_module_names[:]
-            else:
-                peft_config.modules_to_save.extend(classifier_module_names)
+            _add_modules_to_save(peft_config, CLASSIFIER_MODULE_NAMES)
 
         for name, _ in self.base_model.named_children():
             if any(module_name in name for module_name in self.modules_to_save):
@@ -2707,13 +2848,14 @@ class PeftModelForTokenClassification(PeftModel):
         """
         # ensure that additional adapters also add the classifier layer to modules_to_save
         if hasattr(peft_config, "modules_to_save"):
-            classifier_module_names = ["classifier", "score"]
-            if peft_config.modules_to_save is None:
-                peft_config.modules_to_save = classifier_module_names[:]
-            else:
-                peft_config.modules_to_save.extend(classifier_module_names)
+            _add_modules_to_save(peft_config, CLASSIFIER_MODULE_NAMES)
 
-        return super().add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
+        return super().add_adapter(
+            adapter_name,
+            peft_config,
+            low_cpu_mem_usage=low_cpu_mem_usage,
+            autocast_adapter_dtype=autocast_adapter_dtype,
+        )
 
     def forward(
         self,
@@ -2885,10 +3027,7 @@ class PeftModelForQuestionAnswering(PeftModel):
 
         qa_module_names = ["qa_outputs"]
         if hasattr(peft_config, "modules_to_save"):
-            if peft_config.modules_to_save is None:
-                peft_config.modules_to_save = qa_module_names[:]
-            else:
-                peft_config.modules_to_save.extend(qa_module_names)
+            _add_modules_to_save(peft_config, qa_module_names)
 
         for name, _ in self.base_model.named_children():
             if any(module_name in name for module_name in self.modules_to_save):
@@ -2938,12 +3077,14 @@ class PeftModelForQuestionAnswering(PeftModel):
         # ensure that additional adapters also add the classifier layer to modules_to_save
         if hasattr(peft_config, "modules_to_save"):
             qa_module_names = ["qa_outputs"]
-            if peft_config.modules_to_save is None:
-                peft_config.modules_to_save = qa_module_names[:]
-            else:
-                peft_config.modules_to_save.extend(qa_module_names)
+            _add_modules_to_save(peft_config, qa_module_names)
 
-        return super().add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
+        return super().add_adapter(
+            adapter_name,
+            peft_config,
+            low_cpu_mem_usage=low_cpu_mem_usage,
+            autocast_adapter_dtype=autocast_adapter_dtype,
+        )
 
     def forward(
         self,
@@ -3479,6 +3620,7 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
     else:
         quantization_backend = "irregular"
 
+    # TODO: consider adding info about tied modules (_get_module_names_tied_with_embedding) and DTensors here
     adapter_model_status = TunerModelStatus(
         base_model_type=base_model_type,
         adapter_model_type=adapter_model_type,

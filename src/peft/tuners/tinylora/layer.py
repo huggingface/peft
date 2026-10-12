@@ -58,9 +58,9 @@ class TinyLoraLayer(BaseTunerLayer):
         # PyTorch won't double-register the same ModuleDict object across layers.
         self.tinylora_v: Optional[nn.ModuleDict] = None
 
-        # Direct references to this adapter's v parameter, cached for O(1) forward pass access.
-        # Plain dict to avoid PyTorch double-registering the same Parameter.
-        self._tinylora_v_ref: dict[str, nn.Parameter] = {}
+        # Key into `self.tinylora_v[adapter_name]` for this adapter's v parameter. Looked up fresh on every
+        # access (see `_compute_R`) rather than caching the `nn.Parameter` object itself.
+        self._tinylora_v_key: dict[str, str] = {}
 
         # Frozen SVD components as buffers (following LoRA-XS convention)
         # tinylora_A corresponds to V from SVD (shape: r x in_features)
@@ -81,7 +81,7 @@ class TinyLoraLayer(BaseTunerLayer):
     def _all_available_adapter_names(self) -> list[str]:
         """Return a sorted list of all available adapter names."""
         adapter_names = set()
-        adapter_names.update(self._tinylora_v_ref.keys())
+        adapter_names.update(self._tinylora_v_key.keys())
         for name in self.other_param_names:
             attr = getattr(self, name, None)
             if attr is not None and hasattr(attr, "keys"):
@@ -91,8 +91,8 @@ class TinyLoraLayer(BaseTunerLayer):
     def delete_adapter(self, adapter_name: str) -> None:
         """Delete an adapter from the layer."""
         # Delete direct v reference
-        if adapter_name in self._tinylora_v_ref:
-            del self._tinylora_v_ref[adapter_name]
+        if adapter_name in self._tinylora_v_key:
+            del self._tinylora_v_key[adapter_name]
 
         # Delete from other params that use adapter name directly
         for attr in self.other_param_names:
@@ -172,8 +172,7 @@ class TinyLoraLayer(BaseTunerLayer):
 
         # Store reference to model-level ModuleDict (for base class parameter management)
         self.tinylora_v = tinylora_v
-        # Cache direct reference to this adapter's v parameter for O(1) forward pass access
-        self._tinylora_v_ref[adapter_name] = tinylora_v[adapter_name][v_key]
+        self._tinylora_v_key[adapter_name] = v_key
 
         # Compute truncated SVD of base weights (following LoRA-XS convention)
         # actual_r may be less than r if matrix dimensions are smaller
@@ -243,7 +242,7 @@ class TinyLoraLayer(BaseTunerLayer):
 
     def _compute_R(self, adapter_name: str) -> torch.Tensor:
         """Reconstruct R matrix from v and P: R = sum_i(v[i] * P[i])."""
-        v = self._tinylora_v_ref[adapter_name]  # Shape: (u,)
+        v = self.tinylora_v[adapter_name][self._tinylora_v_key[adapter_name]]  # Shape: (u,)
         P = self.tinylora_P[adapter_name]  # Shape: (u, r, r)
 
         # Move P to same device/dtype as v
@@ -478,8 +477,7 @@ class Embedding(nn.Module, TinyLoraLayer):
 
         # Store reference to model-level ModuleDict (for base class parameter management)
         self.tinylora_v = tinylora_v
-        # Cache direct reference to this adapter's v parameter for O(1) forward pass access
-        self._tinylora_v_ref[adapter_name] = tinylora_v[adapter_name][v_key]
+        self._tinylora_v_key[adapter_name] = v_key
 
         # Compute truncated SVD of embedding weights
         self._init_svd_embedding(adapter_name, r)

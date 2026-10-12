@@ -22,9 +22,9 @@ We are happy to accept contributions to PEFT. If you plan to contribute, please 
 
 Before opening a pull request (including a draft), open or find an issue in [huggingface/peft](https://github.com/huggingface/peft/issues) and discuss your proposed contribution. If there is an existing issue and someone is already working on it, has declared their intent to work on it, or has an open PR, you should not submit a separate PR. Wait for a PEFT maintainer or Hugging Face member to explicitly approve the proposal. If you open an issue, keep the length and complexity of the description in proportion with the complexity of the issue. Often, a short description with a reproducer is more valuable than a long description.
 
-Link the approved issue in your PR description using `#123`, `huggingface/peft#123`, or `https://github.com/huggingface/peft/issues/123`. For example, write `Fixes #123`. The reference must point to an issue in the PEFT repository. If you reference several issues, approval on one is sufficient.
+Link the approved, open issue in your PR description using `#123`, `huggingface/peft#123`, or `https://github.com/huggingface/peft/issues/123`. As an exception, maintainers may designate specific long-running discussions that can be referenced by their full GitHub URL without a separate approval comment. If you reference several issues or discussions, one valid reference is sufficient.
 
-An automated workflow checks PRs for corresponding issues with approvals. PRs without verified approval are automatically closed with an explanation. You can obtain approval, update the PR description, and reopen the same PR; please do not create a replacement. If you believe your PR was closed incorrectly, ping the maintainers on the PR.
+An automated workflow checks PRs for approved open issues or discussions. PRs without a valid reference are automatically closed with an explanation. You can obtain issue approval, update the PR description, and reopen the same PR; please do not create a replacement. If you believe your PR was closed incorrectly, ping the maintainers on the PR.
 
 The independent stale bot can still close inactive items, even if labeled as `triaged`. If you feel like the maintainers have overlooked your contribution, you may ping them, but not earlier than before two weeks of inactivity.
 
@@ -74,6 +74,9 @@ If you are new to creating a pull request, follow the [Creating a pull request](
 
 Regardless of the contribution type (unless it’s only about the docs), you should run tests and code quality checks before creating a PR to ensure your contribution doesn’t break anything and follows the project standards.
 
+
+### Running test and checks
+
 We provide a Makefile to execute the necessary tests. Run the code below for the unit test:
 
 ```sh
@@ -105,7 +108,13 @@ pytest tests/<test-file-name> -k <name-of-test>
 
 This should finish much quicker and allow for faster iteration.
 
+### Adding tests
+
+For a general guide on adding new tests, check `tests/README.md`.
+
 If your change is specific to a hardware setting (e.g., it requires CUDA), take a look at [`tests/test_gpu_examples.py`](https://github.com/huggingface/peft/blob/1c1c7fdaa6e6abaa53939b865dee1eded82ad032/tests/test_gpu_examples.py) and [`tests/test_common_gpu.py`](https://github.com/huggingface/peft/blob/1c1c7fdaa6e6abaa53939b865dee1eded82ad032/tests/test_common_gpu.py) to see if it makes sense to add tests there. If your change could have an effect on saving and loading models, please run the tests with the `--regression` flag to trigger regression tests.
+
+## Stale PRs
 
 It can happen that while you’re working on your PR, the underlying code base changes due to other changes being merged. If that happens – especially when there is a merge conflict – please update your branch with the latest changes. This can be a merge or a rebase, and we'll squash and merge the PR once it’s ready. If possible, **avoid force pushes** to make reviews easier.
 
