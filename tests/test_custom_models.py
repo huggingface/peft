@@ -3622,6 +3622,27 @@ class TestPeftCustomModel(PeftCommonTester):
         for key, value in state_dict_before.items():
             assert torch.equal(state_dict_after[key], value)
 
+    def test_set_adapter_on_merged_model_warns_and_unmerges(self, recwarn):
+        # Switching the active adapter on a model with a merged layer has to unmerge that layer first, a merge
+        # and a newly active adapter can't coexist, and it should warn about doing so, since the caller may not
+        # expect their merge to be undone as a side effect of switching adapters.
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False))
+        model.add_adapter("other", LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False))
+        msg = "Adapter cannot be set when the model is merged. Unmerging the model first."
+
+        # sanity check: nothing is merged yet, so switching the adapter should not warn about a merge
+        model.set_adapter("default")
+        assert not any(msg in str(warning.message) for warning in recwarn.list)
+
+        model.merge_adapter()
+        assert model.base_model.model.lin0.merged
+
+        with pytest.warns(UserWarning, match=msg):
+            model.set_adapter("other")
+
+        assert not model.base_model.model.lin0.merged
+        assert model.active_adapter == "other"
+
     @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
     def test_set_adapter_non_overlapping_modules(self, config_cls):
         # Ensure that when setting multiple adapters, the active adapters are correctly being set, even if
@@ -8505,6 +8526,29 @@ class TestFsdp2UnshardedParams:
         model.set_adapter("other")
         assert all(param.requires_grad for param in other_params)
         assert not any(param.requires_grad for param in default_params)
+
+    def test_set_adapter_after_merge_keeps_training_new_adapter(self):
+        # Regression test for #3872: set_adapter() reshards before base_model.set_adapter() unmerges a merged
+        # layer, so the reshard is skipped (resharding a merged layer would drop the merge) and the new adapter's
+        # requires_grad=True lands on a transient unsharded copy instead of the FSDP2 shard. The first backward
+        # still trains the new adapter through that unsharded copy, but it also reshards, so a second backward
+        # gathers from the shard, where the new adapter is still frozen, and silently trains nothing.
+        model = self.get_model(adapter_names=("default", "other"))
+        other_params = self.get_lora_params(model, "other")
+        X = self.get_input()
+
+        with torch.no_grad():
+            model(X)
+        model.merge_adapter()
+        model.set_adapter("other")
+
+        for _ in range(3):
+            for param in other_params:
+                param.grad = None
+            loss = model(X).sum()
+            assert loss.requires_grad, "no trainable adapter is active"
+            loss.backward()
+            assert all(param.grad is not None for param in other_params)
 
     @pytest.mark.parametrize("merged_name, other_name", [("lin0", "lin1"), ("lin1", "lin0")])
     def test_set_requires_grad_with_merged_layer_in_other_fsdp_module(self, merged_name, other_name):
