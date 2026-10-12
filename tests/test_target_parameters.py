@@ -821,7 +821,7 @@ class TestTargetParameters:
         "target_modules",
         [
             ["down_proj"],
-            ["gate_proj", "down_proj"],
+            ["gate_proj", "up_proj", "down_proj"],
             ["shared_experts.down_proj"],
             ["shared_experts.gate_proj", "shared_experts.down_proj"],
             ["mlp.shared_experts.down_proj"],
@@ -853,9 +853,16 @@ class TestTargetParameters:
         )
         peft_model = get_peft_model(deepseek_model, lora_config)
 
+        # bare names also refer to the routed experts, which must be targeted as well, see #3945
+        expected_target_parameters = set(target_parameters)
+        if "down_proj" in target_modules:
+            expected_target_parameters.add("down_proj")
+        if "gate_proj" in target_modules:
+            expected_target_parameters.add("gate_up_proj")
+
         # check the rewritten config
         assert peft_model.peft_config["default"].target_modules == set(target_modules)
-        assert peft_model.peft_config["default"].target_parameters == set(target_parameters or [])
+        assert peft_model.peft_config["default"].target_parameters == expected_target_parameters
 
         # check the lora modules
         # for some modules, whether they're targeted depends on the parametrization
@@ -866,12 +873,12 @@ class TestTargetParameters:
         assert isinstance(mlp1.shared_experts.down_proj, Linear)
 
         # remember: for the param wrapper, the *parent module* is wrapped
-        if len(target_parameters or []) == 0:
+        if not expected_target_parameters:
             assert not isinstance(mlp1.experts, ParamWrapper)
         else:
             assert isinstance(mlp1.experts, ParamWrapper)
             assert mlp1.experts.parameter_name == "down_proj"
-        if len(target_parameters or []) > 1:
+        if any(name.endswith("gate_up_proj") for name in expected_target_parameters):
             # 2 targets: -> nested ParamWrapper
             assert isinstance(mlp1.experts.base_layer, ParamWrapper)
             assert mlp1.experts.base_layer.parameter_name == "gate_up_proj"
@@ -1064,7 +1071,7 @@ class TestTargetParameters:
         assert all("other" in adapter.lora_A for adapter in adapters)
 
     @pytest.mark.parametrize("target_modules", [["down_proj"], r".*\.down_proj"], ids=["suffix", "regex"])
-    @pytest.mark.xfail(strict=True, reason="Broad MoE targets still omit dense modules")
+    @pytest.mark.xfail(strict=True, reason="Broad MoE targets are not scoped to layers in the converted config")
     def test_qwen_target_can_match_dense_modules_and_expert_parameters(self, qwen_model, target_modules):
         # down_proj can refer to both nn.Linear in layer 0 and MoE in layer 1 & 2
         config = LoraConfig(r=2, target_modules=target_modules)
