@@ -24,7 +24,7 @@ from collections.abc import Sequence
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal, Optional, Self, Union
 
 import packaging.version
 import torch
@@ -448,7 +448,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         low_cpu_mem_usage: bool = False,
         key_mapping: Optional[dict[str, str]] = None,
         **kwargs: Any,
-    ) -> PeftModel:
+    ) -> Self:
         r"""
         Instantiate a PEFT model from a pretrained model and loaded PEFT weights.
 
