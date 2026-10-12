@@ -317,10 +317,7 @@ class LoraModel(BaseTuner):
         tied_adapter = {}
         if is_tied:
             tied_module = self.model.get_input_embeddings()
-            emb_A = tied_module.lora_embedding_A[adapter_name]
-            emb_B = tied_module.lora_embedding_B[adapter_name]
-
-            tied_adapter = {"lora_A": emb_B.t(), "lora_B": emb_A.t()}
+            tied_adapter = {"lora_A": tied_module.lora_embedding_B, "lora_B": tied_module.lora_embedding_A}
 
         kwargs = {
             "r": r,
@@ -375,6 +372,7 @@ class LoraModel(BaseTuner):
                 lora_alpha=alpha,
                 target_name=current_key,
                 config=lora_config,
+                tied_adapter=tied_adapter,
             )
 
             base_layer = target.get_base_layer()
