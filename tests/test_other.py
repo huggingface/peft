@@ -28,7 +28,17 @@ from transformers import (
     LlavaForConditionalGeneration,
 )
 
-from peft import LoHaConfig, LoraConfig, PeftModel, VeraConfig, get_peft_model, get_peft_model_state_dict
+from peft import (
+    AdaLoraConfig,
+    HiraConfig,
+    IA3Config,
+    LoHaConfig,
+    LoraConfig,
+    PeftModel,
+    VeraConfig,
+    get_peft_model,
+    get_peft_model_state_dict,
+)
 from peft.import_utils import is_transformers_ge_v5_1_0, is_transformers_ge_v5_6_0
 from peft.utils.other import (
     ModulesToSaveWrapper,
@@ -388,11 +398,10 @@ class TestModulesToSaveUnloadNoActiveAdapter:
 
 
 class TestModulesToSaveUnloadCompositeModule:
-    """Regression test for unloading a modules_to_save module that has no weight of its own.
+    """Test unloading a modules_to_save module that is a composite module without a weight attribute.
 
     For all PEFT methods that rely on BaseTuner._replace_module (i.e. all except a few like LoRA), unloading used to
-    raise an AttributeError when the modules_to_save module is a composite module without a weight attribute, e.g.
-    RobertaClassificationHead.
+    raise an AttributeError for such modules, e.g. RobertaClassificationHead.
     """
 
     @pytest.fixture
@@ -419,19 +428,40 @@ class TestModulesToSaveUnloadCompositeModule:
         torch.manual_seed(0)
         return Model()
 
+    # The bug was in BaseTuner._replace_module, which is shared by all PEFT methods that don't override it, so checking
+    # a few of them is enough. LoRA, AdaLoRA, and HiRA override it, therefore they are checked explicitly.
+    @pytest.mark.parametrize(
+        "config_cls, config_kwargs",
+        [
+            (LoHaConfig, {}),
+            (IA3Config, {"feedforward_modules": []}),
+            (VeraConfig, {}),
+            (LoraConfig, {}),
+            (AdaLoraConfig, {"total_step": 1}),
+            (HiraConfig, {}),
+        ],
+    )
     @pytest.mark.parametrize("unload_method", ["unload", "merge_and_unload"])
-    def test_unload_composite_modules_to_save(self, model, unload_method):
+    def test_unload_composite_modules_to_save(self, model, config_cls, config_kwargs, unload_method):
         x = torch.randn(4, 8)
-        config = LoHaConfig(target_modules=["lin0"], modules_to_save=["head"], init_weights=False)
+        out_base = model(x)
+        # default init, i.e. the PEFT method is a no-op
+        config = config_cls(target_modules=["lin0"], modules_to_save=["head"], **config_kwargs)
         peft_model = get_peft_model(model, config).eval()
+
+        # change the modules_to_save copy of the head so that it produces a different output
         trained_head = peft_model.base_model.model.head.modules_to_save["default"]
+        with torch.no_grad():
+            trained_head.out_proj.bias.add_(1.0)
         out_peft = peft_model(x)
 
         unloaded = getattr(peft_model, unload_method)()
+        out_unloaded = unloaded(x)
 
+        # both unload and merge_and_unload keep the trained copy of the head
         assert unloaded.head is trained_head
-        if unload_method == "merge_and_unload":
-            assert torch.allclose(unloaded(x), out_peft, atol=1e-6, rtol=1e-6)
+        assert torch.allclose(out_unloaded, out_peft, atol=1e-6, rtol=1e-6)
+        assert not torch.allclose(out_unloaded, out_base, atol=1e-6, rtol=1e-6)
 
 
 class TestModulesToSaveNameSubstringBug:
