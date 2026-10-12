@@ -1735,12 +1735,13 @@ class TestHealthcheck:
         model.merge_adapter()  # adds a finding
         healthcheck = model.healthcheck()
 
-        output = format_healthcheck(healthcheck, sep=" | ", indent="    ")
+        # unusual values, so that they cannot match the defaults by accident
+        output = format_healthcheck(healthcheck, sep=" <~SEP~> ", indent="..>")
 
-        assert "Model:\n    ID: other | type: SmallModel | adapters: default (LORA), other (LORA)" in output
+        assert "Model:\n..>ID: other <~SEP~> type: SmallModel <~SEP~> adapters: default (LORA), other (LORA)" in output
         # every adapter in the layer types section starts on its own line
-        assert "Layer types:\n    default:\n        lora.Linear=2\n    other:\n        lora.Linear=1\n" in output
-        assert "Findings:\n    WARNING: Adapter(s) 'default' is/are merged" in output
+        assert "Layer types:\n..>default:\n..>..>lora.Linear=2\n..>other:\n..>..>lora.Linear=1\n" in output
+        assert "Findings:\n..>WARNING: Adapter(s) 'default' is/are merged" in output
 
     def test_print_healthcheck(self):
         model = self.get_peft_model()
