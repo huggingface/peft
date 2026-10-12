@@ -390,7 +390,9 @@ def _resolve_string_target_modules(
     for name in param_keys:
         container, _, leaf = name.rpartition(".")
         if leaf == "weight":
-            # "weight" is the general name for parameters (nn.Linear etc.) and would never be renamed
+            # "weight" is the general name for parameters (nn.Linear etc.) and would never be renamed. Note: The skip is
+            # not stricly needed, since below we check if new_name is in new_name_to_containers. But it's easier to
+            # debug this function if new_name_to_containers does not contain dozens of entries for "weight".
             continue
         new_name_to_containers.setdefault(leaf, set()).add(container)
 
