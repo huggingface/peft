@@ -91,7 +91,11 @@ class LoraFAOptimizer(Optimizer):
         """
         loss = None
         if closure is not None:
-            loss = closure()
+            # The closure must run with gradients enabled so it can compute the loss and call backward(),
+            # matching the behavior of PyTorch optimizers (e.g. AdamW). The parameter updates below remain
+            # under no_grad, and the caller's gradient mode is restored afterwards.
+            with torch.enable_grad():
+                loss = closure()
 
         for group in self.param_groups:
             param_list = []

@@ -449,3 +449,97 @@ def test_lorafa_respects_layer_specific_scaling_patterns(monkeypatch):
     assert torch.allclose(lin0_state["exp_avg_B"], expected_exp_avg_B(lin0, lin0_grad), rtol=1e-5, atol=1e-6), (
         "lin0 exp_avg_B does not match the expected layer-specific scaling"
     )
+
+
+def _build_closure_lorafa_model(use_rslora):
+    """Build the tiny LoRA model + optimizer used by the closure tests."""
+    torch.manual_seed(42)
+    config = LoraConfig(
+        r=2,
+        lora_alpha=2,
+        target_modules=["0"],
+        use_rslora=use_rslora,
+        bias="none",
+    )
+    model = get_peft_model(nn.Sequential(nn.Linear(4, 4, bias=False)), config).to(torch_device).train()
+    optimizer = create_lorafa_optimizer(model, r=2, lora_alpha=2, lr=1e-3)
+    return model, optimizer
+
+
+@pytest.mark.parametrize("use_rslora", [False, True])
+def test_lorafa_step_closure_enables_gradients(use_rslora):
+    """
+    Test that step(closure) runs the closure with gradients enabled, so the closure can compute the loss and call
+    backward(), while the parameter updates stay under no_grad. See issue #3958.
+    """
+    model, optimizer = _build_closure_lorafa_model(use_rslora)
+    x = torch.ones(2, 4).to(torch_device)
+
+    initial_lora_A_weights = {name: param.clone() for name, param in model.named_parameters() if "lora_A" in name}
+
+    def closure():
+        optimizer.zero_grad()
+        assert torch.is_grad_enabled(), "closure should run with gradients enabled"
+        loss = model(x).square().mean()
+        assert loss.requires_grad, "loss computed in the closure should require grad"
+        loss.backward()
+        return loss
+
+    # Call step from inside no_grad to check the caller's gradient mode is preserved.
+    assert torch.is_grad_enabled()
+    with torch.no_grad():
+        loss = optimizer.step(closure)
+        assert not torch.is_grad_enabled()
+    assert torch.is_grad_enabled()
+
+    assert loss is not None
+    # The closure computed gradients, and the step updated lora_B but not lora_A.
+    assert any(
+        param.grad is not None for name, param in model.named_parameters() if "lora" in name and param.requires_grad
+    )
+    for name, param in model.named_parameters():
+        if "lora_A" in name:
+            assert torch.equal(param, initial_lora_A_weights[name]), f"lora_A weights changed for {name}"
+    assert any(torch.any(param != 0) for name, param in model.named_parameters() if "lora_B" in name), (
+        "lora_B weights were not updated"
+    )
+
+
+@pytest.mark.parametrize("use_rslora", [False, True])
+def test_lorafa_step_closure_matches_external_backward(use_rslora):
+    """
+    Test that training via step(closure) produces the same losses and parameters as the external
+    forward/backward + step() path. See issue #3958.
+    """
+    num_steps = 3
+
+    model_closure, optimizer_closure = _build_closure_lorafa_model(use_rslora)
+    torch.manual_seed(42)
+    model_external, optimizer_external = _build_closure_lorafa_model(use_rslora)
+    x = torch.ones(2, 4).to(torch_device)
+
+    losses_closure, losses_external = [], []
+    for _ in range(num_steps):
+
+        def closure():
+            optimizer_closure.zero_grad()
+            loss = model_closure(x).square().mean()
+            loss.backward()
+            return loss
+
+        losses_closure.append(optimizer_closure.step(closure))
+
+        optimizer_external.zero_grad()
+        loss_external = model_external(x).square().mean()
+        loss_external.backward()
+        optimizer_external.step()
+        losses_external.append(loss_external)
+
+    for loss_closure, loss_external in zip(losses_closure, losses_external):
+        assert torch.equal(loss_closure, loss_external), "closure path loss differs from external backward path"
+
+    for (name_closure, param_closure), (name_external, param_external) in zip(
+        model_closure.named_parameters(), model_external.named_parameters()
+    ):
+        assert name_closure == name_external
+        assert torch.equal(param_closure, param_external), f"parameter {name_closure} differs after closure steps"
