@@ -6779,12 +6779,14 @@ def _test_function_wrapper(fn, rank, world_size, init_method, *extra_args):
         _teardown_dist()
 
 
-def _test_lora_weight_synchronization(rank, world_size):
+def _test_lora_weight_synchronization(rank, world_size, init_lora_weights):
     """
     Test that non-sharded LoRA weights are identical across ranks after training step.
     """
     model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, **_get_tp_kwargs(tp_plan=TP_PLAN))
-    lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
+    lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=init_lora_weights)
+    # use a different seed on each rank, so that the LoRA weights only match if they are synchronized
+    torch.manual_seed(rank)
     model = get_peft_model(model, lora_config)
 
     torch.cuda.set_device(rank)
@@ -7139,8 +7141,9 @@ class TestLoraTensorParallel:
             wrapped_fn = partial(_test_function_wrapper, fn)
             mp.spawn(wrapped_fn, args=(WORLD_SIZE, init_method) + extra_args, nprocs=WORLD_SIZE, join=True)
 
-    def test_lora_weight_synchronization(self):
-        self._spawn(_test_lora_weight_synchronization)
+    @pytest.mark.parametrize("init_lora_weights", [True, False])
+    def test_lora_weight_synchronization(self, init_lora_weights):
+        self._spawn(_test_lora_weight_synchronization, init_lora_weights)
 
     def test_lora_gradient_synchronization(self):
         self._spawn(_test_lora_gradient_synchronization)
