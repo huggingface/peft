@@ -6634,8 +6634,11 @@ class TestWeightTying:
             def __init__(self):
                 super().__init__()
 
-                self.embed_tokens = nn.Embedding(1000, 1000)
-                self.linear = nn.Linear(1000, 1000, bias=False)
+                self.embed_tokens = nn.Embedding(1000, 100)
+                self.linear = nn.Linear(100, 100, bias=False)
+
+            def forward(self, x):
+                return self.linear(self.embed_tokens(x))
 
         class ModelConfig:
             def __init__(self, tie_word_embeddings):
@@ -6652,7 +6655,7 @@ class TestWeightTying:
                 super().__init__()
                 self.model = MyModule()
                 self.config = ModelConfig(tie_word_embeddings=config_tie_word_embeddings)
-                self.lm_head = nn.Linear(1000, 1000, bias=False)
+                self.lm_head = nn.Linear(100, 1000, bias=False)
 
                 if tie_weights:
                     self.lm_head.weight = self.model.embed_tokens.weight
@@ -6662,6 +6665,9 @@ class TestWeightTying:
 
             def get_input_embeddings(self):
                 return self.model.embed_tokens
+
+            def forward(self, x):
+                return self.lm_head(self.model(x))
 
         return CausalLM().eval().to(self.torch_device)
 
@@ -7084,6 +7090,57 @@ class TestWeightTying:
             lm_lora_B = model.base_model.model.lm_head.lora_B[adapter_name].weight
             assert embed_lora_A.data_ptr() != lm_lora_B.data_ptr()
             assert embed_lora_B.data_ptr() != lm_lora_A.data_ptr()
+
+    @pytest.mark.xfail(reason="Tied weights don't correctly handle merging yet", strict=True)
+    @pytest.mark.parametrize(
+        "target_modules",
+        [["lm_head"], ["embed_tokens"], ["lm_head", "embed_tokens"], ["lm_head", "embed_tokens", "linear"]],
+    )
+    @pytest.mark.parametrize("ensure_weight_tying", [False, True])
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @pytest.mark.parametrize("autocast_adapter_dtype", [True, False])
+    def test_weight_tying_merge(self, target_modules, ensure_weight_tying, dtype, autocast_adapter_dtype):
+        # Ensure that merging tied weights works as expected, most notably not merging into the same weight
+        # twice. Explicitly test dtypes because dtype casting may untie the LoRA weights.
+        model = self.get_lm_model().to(dtype)
+        x = torch.arange(10).view(1, -1)
+        with torch.inference_mode():
+            output_base = model(x)
+
+        config = LoraConfig(
+            target_modules=target_modules,
+            ensure_weight_tying=ensure_weight_tying,
+            init_lora_weights=False,
+        )
+
+        model = get_peft_model(model, config, autocast_adapter_dtype=autocast_adapter_dtype)
+        # sanity check
+        if ensure_weight_tying or "embed_tokens" in target_modules:
+            assert isinstance(model.base_model.model.model.embed_tokens, LoraLayer)
+        if ensure_weight_tying or "lm_head" in target_modules:
+            assert isinstance(model.base_model.model.lm_head, LoraLayer)
+
+        with torch.inference_mode():
+            output_before = model(x)
+        # sanity check
+        atol = rtol = {torch.float32: 1e-6, torch.float16: 1e-3, torch.bfloat16: 1e-2}[dtype]
+        assert not torch.allclose(output_before, output_base, atol=atol, rtol=rtol)
+
+        model.merge_adapter()
+        with torch.inference_mode():
+            output_merged = model(x)
+
+        model.unmerge_adapter()
+        with torch.inference_mode():
+            output_unmerged = model(x)
+
+        unloaded = model.merge_and_unload()
+        with torch.inference_mode():
+            output_unloaded = unloaded(x)
+
+        assert torch.allclose(output_before, output_merged, atol=atol, rtol=rtol)
+        assert torch.allclose(output_before, output_unmerged, atol=atol, rtol=rtol)
+        assert torch.allclose(output_before, output_unloaded, atol=atol, rtol=rtol)
 
 
 class TestTinyLoraInitialization:
