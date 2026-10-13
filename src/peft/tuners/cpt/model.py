@@ -146,19 +146,21 @@ class CPTEmbedding(BasePromptEncoder):
         """
         Computes the loss for CPT models with optional exponential decay.
 
-        CPT label roles are positive multiples of four (4, 8, ...), with a distinct type ID for each demonstration.
-        Non-label positions must already have their labels set to the ignore index -100. Logits, labels and type masks
-        are shifted for next-token prediction before calculating the loss.
+        Instead of computing a uniform average cross-entropy loss across the entire sequence, this function isolates
+        label tokens for each distinct demonstration using the modulo-4 namespace encoded in `cpt_type_mask`. With
+        `config.opt_weighted_loss_type="decay"`, it applies exponential decay weighting
+        (`config.opt_loss_decay_factor`) across demonstrations, prioritizing later examples (and the final query
+        prediction) over earlier demonstrations.
 
-        When `config.opt_weighted_loss_type` is `"decay"`, each batch sample's distinct label type IDs after shifting
-        are sorted in ascending order. For K IDs, the ID at rank k receives weight `config.opt_loss_decay_factor ** (K
-        - 1 - k)`. Gaps between type IDs do not add decay steps. The highest ID, normally the final query, receives
-        weight 1; earlier IDs receive smaller weights when the factor is between 0 and 1. With `"none"`, every valid
-        label receives weight 1.
-
-        The final loss is the sum of weighted per-token cross-entropy losses divided by the number of valid shifted
-        labels across the batch. It is not normalized by the sum of the weights or averaged per demonstration, so
-        demonstrations with more valid labels contribute more terms.
+        Demonstration Grouping Logic:
+            * Tokens where `(cpt_type_mask > 0) & (cpt_type_mask % 4 == 0)` represent ground-truth labels.
+            * The demonstration index `k` is the rank of its label type ID among the distinct label IDs present after
+              the next-token shift, in ascending order (0-indexed).
+            * Cross-entropy loss is computed for each valid label token.
+            * Given `K` distinct label IDs and decay factor `gamma` (`opt_loss_decay_factor`), the weight for
+              demonstration `k` (where `0 <= k < K`) is given by:
+                  `weight_k = gamma ** (K - 1 - k)`
+              The final loss is the sum of weighted token losses divided by the number of valid labels.
 
         Args:
             base_model_output (ModelOutput):
@@ -175,13 +177,20 @@ class CPTEmbedding(BasePromptEncoder):
                 The base model output with computed loss.
 
         Example:
-            Suppose two context demonstrations and one query each have one valid shifted label, with type IDs 4, 8 and
-            12 and per-token losses 2.0, 1.6 and 1.0. With `opt_weighted_loss_type="decay"` and
-            `opt_loss_decay_factor=0.5`, their weights are 0.25, 0.5 and 1.0:
+            Suppose a sequence contains 2 prompt demonstrations followed by 1 user query (K = 3), each with one valid
+            label after the next-token shift:
+                - Demo 1 (Prefix Demo 1): Label tokens have type 4 -> Cross-entropy L_0 = 2.0
+                - Demo 2 (Prefix Demo 2): Label tokens have type 8 -> Cross-entropy L_1 = 1.6
+                - Demo 3 (Target Query) : Label tokens have type 12 -> Cross-entropy L_2 = 1.0
 
-            ```python
-            loss = (0.25 * 2.0 + 0.5 * 1.6 + 1.0 * 1.0) / 3  # approximately 0.7667
-            ```
+            With `opt_weighted_loss_type="decay"` and `opt_loss_decay_factor = 0.5`:
+                - Demo 1 weight: 0.5 ** (3 - 1 - 0) = 0.5 ** 2 = 0.25
+                - Demo 2 weight: 0.5 ** (3 - 1 - 1) = 0.5 ** 1 = 0.50
+                - Demo 3 weight: 0.5 ** (3 - 1 - 2) = 0.5 ** 0 = 1.00
+
+            Weighted Loss:
+                loss = (0.25 * 2.0 + 0.50 * 1.6 + 1.00 * 1.0) / 3
+                     = (0.5 + 0.8 + 1.0) / 3 = 2.3 / 3 = 0.7666...
         """
 
         device = base_model_output.logits.device
