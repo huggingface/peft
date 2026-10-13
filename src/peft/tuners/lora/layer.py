@@ -382,6 +382,8 @@ class LoraLayer(BaseTunerLayer):
                     # The adapter weights need to be on device for broadcasting
                     self._move_adapter_to_device_of_base_layer(adapter_name)
                     dist.broadcast(self.lora_B[adapter_name].weight.data, src=src, group=pg)
+                    if self.lora_B[adapter_name].bias is not None:
+                        dist.broadcast(self.lora_B[adapter_name].bias.data, src=src, group=pg)
                 elif tp_plan == "embedding_rowwise" and adapter_name in self.lora_embedding_B:
                     self._move_adapter_to_device_of_base_layer(adapter_name)
                     dist.broadcast(self.lora_embedding_B[adapter_name].data, src=src, group=pg)
@@ -391,6 +393,8 @@ class LoraLayer(BaseTunerLayer):
                     self._move_adapter_to_device_of_base_layer(adapter_name)
                     dist.broadcast(self.lora_A[adapter_name].weight.data, src=src, group=pg)
                     dist.broadcast(self.lora_B[adapter_name].weight.data, src=src, group=pg)
+                    if self.lora_B[adapter_name].bias is not None:
+                        dist.broadcast(self.lora_B[adapter_name].bias.data, src=src, group=pg)
 
     def olora_init(self, adapter_name):
         base_layer = self.get_base_layer()
