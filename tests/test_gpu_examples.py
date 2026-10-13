@@ -6783,8 +6783,9 @@ def _test_lora_weight_synchronization(rank, world_size, init_lora_weights):
     """
     Test that non-sharded LoRA weights are identical across ranks after training step.
     """
-    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, **_get_tp_kwargs(tp_plan=TP_PLAN))
-    lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=init_lora_weights)
+    tp_plan_with_lm_head = {**TP_PLAN, "lm_head": "colwise_gather_output"}
+    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, **_get_tp_kwargs(tp_plan=tp_plan_with_lm_head))
+    lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES + ["lm_head"], init_lora_weights=init_lora_weights)
     # use a different seed on each rank, so that the LoRA weights only match if they are synchronized
     torch.manual_seed(rank)
     model = get_peft_model(model, lora_config)
@@ -6835,6 +6836,13 @@ def _test_lora_weight_synchronization(rank, world_size, init_lora_weights):
             dist.all_gather(gathered, weight)
             for i, g in enumerate(gathered):
                 assert torch.allclose(weight, g), f"{name}.lora_embedding_B differs between rank {rank} and rank {i}"
+        elif tp_plan == "colwise_gather_output":
+            for lora_name in ("lora_A", "lora_B"):
+                weight = getattr(module, lora_name)["default"].weight.data.contiguous()
+                gathered = [torch.zeros_like(weight) for _ in range(world_size)]
+                dist.all_gather(gathered, weight)
+                for i, g in enumerate(gathered):
+                    assert torch.allclose(weight, g), f"{name}.{lora_name} differs between rank {rank} and rank {i}"
 
 
 def _test_lora_gradient_synchronization(rank, world_size):
