@@ -28,7 +28,15 @@ from transformers import (
     LlavaForConditionalGeneration,
 )
 
-from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model, get_peft_model_state_dict
+from peft import (
+    AdaLoraConfig,
+    HiraConfig,
+    LoraConfig,
+    PeftModel,
+    VeraConfig,
+    get_peft_model,
+    get_peft_model_state_dict,
+)
 from peft.import_utils import is_transformers_ge_v5_1_0, is_transformers_ge_v5_6_0
 from peft.utils.other import (
     ModulesToSaveWrapper,
@@ -385,6 +393,58 @@ class TestModulesToSaveUnloadNoActiveAdapter:
         else:
             # unloading without merging must restore the base model output
             assert torch.allclose(out_unloaded, out_base, atol=1e-6, rtol=1e-6)
+
+
+class TestModulesToSaveUnloadOriginalModule:
+    """Test that unload() restores the original modules_to_save module, while merge_and_unload() keeps the trained
+    copy."""
+
+    @pytest.fixture
+    def mlp(self):
+        class MLP(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(8, 8)
+                self.lin1 = nn.Linear(8, 8)
+
+            def forward(self, x):
+                return self.lin1(self.lin0(x))
+
+        torch.manual_seed(0)
+        return MLP()
+
+    # The fix is in ModulesToSaveWrapper, but PEFT methods that use BaseTuner._replace_module additionally copy the
+    # weight of the trained copy onto the original module when unloading. Therefore, only the methods that override
+    # _replace_module are checked here.
+    @pytest.mark.parametrize(
+        "config_cls, config_kwargs", [(LoraConfig, {}), (AdaLoraConfig, {"total_step": 1}), (HiraConfig, {})]
+    )
+    @pytest.mark.parametrize("unload_method", ["unload", "merge_and_unload"])
+    def test_unload_modules_to_save(self, mlp, config_cls, config_kwargs, unload_method):
+        x = torch.randn(4, 8)
+        out_base = mlp(x)
+        original_lin1 = mlp.lin1
+        # default init, i.e. the PEFT method is a no-op
+        config = config_cls(target_modules=["lin0"], modules_to_save=["lin1"], **config_kwargs)
+        model = get_peft_model(mlp, config).eval()
+
+        # change the modules_to_save copy so that it produces a different output
+        trained_lin1 = model.base_model.model.lin1.modules_to_save["default"]
+        trained_lin1.weight.data.fill_(55.5)
+        out_peft = model(x)
+
+        unloaded = getattr(model, unload_method)()
+        out_unloaded = unloaded(x)
+
+        if unload_method == "unload":
+            # the base model is restored
+            assert unloaded.lin1 is original_lin1
+            assert not (unloaded.lin1.weight == 55.5).any()
+            assert torch.allclose(out_unloaded, out_base, atol=1e-6, rtol=1e-6)
+        else:
+            # the trained copy is kept
+            assert unloaded.lin1 is trained_lin1
+            assert torch.allclose(out_unloaded, out_peft, atol=1e-6, rtol=1e-6)
 
 
 class TestModulesToSaveNameSubstringBug:
