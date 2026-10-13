@@ -146,6 +146,22 @@ class CPTEmbedding(BasePromptEncoder):
         """
         Computes the loss for CPT models with optional exponential decay.
 
+        Instead of computing a uniform average cross-entropy loss across the entire sequence,
+        this function isolates label tokens for each distinct demonstration using the modulo-4
+        namespace encoded in `cpt_type_mask`. It then applies an exponential decay weighting
+        (`peft_config.opt_loss_decay_factor`) across demonstrations, prioritizing later examples
+        (and the final query prediction) over earlier demonstrations.
+
+        Demonstration Grouping Logic:
+            * Tokens where `(cpt_type_mask > 0) & (cpt_type_mask % 4 == 0)` represent ground-truth labels.
+            * The demonstration index `k` for a label token is determined by integer division:
+              `demo_index = (cpt_type_mask // 4) - 1` (0-indexed).
+            * Cross-entropy loss `L_k` is computed independently per demonstration `k`.
+            * Given `K` total demonstrations and decay factor `gamma` (`opt_loss_decay_factor`),
+              the weight for demonstration `k` (where `0 <= k < K`) is given by:
+                  `weight_k = gamma ** (K - 1 - k)`
+              The final loss is the weighted sum (or weighted average) over all `L_k`.
+
         Args:
             base_model_output (ModelOutput):
                 Output from the base model containing logits.
@@ -159,6 +175,23 @@ class CPTEmbedding(BasePromptEncoder):
         Returns:
             ModelOutput:
                 The base model output with computed loss.
+
+        Example:
+            Suppose a sequence contains 2 prompt demonstrations followed by 1 user query (K = 3):
+                - Demo 1 (Prefix Demo 1): Label tokens have type 4  -> Cross-entropy L_0 = 2.0
+                - Demo 2 (Prefix Demo 2): Label tokens have type 8  -> Cross-entropy L_1 = 1.6
+                - Demo 3 (Target Query) : Label tokens have type 12 -> Cross-entropy L_2 = 1.0
+
+            With `opt_loss_decay_factor = 0.5`:
+                - Demo 1 weight: 0.5 ** (3 - 1 - 0) = 0.5 ** 2 = 0.25
+                - Demo 2 weight: 0.5 ** (3 - 1 - 1) = 0.5 ** 1 = 0.50
+                - Demo 3 weight: 0.5 ** (3 - 1 - 2) = 0.5 ** 0 = 1.00
+
+            Weighted Loss:
+                loss = (0.25 * 2.0 + 0.50 * 1.6 + 1.00 * 1.0) / (0.25 + 0.50 + 1.00)
+                     = (0.5 + 0.8 + 1.0) / 1.75
+                     = 2.3 / 1.75
+                     ≈ 1.314
         """
 
         device = base_model_output.logits.device
@@ -189,6 +222,9 @@ class CPTEmbedding(BasePromptEncoder):
 
             exponential_decay = torch.ones_like(shift_cpt_type_mask[i]).to(device=device).float()
             decay_value = 1
+
+            # Process the exponential weighting in reverse to decay the actual prediction and later
+            # demonstrations less than initial ones, possibly to mitigate recency bias.
             for label_mask_idx in torch.flip(labels_ids, [0]):
                 exponential_decay[shift_cpt_type_mask[i] == label_mask_idx] = decay_value
                 decay_value *= config.opt_loss_decay_factor
