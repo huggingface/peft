@@ -2304,14 +2304,12 @@ class PeftModelForCausalLM(PeftModel):
             inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
             return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
 
-
     def _cpt_forward(self, input_ids, inputs_embeds, peft_config, task_ids, batch_size, **kwargs):
-        # Pop labels to extend them so that they accomodate for the prefix embedding we will add.
+        # Extend labels to include the prefix embeddings.
         labels = kwargs.pop("labels")
         device = next(i.device for i in [input_ids, inputs_embeds, labels] if i is not None)
 
-        # Retrieve per-token role mask for user input; fallback assigns Type 4 (target/label role)
-        # to all input tokens if unannotated, ensuring they are not masked in the loss computation.
+        # Unannotated input tokens have role 4, so their labels contribute to the loss.
         if "input_type_mask" in kwargs.keys():
             input_type_mask = kwargs.pop("input_type_mask").to(device)
         else:
@@ -2321,50 +2319,46 @@ class PeftModelForCausalLM(PeftModel):
         cpt_token_ids = peft_config.cpt_token_ids
         cpt_tokens_type_mask = peft_config.cpt_tokens_type_mask
 
-        # Project tokens to embeddings if not already in continuous vector form to combine them with the
-        # learned prompt embedding: [Learnable Prompt ; Input]
+        # Prepend the learned context embeddings to the input embeddings.
         if inputs_embeds is None:
             inputs_embeds = self.word_embeddings(input_ids)
         prompts = self.get_prompt(batch_size=batch_size, task_ids=task_ids).to(inputs_embeds.dtype)
         inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
 
-        # If we were provided with labels we need to modify the labels so that they match with the updated
-        # sequence length (since we prepended the soft prompt embeddings).
+        # Extend the labels and role masks to match the sequence with the prepended context.
         cpt_labels = None
         if labels is not None:
             # Prepend static prompt token IDs to the labels to match the newly extended sequence length.
             prefix_labels = torch.Tensor(cpt_token_ids).long().view(1, -1).repeat(batch_size, 1).to(labels.device)
             cpt_labels = torch.cat((prefix_labels, labels), dim=1)
 
-            # Match prefix type mask to sequence and offset the input mask to create distinct demonstration namespaces.
-            #
-            # We can have multiple demonstrations in the prompt, each getting their own loss decay. These
-            # demonstrations are identified by being multiples of the 4 token types we have. Demonstration 1 will use
-            # id 4 for its labels, demonstration 2 will use 8 for its labels, etc. To make sure that the prefix
-            # we added is treated with its own decay, we need to shift all these values up.
-            #
-            # (Note: prefix_type_mask.max() must be a multiple of 4 to preserve modulo-4 label identification)
-            prefix_type_mask = torch.Tensor(cpt_tokens_type_mask).long().view(1, -1).repeat(batch_size, 1).to(labels.device)
+            # Each demonstration has four roles: input template, input, output template, and label.
+            # Label roles are positive multiples of four (4, 8, ...), which identify distinct demonstrations
+            # for loss decay. Round the context's maximum type up to a multiple of four before offsetting
+            # positive input types. This separates the groups without changing any token's role modulo four,
+            # even when the context ends with an incomplete group or uses the default type mask [1].
+            prefix_type_mask = (
+                torch.Tensor(cpt_tokens_type_mask).long().view(1, -1).repeat(batch_size, 1).to(labels.device)
+            )
             adjusted_input_type_mask = input_type_mask
             prefix_type_offset = ((prefix_type_mask.max() + 3) // 4) * 4
             adjusted_input_type_mask[adjusted_input_type_mask > 0] += prefix_type_offset
 
-            # Merge masks across full sequence: [Prefix Types ; Shifted Input Types]
+            # Combine context roles with the shifted input roles.
             cpt_type_mask = torch.cat((prefix_type_mask, adjusted_input_type_mask), dim=1)
 
-            # In CPT, labels occupy slot 4 (or 4*k for demonstration k).
-            # Mask all non-label tokens (templates, inputs, delimiters) with PyTorch ignore index -100
+            # Exclude non-label roles from the loss using PyTorch's ignore index.
             labels_idx = (cpt_type_mask > 0) & (cpt_type_mask % 4 == 0)
             cpt_labels[~labels_idx] = -100
 
-        # Run forward pass through frozen backbone using combined embeddings and masked labels
+        # Run the frozen backbone on the combined embeddings and masked labels.
         kwargs["labels"] = cpt_labels
         base_model_output = self.base_model(inputs_embeds=inputs_embeds, **kwargs)
 
         if labels is None:
             return base_model_output
 
-        # Delegate to custom CPT loss (computes weighted cross-entropy per demonstration and type-specific gradients)
+        # Apply CPT's per-demonstration loss weighting.
         cpt_embedding = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
         base_model_output = cpt_embedding.calculate_loss(
             base_model_output, cpt_labels, cpt_type_mask, self.peft_config["default"]

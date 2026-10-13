@@ -146,21 +146,19 @@ class CPTEmbedding(BasePromptEncoder):
         """
         Computes the loss for CPT models with optional exponential decay.
 
-        Instead of computing a uniform average cross-entropy loss across the entire sequence,
-        this function isolates label tokens for each distinct demonstration using the modulo-4
-        namespace encoded in `cpt_type_mask`. It then applies an exponential decay weighting
-        (`peft_config.opt_loss_decay_factor`) across demonstrations, prioritizing later examples
-        (and the final query prediction) over earlier demonstrations.
+        CPT label roles are positive multiples of four (4, 8, ...), with a distinct type ID for each demonstration.
+        Non-label positions must already have their labels set to the ignore index -100. Logits, labels and type masks
+        are shifted for next-token prediction before calculating the loss.
 
-        Demonstration Grouping Logic:
-            * Tokens where `(cpt_type_mask > 0) & (cpt_type_mask % 4 == 0)` represent ground-truth labels.
-            * The demonstration index `k` for a label token is determined by integer division:
-              `demo_index = (cpt_type_mask // 4) - 1` (0-indexed).
-            * Cross-entropy loss `L_k` is computed independently per demonstration `k`.
-            * Given `K` total demonstrations and decay factor `gamma` (`opt_loss_decay_factor`),
-              the weight for demonstration `k` (where `0 <= k < K`) is given by:
-                  `weight_k = gamma ** (K - 1 - k)`
-              The final loss is the weighted sum (or weighted average) over all `L_k`.
+        When `config.opt_weighted_loss_type` is `"decay"`, each batch sample's distinct label type IDs after shifting
+        are sorted in ascending order. For K IDs, the ID at rank k receives weight `config.opt_loss_decay_factor ** (K
+        - 1 - k)`. Gaps between type IDs do not add decay steps. The highest ID, normally the final query, receives
+        weight 1; earlier IDs receive smaller weights when the factor is between 0 and 1. With `"none"`, every valid
+        label receives weight 1.
+
+        The final loss is the sum of weighted per-token cross-entropy losses divided by the number of valid shifted
+        labels across the batch. It is not normalized by the sum of the weights or averaged per demonstration, so
+        demonstrations with more valid labels contribute more terms.
 
         Args:
             base_model_output (ModelOutput):
@@ -177,21 +175,13 @@ class CPTEmbedding(BasePromptEncoder):
                 The base model output with computed loss.
 
         Example:
-            Suppose a sequence contains 2 prompt demonstrations followed by 1 user query (K = 3):
-                - Demo 1 (Prefix Demo 1): Label tokens have type 4  -> Cross-entropy L_0 = 2.0
-                - Demo 2 (Prefix Demo 2): Label tokens have type 8  -> Cross-entropy L_1 = 1.6
-                - Demo 3 (Target Query) : Label tokens have type 12 -> Cross-entropy L_2 = 1.0
+            Suppose two context demonstrations and one query each have one valid shifted label, with type IDs 4, 8 and
+            12 and per-token losses 2.0, 1.6 and 1.0. With `opt_weighted_loss_type="decay"` and
+            `opt_loss_decay_factor=0.5`, their weights are 0.25, 0.5 and 1.0:
 
-            With `opt_loss_decay_factor = 0.5`:
-                - Demo 1 weight: 0.5 ** (3 - 1 - 0) = 0.5 ** 2 = 0.25
-                - Demo 2 weight: 0.5 ** (3 - 1 - 1) = 0.5 ** 1 = 0.50
-                - Demo 3 weight: 0.5 ** (3 - 1 - 2) = 0.5 ** 0 = 1.00
-
-            Weighted Loss:
-                loss = (0.25 * 2.0 + 0.50 * 1.6 + 1.00 * 1.0) / (0.25 + 0.50 + 1.00)
-                     = (0.5 + 0.8 + 1.0) / 1.75
-                     = 2.3 / 1.75
-                     ≈ 1.314
+            ```python
+            loss = (0.25 * 2.0 + 0.5 * 1.6 + 1.0 * 1.0) / 3  # approximately 0.7667
+            ```
         """
 
         device = base_model_output.logits.device
@@ -223,8 +213,7 @@ class CPTEmbedding(BasePromptEncoder):
             exponential_decay = torch.ones_like(shift_cpt_type_mask[i]).to(device=device).float()
             decay_value = 1
 
-            # Process the exponential weighting in reverse to decay the actual prediction and later
-            # demonstrations less than initial ones, possibly to mitigate recency bias.
+            # Assign weight 1 to the highest label type ID and decay each preceding distinct ID.
             for label_mask_idx in torch.flip(labels_ids, [0]):
                 exponential_decay[shift_cpt_type_mask[i] == label_mask_idx] = decay_value
                 decay_value *= config.opt_loss_decay_factor
