@@ -360,3 +360,42 @@ def test_cpt_forward_loss_matches_reference():
         output.logits[:, :-1].reshape(-1, vocab_size).float(), cpt_labels[:, 1:].reshape(-1), ignore_index=-100
     )
     assert torch.allclose(output.loss, expected_loss, atol=1e-4, rtol=1e-4)
+
+
+def test_cpt_does_not_mutate_caller_input_type_mask():
+    # Regression test for #3928: `_cpt_forward` must not mutate the caller's
+    # `input_type_mask` in place. When the tensor is already on the target device,
+    # `.to(device)` returns the same object, so the in-place shift applied to
+    # `adjusted_input_type_mask` used to corrupt the caller tensor (and compounded
+    # across repeated forwards).
+    from transformers import GPT2Config, GPT2LMHeadModel
+
+    torch.manual_seed(0)
+    base_model = GPT2LMHeadModel(
+        GPT2Config(
+            vocab_size=32, n_layer=1, n_head=2, n_embd=16, n_positions=32,
+            resid_pdrop=0, embd_pdrop=0, attn_pdrop=0,
+        )
+    )
+    config = CPTConfig(
+        task_type=TaskType.CAUSAL_LM,
+        cpt_token_ids=[0, 0, 0, 0],
+        cpt_tokens_type_mask=[4, 4, 4, 4],
+    )
+    model = get_peft_model(base_model, config).eval()
+
+    input_ids = torch.tensor([[5, 6, 7, 8]])
+    input_type_mask = torch.tensor([[4, 4, 4, 4]])
+
+    with torch.no_grad():
+        model(input_ids=input_ids, labels=input_ids.clone(), input_type_mask=input_type_mask)
+    assert input_type_mask.tolist() == [[4, 4, 4, 4]], (
+        f"caller input_type_mask was mutated in place: {input_type_mask.tolist()}"
+    )
+
+    # a second forward on the same (untouched) tensor must still behave correctly
+    with torch.no_grad():
+        out = model(input_ids=input_ids, labels=input_ids.clone(), input_type_mask=input_type_mask)
+    assert input_type_mask.tolist() == [[4, 4, 4, 4]]
+    assert torch.isfinite(out.loss)
+
