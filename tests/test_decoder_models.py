@@ -1601,3 +1601,24 @@ class TestDecoderModels(PeftCommonTester):
             inputs = torch.arange(10).view(1, -1).to(self.torch_device)
             with pytest.raises(ValueError, match="skipped every layer"):
                 model(inputs)
+
+    @pytest.mark.parametrize(
+        "config_cls",
+        [PromptTuningConfig, PrefixTuningConfig, PromptEncoderConfig],
+    )
+    def test_prompt_learning_fallback_without_get_text_config(self, monkeypatch, config_cls):
+        # Regression test for #3951: for older transformers versions (< 4.45) that lack get_text_config,
+        # _setup_prompt_encoder should fall back to config.vocab_size without raising TypeError: argument is not iterable.
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+
+        # Simulate older transformers PretrainedConfig lacking get_text_config
+        from transformers.configuration_utils import PretrainedConfig
+
+        monkeypatch.delattr(PretrainedConfig, "get_text_config", raising=False)
+        assert not hasattr(model.config, "get_text_config")
+
+        config = config_cls(num_virtual_tokens=4, task_type=TaskType.CAUSAL_LM)
+        peft_model = get_peft_model(model, config)
+        assert peft_model.word_embeddings is not None
