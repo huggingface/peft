@@ -33,9 +33,10 @@ from .utils import CONFIG_NAME, PeftType, TaskType
 # we expect at least these keys to be present in a PEFT adapter_config.json
 MIN_EXPECTED_CONFIG_KEYS = {"peft_type"}
 
-# The adapter_config.json is written with sorted keys, except for the dicts stored under these keys. For those, the
-# order matters: when more than one key matches a module, the first one wins, so the order has to survive a save/load
-# round trip. If another config argument needs its order preserved, add it here.
+# The adapter_config.json is written with sorted keys, except for the dicts stored under these keys, whose order has to
+# survive a save/load round trip. For rank_pattern and alpha_pattern, the order matters because when more than one key
+# matches a module, the first one wins. If another config argument needs its order preserved, add it here and extend
+# this comment.
 CONFIG_KEYS_WITH_PRESERVED_ORDER = {"rank_pattern", "alpha_pattern"}
 
 

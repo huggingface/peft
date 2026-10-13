@@ -696,7 +696,8 @@ class TestPeftConfig:
 
     def test_save_pretrained_sorts_keys_except_pattern_keys(self, tmp_path):
         # The config is written with sorted keys, nested dicts included, but the order of rank_pattern and
-        # alpha_pattern is kept, see #3818.
+        # alpha_pattern is kept, see #3818. Testing LoRA is enough: all configs are saved by the same
+        # PeftConfigMixin.save_pretrained, and the methods that support these arguments use the same names.
         config = LoraConfig(
             rank_pattern={"module.foo": 16, "foo": 4},
             alpha_pattern={"module.foo": 2, "foo": 8},

@@ -2627,6 +2627,8 @@ class TestRankAndAlphaPattern:
         with open(tmp_path / "adapter_config.json") as f:
             assert list(json.load(f)[pattern]) == ["module.foo", "foo"]
 
+        # Before the fix, loading failed with a shape mismatch for rank_pattern, since module.foo was created with
+        # rank 4 instead of 16. For alpha_pattern, loading worked but the scaling of module.foo was incorrect.
         loaded = PeftModel.from_pretrained(base_model, tmp_path)
         for name in ["foo", "module.foo", "module.module.foo"]:
             layer, layer_loaded = (
