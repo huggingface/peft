@@ -291,6 +291,61 @@ class LoraModel(BaseTuner):
                     f"{sorted(other_target_parameters)} for adapter '{adapter_name}'."
                 )
 
+    def _cast_adapter_dtype(self, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
+        # `cast_adapter_dtype` upcasts bf16/fp16 adapter weights to fp32 by reassigning a fresh
+        # parameter per module. For LoRA weights tied to the input embeddings (see
+        # `ensure_weight_tying`), this silently breaks the shared storage between the tied
+        # weights. Detect the tied layers beforehand and re-establish the ties afterwards.
+        tied_layers = self._find_tied_lora_layers(adapter_name) if autocast_adapter_dtype else []
+        super()._cast_adapter_dtype(adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
+        if tied_layers:
+            self._retie_lora_adapters(tied_layers, adapter_name)
+
+    def _find_tied_lora_layers(self, adapter_name: str) -> list[LoraLayer]:
+        """Find LoRA layers whose adapter weights are tied to the input embeddings' adapter weights.
+
+        Weight tying is implemented by sharing storage between the tied weights (the tied
+        `lora_A`/`lora_B` weights are transposed views of the embedding adapter weights), so
+        tied layers are detected by comparing the underlying storage.
+        """
+        config = self.peft_config.get(adapter_name)
+        if not getattr(config, "target_modules_to_tie", None):
+            return []
+        embeddings = self.model.get_input_embeddings()
+        embedding_B = getattr(embeddings, "lora_embedding_B", None)
+        if embedding_B is None or adapter_name not in embedding_B:
+            return []
+        tied_storage_ptr = embedding_B[adapter_name].untyped_storage().data_ptr()
+        tied_layers = []
+        for module in self.model.modules():
+            if module is embeddings or not isinstance(module, LoraLayer):
+                continue
+            lora_A = module.lora_A
+            if adapter_name not in lora_A:
+                continue
+            weight = lora_A[adapter_name].weight
+            if weight is None:
+                continue
+            if weight.untyped_storage().data_ptr() == tied_storage_ptr:
+                tied_layers.append(module)
+        return tied_layers
+
+    def _retie_lora_adapters(self, tied_layers: list[LoraLayer], adapter_name: str) -> None:
+        """Re-establish LoRA weight ties to the input embeddings after a dtype cast.
+
+        `cast_adapter_dtype` reassigns fresh (upcast) parameters per module, so the tied
+        weights no longer share storage. Re-point the tied weights at transposed views of
+        the (already cast) embedding adapter weights, mirroring the tying established in
+        `_create_and_replace`.
+        """
+        embeddings = self.model.get_input_embeddings()
+        emb_A = embeddings.lora_embedding_A[adapter_name]
+        emb_B = embeddings.lora_embedding_B[adapter_name]
+        for layer in tied_layers:
+            for attr, emb_param in (("lora_A", emb_B), ("lora_B", emb_A)):
+                linear = getattr(layer, attr)[adapter_name]
+                linear.weight = nn.Parameter(emb_param.t(), requires_grad=linear.weight.requires_grad)
+
     def _create_and_replace(
         self,
         lora_config,

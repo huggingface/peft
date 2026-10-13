@@ -7085,6 +7085,34 @@ class TestWeightTying:
             assert embed_lora_A.data_ptr() != lm_lora_B.data_ptr()
             assert embed_lora_B.data_ptr() != lm_lora_A.data_ptr()
 
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_weight_tying_survives_autocast_adapter_dtype(self, dtype):
+        # Regression test for https://github.com/huggingface/peft/issues/3929: with a
+        # fp16/bf16 base model, `cast_adapter_dtype` upcasts the adapter weights to fp32 by
+        # reassigning fresh parameters per module, which silently broke the shared storage
+        # between the tied LoRA weights.
+        model = self.get_lm_model().to(dtype)
+        config = LoraConfig(
+            target_modules=["embed_tokens", "lm_head"],
+            ensure_weight_tying=True,
+        )
+        model = get_peft_model(model, config)
+
+        adapter_name = "default"
+        embed_lora_A = model.base_model.model.model.embed_tokens.lora_embedding_A[adapter_name]
+        embed_lora_B = model.base_model.model.model.embed_tokens.lora_embedding_B[adapter_name]
+        lm_lora_A = model.base_model.model.lm_head.lora_A[adapter_name].weight
+        lm_lora_B = model.base_model.model.lm_head.lora_B[adapter_name].weight
+
+        # the adapter weights are upcast to fp32 ...
+        assert lm_lora_A.dtype == torch.float32
+        assert lm_lora_B.dtype == torch.float32
+        # ... but the ties are preserved
+        assert torch.allclose(embed_lora_A, lm_lora_B.T)
+        assert torch.allclose(embed_lora_B, lm_lora_A.T)
+        assert embed_lora_A.data_ptr() == lm_lora_B.data_ptr()
+        assert embed_lora_B.data_ptr() == lm_lora_A.data_ptr()
+
 
 class TestTinyLoraInitialization:
     """Regression tests for the model-level `_target_key_to_idx` cache used to compute `weight_tying` groups."""
