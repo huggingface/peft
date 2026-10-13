@@ -23,6 +23,10 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     DataCollatorForLanguageModeling,
+    GPT2Config,
+    GPT2LMHeadModel,
+    LlamaConfig,
+    LlamaForCausalLM,
     Trainer,
     TrainingArguments,
 )
@@ -360,3 +364,78 @@ def test_cpt_forward_loss_matches_reference():
         output.logits[:, :-1].reshape(-1, vocab_size).float(), cpt_labels[:, 1:].reshape(-1), ignore_index=-100
     )
     assert torch.allclose(output.loss, expected_loss, atol=1e-4, rtol=1e-4)
+
+
+@pytest.mark.parametrize(
+    "model_class, model_config",
+    [
+        pytest.param(
+            GPT2LMHeadModel,
+            GPT2Config(
+                vocab_size=32,
+                n_layer=1,
+                n_head=2,
+                n_embd=16,
+                n_positions=32,
+                resid_pdrop=0,
+                embd_pdrop=0,
+                attn_pdrop=0,
+            ),
+            id="gpt2",
+        ),
+        pytest.param(
+            LlamaForCausalLM,
+            LlamaConfig(
+                vocab_size=32,
+                num_hidden_layers=1,
+                num_attention_heads=2,
+                num_key_value_heads=2,
+                hidden_size=16,
+                intermediate_size=32,
+            ),
+            id="llama",
+        ),
+    ],
+)
+@pytest.mark.parametrize("prefix_types", [None, [1, 2, 3], [1, 2, 3, 4], [1, 2, 3, 4, 5]])
+@pytest.mark.parametrize("explicit_input_mask", [False, True])
+@pytest.mark.parametrize("weighted_loss", ["none", "decay"])
+def test_cpt_partial_context_keeps_input_labels(
+    model_class, model_config, prefix_types, explicit_input_mask, weighted_loss
+):
+    # Regression for #3899: each token's role must survive separation of context and input groups.
+    torch.manual_seed(0)
+    config_kwargs = (
+        {}
+        if prefix_types is None
+        else {"cpt_token_ids": list(range(len(prefix_types))), "cpt_tokens_type_mask": prefix_types}
+    )
+    config = CPTConfig(
+        task_type=TaskType.CAUSAL_LM,
+        opt_weighted_loss_type=weighted_loss,
+        opt_loss_decay_factor=0.95,
+        **config_kwargs,
+    )
+    model = get_peft_model(model_class(model_config), config).eval()
+    input_ids = torch.tensor([[5, 6, 7, 8], [8, 7, 6, 5]])
+    input_types = torch.tensor([[1, 2, 4, 4], [0, 4, 2, 4]]) if explicit_input_mask else torch.full_like(input_ids, 4)
+    kwargs = {"input_type_mask": input_types.clone()} if explicit_input_mask else {}
+
+    output = model(input_ids=input_ids, labels=input_ids.clone(), **kwargs)
+
+    prefix_labels = torch.tensor(config.cpt_token_ids).expand(2, -1)
+    prefix_types_tensor = torch.tensor(config.cpt_tokens_type_mask).expand(2, -1)
+    prefix_answers = (prefix_types_tensor > 0) & (prefix_types_tensor % 4 == 0)
+    input_answers = (input_types > 0) & (input_types % 4 == 0)
+    labels = torch.cat([prefix_labels, input_ids], dim=1)
+    labels[~torch.cat([prefix_answers, input_answers], dim=1)] = -100
+    losses = torch.nn.functional.cross_entropy(
+        output.logits[:, :-1].reshape(-1, 32), labels[:, 1:].reshape(-1), reduction="none"
+    ).view(2, -1)
+    weights = torch.ones_like(labels, dtype=torch.float32)
+    if weighted_loss == "decay":
+        weights[:, : config.num_virtual_tokens] = 0.95
+    valid = labels[:, 1:] != -100
+    expected = (losses[valid] * weights[:, 1:][valid]).mean()
+
+    torch.testing.assert_close(output.loss, expected)
