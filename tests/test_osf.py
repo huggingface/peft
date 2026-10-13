@@ -87,3 +87,21 @@ def test_osf_merge_and_unload_and_unmerge_behavior():
     # merge_and_unload should return the base model (no OSF wrappers)
     merged_model = wrapped.merge_and_unload()
     assert isinstance(merged_model.linear, torch.nn.Linear)
+
+
+def test_osf_merge_twice_applies_delta_once():
+    torch.manual_seed(0)
+    model = DummyModel(DummyConfig())
+    cfg = OSFConfig(target_modules=["linear"], effective_rank=2)
+    wrapped = get_peft_model(model, cfg)
+    osf_linear = wrapped.base_model.model.linear
+    with torch.no_grad():
+        osf_linear.osf_svd_params["default"]["S_low"].add_(1.0)
+
+    osf_linear.merge()
+    weight_after_first_merge = osf_linear.get_base_layer().weight.detach().clone()
+    with pytest.warns(UserWarning, match="All adapters are already merged"):
+        osf_linear.merge()
+
+    assert_close(osf_linear.get_base_layer().weight, weight_after_first_merge)
+    assert osf_linear.merged_adapters == ["default"]

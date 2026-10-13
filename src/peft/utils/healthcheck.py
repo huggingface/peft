@@ -334,9 +334,6 @@ def format_healthcheck(healthcheck: dict[str, Any], sep=", ", indent="  ") -> st
         Result (`str`)
             The formatted string in human-readable format.
     """
-    sep = ", "
-    indent = "  "
-
     summary = healthcheck["summary"]
     adapter_state = healthcheck["adapter_state"]
     environment = healthcheck["environment"]
@@ -398,16 +395,16 @@ def format_healthcheck(healthcheck: dict[str, Any], sep=", ", indent="  ") -> st
     ]
 
     if "adapter_layer_types" in summary:
-        layer_types = ""
+        layer_types = []
         for adapter_name, dct in summary["adapter_layer_types"].items():
-            layer_types += f"{indent}{adapter_name}:\n"
-            layer_types += f"{2 * indent}" + sep.join(f"{k}={v}" for k, v in dct.items())
-        lines.append(f"Layer types:\n{layer_types}")
+            layer_types.append(f"{indent}{adapter_name}:")
+            layer_types.append(f"{2 * indent}" + sep.join(f"{k}={v}" for k, v in dct.items()))
+        lines.extend(["Layer types:", *layer_types])
 
     findings = healthcheck["findings"]
     if findings:
         lines.append("Findings:")
-        lines.extend(f"  {finding['severity'].upper()}: {finding['message']}" for finding in findings)
+        lines.extend(f"{indent}{finding['severity'].upper()}: {finding['message']}" for finding in findings)
 
     result = "\n".join(lines)
     return result
