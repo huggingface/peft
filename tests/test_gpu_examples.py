@@ -6855,6 +6855,8 @@ def _test_lora_weight_synchronization(rank, world_size, init_lora_weights, lora_
                         assert torch.allclose(weight, g), (
                             f"{name}.{lora_name}.{param_name} differs between rank {rank} and rank {i}"
                         )
+        else:
+            raise ValueError(f"Unexpected tp_plan {tp_plan} for {name}")
 
 
 def _test_lora_gradient_synchronization(rank, world_size):
