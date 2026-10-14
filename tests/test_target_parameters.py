@@ -883,6 +883,14 @@ class TestTargetParameters:
             assert isinstance(mlp1.experts.base_layer, ParamWrapper)
             assert mlp1.experts.base_layer.parameter_name == "gate_up_proj"
 
+    def test_deepseek_v3_target_modules_partial_fused_projection_raises(self, deepseek_model):
+        # gate_proj also refers to the routed experts, where it is fused with up_proj into gate_up_proj, so targeting it
+        # without up_proj cannot be represented, see #3945
+        lora_config = LoraConfig(target_modules=["gate_proj", "down_proj"])
+        msg = "Cannot convert PEFT target(s) gate_proj without also targeting up_proj"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(deepseek_model, lora_config)
+
     @pytest.fixture
     def qwen_model(self):
         # docstyle-ignore
