@@ -1107,8 +1107,9 @@ class BaseTuner(nn.Module, ABC):
                     RuntimeWarning,
                 )
 
-        # Warn about rank_pattern / alpha_pattern entries that matched no targeted module. The
+        # Warn about rank_pattern / alpha_pattern entries that matched no targeted module or parameter. The
         # matching semantics are identical to `get_pattern_key`.
+        targeted_names = targeted_module_names + targeted_parameter_names
         for pattern_attr in ("rank_pattern", "alpha_pattern"):
             patterns = getattr(peft_config, pattern_attr, None)
             if not patterns:
@@ -1116,13 +1117,13 @@ class BaseTuner(nn.Module, ABC):
             matched = {
                 pattern_key
                 for pattern_key in patterns
-                if any(re.match(rf"(.*\.)?({pattern_key})$", module_name) for module_name in targeted_module_names)
+                if any(re.match(rf"(.*\.)?({pattern_key})$", name) for name in targeted_names)
             }
             unmatched = sorted(set(patterns) - matched)
             if unmatched:
                 warnings.warn(
-                    f"The following {pattern_attr} keys did not match any targeted module and were ignored: "
-                    f"{unmatched}.",
+                    f"The following {pattern_attr} keys did not match any targeted module or parameter and were "
+                    f"ignored: {unmatched}.",
                     RuntimeWarning,
                 )
 

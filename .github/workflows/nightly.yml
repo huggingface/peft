@@ -3,7 +3,7 @@ name: Self-hosted runner with slow tests (scheduled)
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 2 * * *"
+    - cron: "0 3 * * *"
 
 env:
   RUN_SLOW: "yes"
