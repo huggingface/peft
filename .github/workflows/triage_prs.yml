@@ -7,7 +7,8 @@
 # open PEFT issue approved by a listed maintainer or public Hugging
 # Face member with "/peft-triage: approved" on its own line outside a
 # code block, or link one of the discussions allowlisted in
-# scripts/triage_prs.py. Accepted issue references: #123,
+# scripts/triage_prs.py. The command may include a username to limit
+# approval to that PR author. Accepted issue references: #123,
 # huggingface/peft#123, or a full GitHub issue URL. Allowlisted
 # discussions must use their full GitHub URL.
 # Contributor allowlists do not grant approval authority. Only public
