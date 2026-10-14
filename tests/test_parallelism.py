@@ -206,7 +206,7 @@ class _ExpertParameterModel(nn.Module):
 )
 class TestExpertParameterParallelism:
     @staticmethod
-    def _check(rank, init_uri, shard_dim, is_transposed, num_experts=4, mesh_shape=(2,)):
+    def _check(rank, init_uri, shard_dim, is_transposed, num_experts=4, mesh_shape=(2,), squeeze_mesh=False):
         dist.init_process_group("gloo", init_method=init_uri, rank=rank, world_size=math.prod(mesh_shape))
         try:
             torch.set_num_threads(1)
@@ -216,14 +216,24 @@ class TestExpertParameterParallelism:
             reference_base = _ExpertParameterModel(is_transposed, num_experts)
             reference_base.experts.weight = nn.Parameter(weight.clone())
             shard_dims = shard_dim if isinstance(shard_dim, tuple) else (shard_dim,)
-            mesh = init_device_mesh(
-                "cpu", mesh_shape, mesh_dim_names=tuple("ep" if dim == 0 else "tp" for dim in shard_dims)
-            )
+            mesh_names = ("efsdp", "ep") if squeeze_mesh else tuple("ep" if dim == 0 else "tp" for dim in shard_dims)
+            mesh = init_device_mesh("cpu", mesh_shape, mesh_dim_names=mesh_names)
             placements = [Shard(dim) if dim is not None else Replicate() for dim in shard_dims]
             base.experts.weight = nn.Parameter(distribute_tensor(weight.clone(), mesh, placements))
             config = LoraConfig(r=2, lora_alpha=2, target_parameters=["experts.weight"], init_lora_weights=False)
             torch.manual_seed(7)
             model = get_peft_model(base, config)
+            if squeeze_mesh:
+                # The base is already unsharded during checkpoint recomputation, dropping its singleton FSDP axis.
+                # Adapter parameters keep their original mesh; only their temporary factors should follow the base.
+                wrapper = base.experts
+                original = wrapper.get_param()
+                wrapper.get_base_layer().weight = nn.Parameter(
+                    DTensor.from_local(
+                        original.to_local(), mesh["ep"], [Shard(0)], shape=original.shape, stride=original.stride()
+                    ),
+                    requires_grad=False,
+                )
             torch.manual_seed(7)
             reference = get_peft_model(reference_base, LoraConfig(**config.to_dict()))
             x = torch.randn(num_experts, 3, 6)
@@ -231,7 +241,10 @@ class TestExpertParameterParallelism:
             input_placements = [
                 Shard(0) if dim == 0 else Shard(2) if dim == input_dim else Replicate() for dim in shard_dims
             ]
-            distributed_x = distribute_tensor(x, mesh, input_placements)
+            input_mesh = mesh["ep"] if squeeze_mesh else mesh
+            distributed_x = distribute_tensor(
+                x, input_mesh, input_placements[1:] if squeeze_mesh else input_placements
+            )
             actual = model(distributed_x).full_tensor()
             expected = reference(x)
             torch.testing.assert_close(actual, expected)
@@ -284,6 +297,62 @@ class TestExpertParameterParallelism:
             nprocs=math.prod(mesh_shape),
             join=True,
         )
+
+    @pytest.mark.parametrize("is_transposed", [False, True])
+    def test_expert_factors_follow_unsharded_base_mesh(self, tmp_path, is_transposed):
+        mp.spawn(
+            self._check,
+            args=((tmp_path / "dist_init").as_uri(), (0, 0), is_transposed, 4, (1, 2), True),
+            nprocs=2,
+            join=True,
+        )
+
+    @staticmethod
+    def _check_local_proxy_checkpoint(rank, init_uri):
+        from torch.utils.checkpoint import checkpoint
+
+        from peft.tuners.lora.layer import _LoraFactorsProxy
+
+        dist.init_process_group("gloo", init_method=init_uri, rank=rank, world_size=2)
+        try:
+            torch.set_num_threads(1)
+            torch.manual_seed(7)
+            mesh = init_device_mesh("cpu", (1, 2), mesh_dim_names=("efsdp", "ep"))
+            placements = [Shard(0), Shard(0)]
+            weight = distribute_tensor(torch.randn(4, 6, 8), mesh, placements)
+            lhs = nn.Parameter(distribute_tensor(torch.randn(4, 6, 2), mesh, placements))
+            rhs = nn.Parameter(distribute_tensor(torch.randn(4, 2, 8), mesh, placements))
+            x = torch.randn(2, 3, 6, requires_grad=True)
+            expected = torch.bmm(x, weight.to_local() + 0.5 * torch.bmm(lhs.to_local(), rhs.to_local()))
+            expected.square().sum().backward()
+            expected_grads = [param.grad.full_tensor().clone() for param in (lhs, rhs)]
+            lhs.grad = rhs.grad = x.grad = None
+            calls = 0
+
+            def forward(local_x):
+                nonlocal calls
+                # The original FSDP forward and checkpoint recomputation expose different logical meshes.
+                tensors = (weight, lhs, rhs)
+                if calls:
+                    tensors = tuple(
+                        DTensor.from_local(t.to_local(), mesh["ep"], [Shard(0)], shape=t.shape, stride=t.stride())
+                        for t in tensors
+                    )
+                calls += 1
+                base, left, right = tensors
+                return torch.bmm(local_x, _LoraFactorsProxy(left, right, 0.5, local_tensor=True)(base))
+
+            actual = checkpoint(forward, x, use_reentrant=False)
+            torch.testing.assert_close(actual, expected)
+            actual.square().sum().backward()
+            assert calls == 2
+            for param, expected_grad in zip((lhs, rhs), expected_grads):
+                torch.testing.assert_close(param.grad.full_tensor(), expected_grad)
+        finally:
+            dist.destroy_process_group()
+
+    def test_local_expert_proxy_checkpoint_mesh_transition(self, tmp_path):
+        mp.spawn(self._check_local_proxy_checkpoint, args=((tmp_path / "dist_init").as_uri(),), nprocs=2, join=True)
 
     @staticmethod
     def _check_transformers(rank, init_uri, checkpoint, ep_size, device_type):
