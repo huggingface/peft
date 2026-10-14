@@ -2129,7 +2129,7 @@ class BaseTunerLayer(ABC):
         # Inference mode freezes both the adapter parameters and all adapter-specific submodules. The parent tuner
         # layer remains in its existing training/eval mode because it can host multiple adapters.
         for adapter_name in adapter_names:
-            self.set_training(adapter_name, not inference_mode)
+            self.set_training(adapter_name, self.training and not inference_mode)
 
         self._freeze_non_trainable_peft_weights(adapter_names)
         self._active_adapter = adapter_names

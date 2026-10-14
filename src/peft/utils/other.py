@@ -558,7 +558,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         """
         if isinstance(adapter_names, str):
             self._active_adapter = adapter_names
-            self.set_training(adapter_names, not inference_mode)
+            self.set_training(adapter_names, self.training and not inference_mode)
         else:
             self._active_adapter = []
             for adapter_name in adapter_names:
@@ -566,7 +566,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
                     raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
 
                 self._active_adapter.append(adapter_name)
-                self.set_training(adapter_name, not inference_mode)
+                self.set_training(adapter_name, self.training and not inference_mode)
 
     def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
         """Delete an adapter from the layer, set a new active adapter if necessary"""
@@ -757,7 +757,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
 
         _set_layer_requires_grad(self.modules_to_save[adapter_name], not inference_mode)
-        self.set_training(adapter_name, not inference_mode)
+        self.set_training(adapter_name, self.training and not inference_mode)
         self._active_adapter = adapter_name
 
     def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
@@ -1141,13 +1141,14 @@ def _set_trainable(
             if isinstance(grandparent, wrapper_cls):
                 grandparent.update(adapter_name, **wrapper_kwargs)
                 grandparent.set_adapter(grandparent.active_adapter, inference_mode=inference_mode)
-                grandparent.set_training(adapter_name, not inference_mode)
+                grandparent.set_training(adapter_name, grandparent.training and not inference_mode)
             elif isinstance(target, wrapper_cls):
                 target.update(adapter_name, **wrapper_kwargs)
                 target.set_adapter(target.active_adapter, inference_mode=inference_mode)
-                target.set_training(adapter_name, not inference_mode)
+                target.set_training(adapter_name, target.training and not inference_mode)
             else:
                 new_module = wrapper_cls(target, adapter_name, **wrapper_kwargs)
+                new_module.train(target.training)
                 if activate_adapter:
                     new_module.set_adapter(adapter_name, inference_mode=inference_mode)
                 else:
