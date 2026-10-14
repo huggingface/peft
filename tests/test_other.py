@@ -31,6 +31,7 @@ from transformers import (
 from peft import (
     AdaLoraConfig,
     HiraConfig,
+    LoHaConfig,
     LoraConfig,
     PeftModel,
     VeraConfig,
@@ -413,11 +414,11 @@ class TestModulesToSaveUnloadOriginalModule:
         torch.manual_seed(0)
         return MLP()
 
-    # The fix is in ModulesToSaveWrapper, but PEFT methods that use BaseTuner._replace_module additionally copy the
-    # weight of the trained copy onto the original module when unloading. Therefore, only the methods that override
-    # _replace_module are checked here.
+    # It is sufficient to test LoHa because all PEFT methods share the same code path. Exceptions are LoRA, AdaLoRA, and
+    # HiRA, which override BaseTuner._replace_module and are thus tested explicitly.
     @pytest.mark.parametrize(
-        "config_cls, config_kwargs", [(LoraConfig, {}), (AdaLoraConfig, {"total_step": 1}), (HiraConfig, {})]
+        "config_cls, config_kwargs",
+        [(LoHaConfig, {}), (LoraConfig, {}), (AdaLoraConfig, {"total_step": 1}), (HiraConfig, {})],
     )
     @pytest.mark.parametrize("unload_method", ["unload", "merge_and_unload"])
     def test_unload_modules_to_save(self, mlp, config_cls, config_kwargs, unload_method):
