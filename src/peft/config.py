@@ -19,7 +19,7 @@ import json
 import os
 import warnings
 from dataclasses import asdict, dataclass, field
-from typing import Optional, Union
+from typing import Optional, Self, Union
 
 import packaging.version
 from huggingface_hub import hf_hub_download
@@ -183,7 +183,7 @@ class PeftConfigMixin(PushToHubMixin):
             writer.write(json.dumps(_sort_keys(output_dict), indent=2))
 
     @classmethod
-    def from_peft_type(cls, **kwargs):
+    def from_peft_type(cls, **kwargs) -> Self:
         r"""
         This method loads the configuration of your adapter model from a set of kwargs.
 
@@ -248,7 +248,7 @@ class PeftConfigMixin(PushToHubMixin):
         return config
 
     @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path: str, subfolder: Optional[str] = None, **kwargs):
+    def from_pretrained(cls, pretrained_model_name_or_path: str, subfolder: Optional[str] = None, **kwargs) -> Self:
         r"""
         This method loads the configuration of your adapter model from a directory.
 
