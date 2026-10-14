@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import copy
 import math
 import warnings
 
@@ -449,3 +450,48 @@ def test_lorafa_respects_layer_specific_scaling_patterns(monkeypatch):
     assert torch.allclose(lin0_state["exp_avg_B"], expected_exp_avg_B(lin0, lin0_grad), rtol=1e-5, atol=1e-6), (
         "lin0 exp_avg_B does not match the expected layer-specific scaling"
     )
+
+
+@pytest.mark.parametrize("use_rslora", [False, True])
+@pytest.mark.parametrize("outer_no_grad", [False, True])
+def test_lorafa_closure_matches_external_backward(use_rslora, outer_no_grad):
+    # Regression for #3958: the closure must record gradients even inside step's no_grad context.
+    torch.manual_seed(42)
+    model = get_peft_model(
+        torch.nn.Sequential(torch.nn.Linear(4, 4, bias=False)),
+        LoraConfig(target_modules=["0"], r=2, lora_alpha=4, use_rslora=use_rslora),
+    ).train()
+    reference = copy.deepcopy(model)
+    opt = create_lorafa_optimizer(model, r=2, lora_alpha=4, lr=0.001, weight_decay=0.01)
+    refopt = create_lorafa_optimizer(reference, r=2, lora_alpha=4, lr=0.001, weight_decay=0.01)
+    x = torch.ones(2, 4)
+    before_a = model.get_base_model()[0].lora_A["default"].weight.detach().clone()
+    before_b = model.get_base_model()[0].lora_B["default"].weight.detach().clone()
+    calls = []
+
+    def closure():
+        calls.append(torch.is_grad_enabled())
+        opt.zero_grad()
+        loss = model(x).square().mean()
+        loss.backward()
+        return loss
+
+    for _ in range(3):
+        refopt.zero_grad()
+        expected_loss = reference(x).square().mean()
+        expected_loss.backward()
+        refopt.step()
+        with torch.set_grad_enabled(not outer_no_grad):
+            original_mode = torch.is_grad_enabled()
+            actual_loss = opt.step(closure)
+            assert torch.is_grad_enabled() == original_mode
+        assert actual_loss.requires_grad
+        torch.testing.assert_close(actual_loss, expected_loss, rtol=0, atol=0)
+        for p, q in zip(model.parameters(), reference.parameters()):
+            torch.testing.assert_close(p, q, rtol=0, atol=0)
+    assert calls == [True, True, True]
+    a = model.get_base_model()[0].lora_A["default"].weight
+    b = model.get_base_model()[0].lora_B["default"].weight
+    assert a.grad is None
+    assert torch.equal(a, before_a)
+    assert not torch.equal(b, before_b)
