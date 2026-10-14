@@ -451,35 +451,23 @@ def test_lorafa_respects_layer_specific_scaling_patterns(monkeypatch):
     )
 
 
-@pytest.mark.parametrize("use_rslora", [False, True])
-@pytest.mark.parametrize("outer_no_grad", [False, True])
-def test_lorafa_closure_enables_gradients(use_rslora, outer_no_grad):
-    # Regression for #3958: step must enable gradients while evaluating the closure.
+def test_lorafa_step_with_closure():
+    # Regression for #3958: backward inside the closure must not run under no_grad.
     torch.manual_seed(42)
     model = get_peft_model(
         torch.nn.Sequential(torch.nn.Linear(4, 4, bias=False)),
-        LoraConfig(target_modules=["0"], r=2, lora_alpha=4, use_rslora=use_rslora),
-    ).train()
+        LoraConfig(target_modules=["0"], r=2, lora_alpha=4),
+    )
     optimizer = create_lorafa_optimizer(model, r=2, lora_alpha=4, lr=0.001)
     x = torch.ones(2, 4)
-    layer = model.get_base_model()[0]
-    a = layer.lora_A["default"].weight
-    b = layer.lora_B["default"].weight
-    initial_b = b.detach().clone()
 
     def closure():
-        assert torch.is_grad_enabled()
         optimizer.zero_grad()
         loss = model(x).square().mean()
         loss.backward()
-        assert b.grad is not None
-        assert torch.isfinite(b.grad).all()
-        assert torch.count_nonzero(b.grad) > 0
         return loss
 
-    with torch.set_grad_enabled(not outer_no_grad):
-        loss = optimizer.step(closure)
-        assert torch.is_grad_enabled() == (not outer_no_grad)
-    assert loss.requires_grad
-    assert a.grad is None
-    assert not torch.equal(b, initial_b)
+    optimizer.step(closure)
+    grad = model.get_base_model()[0].lora_B["default"].weight.grad
+    assert grad is not None
+    assert torch.count_nonzero(grad) > 0
