@@ -490,6 +490,36 @@ class TestShadowKVCache:
             uncached = model.generate(input_ids=ids, max_new_tokens=4, use_cache=False, do_sample=False)
         assert torch.equal(cached, uncached)
 
+    def test_explicit_shadow_model_utf8_config(self, tmp_path):
+        # Regression for the UTF-8 pin in `_load_shadow_backbone`: a shadow checkpoint whose
+        # config.json contains literal non-ASCII (e.g. a CJK `_name_or_path`, hand-edited or written
+        # by another tool with ensure_ascii=False) must load on locales whose default encoding is
+        # not UTF-8 (e.g. cp936 on Windows, or LC_ALL=C on Linux).
+        base = make_llama_causal()
+        shadow_hidden = base.config.hidden_size // 2
+        shadow_cfg = LlamaConfig(
+            vocab_size=base.config.vocab_size,
+            hidden_size=shadow_hidden,
+            intermediate_size=2 * shadow_hidden,
+            num_hidden_layers=1,
+            num_attention_heads=base.config.num_attention_heads,
+            num_key_value_heads=getattr(base.config, "num_key_value_heads", base.config.num_attention_heads),
+            max_position_embeddings=base.config.max_position_embeddings,
+        )
+        LlamaModel(shadow_cfg).save_pretrained(tmp_path)
+        config_path = tmp_path / "config.json"
+        with open(config_path, encoding="utf-8") as f:
+            raw_config = json.load(f)
+        raw_config["_name_or_path"] = "汉 模型 🤗"
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(raw_config, f, ensure_ascii=False)
+
+        model = get_peft_model(
+            base,
+            ShadowConfig(task_type="CAUSAL_LM", shadow_model=str(tmp_path), init_weights=False),
+        )
+        assert isinstance(model, PeftModel)
+
     def test_shadow_cache_reorder_and_crop(self):
         model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
         model.eval()
