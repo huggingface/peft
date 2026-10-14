@@ -17,7 +17,8 @@ Add the string
 
       /peft-triage approved
 
-to approve an issue.
+to approve an issue. Add a GitHub username to limit approval to that contributor, for example `/peft-triage approved
+username` or `/peft-triage approved @username`.
 """
 
 import os
@@ -58,9 +59,10 @@ CLOSURE_MESSAGE = (
     "{closure_marker}\n\n"
     "Thank you for your interest in contributing to PEFT. This PR is being closed because its description "
     "does not reference an accepted PEFT discussion or an open PEFT issue with explicit approval from a "
-    "maintainer or public Hugging Face organization member.\n\n"
+    "maintainer or public Hugging Face organization member that applies to this PR's author.\n\n"
     "Please open or find an issue, discuss the proposed contribution, and wait for an authorized "
-    "person to comment `/{bot_name} approved` before opening a PR. "
+    "person to comment `/{bot_name} approved` before opening a PR. To limit approval to one contributor, "
+    "the commenter can add that person's username after `approved`. "
     "Once approved, reference it in this PR's description (for example, `Fixes #123`) and reopen the PR; "
     "there is no need to create another PR.\n\n"
     "If you believe this PR was closed incorrectly, please ping the maintainers here.\n\n"
@@ -228,11 +230,19 @@ def iter_unfenced_lines(body):
             yield line
 
 
-def contains_approval(body, bot_name):
-    """Require the command on its own line, outside HTML comments and Markdown code fences."""
-    return any(
-        re.fullmatch(rf" {{0,3}}/{re.escape(bot_name)} approved[ \t]*", line) for line in iter_unfenced_lines(body)
-    )
+def contains_approval(body, bot_name, author_login=None):
+    """Match a general approval or one scoped to this PR author, outside HTML comments and Markdown code fences."""
+    username = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?"
+    pattern = re.compile(rf" {{0,3}}/{re.escape(bot_name)} approved(?:[ \t]+@?({username}))?[ \t]*")
+    for line in iter_unfenced_lines(body):
+        match = pattern.fullmatch(line)
+        if match:
+            approved_author = match[1]
+            if approved_author is None or (
+                author_login is not None and approved_author.casefold() == author_login.casefold()
+            ):
+                return True
+    return False
 
 
 def is_eligible_pr(pr, since):
@@ -282,7 +292,7 @@ class PullRequestTriage:
             )
         )
 
-    def has_approved_issue(self, body):
+    def has_approved_issue(self, body, author_login):
         for number in extract_issue_numbers(body, self.repository):
             try:
                 issue = self.client.get(f"{self.path}/issues/{number}")
@@ -297,7 +307,8 @@ class PullRequestTriage:
 
             comments = self.client.list_items(f"{self.path}/issues/{number}/comments")
             if any(
-                contains_approval(comment["body"], self.bot_name) and self.can_approve(comment["user"]["id"])
+                contains_approval(comment["body"], self.bot_name, author_login=author_login)
+                and self.can_approve(comment["user"]["id"])
                 for comment in comments
             ):
                 return True
@@ -335,7 +346,7 @@ class PullRequestTriage:
             or self.is_exempt_author(pr["user"]["id"])
             or self.has_allowed_issue(pr["body"])
             or self.has_allowed_discussion(pr["body"])
-            or self.has_approved_issue(pr["body"])
+            or self.has_approved_issue(pr["body"], pr["user"]["login"])
         )
         comments = [] if approved else self.client.list_items(f"{self.path}/issues/{number}/comments")
         current = self.client.get(f"{self.path}/pulls/{number}")
