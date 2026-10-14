@@ -33,6 +33,12 @@ from .utils import CONFIG_NAME, PeftType, TaskType
 # we expect at least these keys to be present in a PEFT adapter_config.json
 MIN_EXPECTED_CONFIG_KEYS = {"peft_type"}
 
+# The adapter_config.json is written with sorted keys, except for the dicts stored under these keys, whose order has to
+# survive a save/load round trip. For rank_pattern and alpha_pattern, the order matters because when more than one key
+# matches a module, the first one wins. If another config argument needs its order preserved, add it here and extend
+# this comment.
+CONFIG_KEYS_WITH_PRESERVED_ORDER = {"rank_pattern", "alpha_pattern"}
+
 
 def _check_and_remove_unused_kwargs(cls, kwargs):
     """Make PEFT configs forward-compatible by removing unused kwargs that were added in later PEFT versions.
@@ -47,6 +53,20 @@ def _check_and_remove_unused_kwargs(cls, kwargs):
     for key in unexpected_kwargs:
         del kwargs[key]
     return kwargs, unexpected_kwargs
+
+
+def _sort_keys(obj):
+    """Sort the keys of all dicts in obj, like `json.dumps(..., sort_keys=True)`, except for the dicts stored under
+    `CONFIG_KEYS_WITH_PRESERVED_ORDER`.
+    """
+    if isinstance(obj, dict):
+        return {
+            key: value if key in CONFIG_KEYS_WITH_PRESERVED_ORDER else _sort_keys(value)
+            for key, value in sorted(obj.items())
+        }
+    if isinstance(obj, (list, tuple)):
+        return [_sort_keys(item) for item in obj]
+    return obj
 
 
 def _is_dev_version(version: str) -> bool:
@@ -160,7 +180,7 @@ class PeftConfigMixin(PushToHubMixin):
 
         # save it
         with open(output_path, "w") as writer:
-            writer.write(json.dumps(output_dict, indent=2, sort_keys=True))
+            writer.write(json.dumps(_sort_keys(output_dict), indent=2))
 
     @classmethod
     def from_peft_type(cls, **kwargs):
