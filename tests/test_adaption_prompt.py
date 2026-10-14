@@ -110,10 +110,11 @@ class TestAdaptionPrompt:
                     if name.endswith("adaption_gate"):
                         param.fill_(0.5)
             model.save_pretrained(tmp_path)
-            frozen = PeftModel.from_pretrained(
+            # This is a separate inference-only model, not the trainable "default" adapter in model.
+            frozen_model = PeftModel.from_pretrained(
                 self.transformers_class.from_pretrained(model_id), tmp_path, adapter_name=adapter_name
             )
-            assert not any(param.requires_grad for param in frozen.parameters())
+            assert not any(param.requires_grad for param in frozen_model.parameters())
             trainable = PeftModel.from_pretrained(
                 self.transformers_class.from_pretrained(model_id),
                 tmp_path,
@@ -129,11 +130,12 @@ class TestAdaptionPrompt:
             output = model(**inputs)
             output.logits.sum().backward()
             assert any(param.grad is not None for param in model.parameters())
-            assert not frozen(**inputs).logits.requires_grad
-            assert_close(frozen(**inputs).logits, output.logits)
+            assert not frozen_model(**inputs).logits.requires_grad
+            assert_close(frozen_model(**inputs).logits, output.logits)
 
             model.set_adapter("frozen")
             assert not any(param.requires_grad for param in model.parameters())
+            # The original default adapter was created trainable; switching back restores that adapter.
             model.set_adapter("default")
             assert any(param.requires_grad for param in model.parameters())
 

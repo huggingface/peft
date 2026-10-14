@@ -705,10 +705,11 @@ class TestDecoderModels(PeftCommonTester):
             assert any(param.requires_grad for param in model.prompt_encoder["default"].parameters())
 
             frozen_config = config_cls(**{**config_kwargs, "inference_mode": True})
-            frozen = get_peft_model(
+            # This is a separate inference-only model; model's default adapter remains trainable.
+            frozen_model = get_peft_model(
                 self.transformers_class.from_pretrained(model_id), frozen_config, adapter_name=adapter_name
             )
-            assert not any(param.requires_grad for param in frozen.parameters())
+            assert not any(param.requires_grad for param in frozen_model.parameters())
             model.add_adapter("frozen", frozen_config)
 
             assert not any(param.requires_grad for param in model.prompt_encoder["frozen"].parameters())
@@ -721,7 +722,7 @@ class TestDecoderModels(PeftCommonTester):
             output = model(**inputs)
             output.logits.sum().backward()
             assert any(param.grad is not None for param in model.prompt_encoder["default"].parameters())
-            assert not frozen(**inputs).logits.requires_grad
+            assert not frozen_model(**inputs).logits.requires_grad
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize(
@@ -738,10 +739,11 @@ class TestDecoderModels(PeftCommonTester):
             model = get_peft_model(self.transformers_class.from_pretrained(model_id), config)
             assert any(param.requires_grad for param in model.prompt_encoder["default"].parameters())
             model.save_pretrained(tmp_path)
-            frozen = PeftModel.from_pretrained(
+            # Loading the checkpoint freezes this separate model, not model's original default adapter.
+            frozen_model = PeftModel.from_pretrained(
                 self.transformers_class.from_pretrained(model_id), tmp_path, adapter_name=adapter_name
             )
-            assert not any(param.requires_grad for param in frozen.parameters())
+            assert not any(param.requires_grad for param in frozen_model.parameters())
             model.load_adapter(tmp_path, adapter_name="frozen")
             assert not any(param.requires_grad for param in model.prompt_encoder["frozen"].parameters())
             assert any(param.requires_grad for param in model.prompt_encoder["default"].parameters())
@@ -753,8 +755,8 @@ class TestDecoderModels(PeftCommonTester):
             output = model(**inputs)
             output.logits.sum().backward()
             assert any(param.grad is not None for param in model.prompt_encoder["default"].parameters())
-            assert not frozen(**inputs).logits.requires_grad
-            torch.testing.assert_close(frozen(**inputs).logits, output.logits)
+            assert not frozen_model(**inputs).logits.requires_grad
+            torch.testing.assert_close(frozen_model(**inputs).logits, output.logits)
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
