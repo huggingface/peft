@@ -365,8 +365,8 @@ def test_cpt_forward_loss_matches_reference():
 def test_cpt_forward_does_not_mutate_input_type_mask():
     """A forward pass must leave the caller-provided input_type_mask unchanged.
 
-    The CPT forward used to shift the mask in place, so every call rewrote the tensor held by the caller (e.g. a
-    batch stored in a dataset and reused across epochs) and the drift compounded on each forward.
+    The CPT forward used to shift the mask in place, so every call rewrote the tensor held by the caller (e.g. a batch
+    stored in a dataset and reused across epochs) and the drift compounded on each forward.
     """
     config = CPTConfig(
         cpt_token_ids=[0, 1, 2, 3],
