@@ -2009,15 +2009,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
             raise ValueError(
                 f"Only same embed for query/key/value is supported as of now for {self.__class__.__name__}."
             )
-        if config.use_dora:
-            # TODO: probably not so hard to implement
-            raise ValueError(f"{self.__class__.__name__} does not support DoRA (yet), please set use_dora to False")
-        if config.velora_config is not None:
-            raise ValueError(f"{self.__class__.__name__} does not support VeLoRA, please set `velora_config=None`.")
-        if config.kasa_config is not None:
-            raise ValueError(f"{self.__class__.__name__} does not support KaSA, please set `kasa_config=None`.")
-        if kwargs.get("use_alora", False):
-            raise ValueError(f"{self.__class__.__name__} does not support aLoRA (yet), please set use_alora to False")
+        self._check_config(config, **kwargs)
         super().__init__()
         LoraLayer.__init__(self, base_layer, **kwargs)
 
@@ -2096,10 +2088,27 @@ class MultiheadAttention(nn.Module, LoraLayer):
     def add_zero_attn(self) -> bool:
         return self.get_base_layer().add_zero_attn
 
-    def update_layer(self, *args, **kwargs) -> None:
-        super().update_layer(*args, **kwargs)
+    def _check_config(self, config: LoraConfig, **kwargs) -> None:
+        # Called from __init__ before out_proj is wrapped and from update_layer, which is what adding another adapter
+        # to an existing layer goes through.
+        if config.use_dora:
+            # TODO: probably not so hard to implement
+            raise ValueError(f"{self.__class__.__name__} does not support DoRA (yet), please set use_dora to False")
+        if config.velora_config is not None:
+            raise ValueError(f"{self.__class__.__name__} does not support VeLoRA, please set `velora_config=None`.")
+        if config.kasa_config is not None:
+            raise ValueError(f"{self.__class__.__name__} does not support KaSA, please set `kasa_config=None`.")
+        if kwargs.get("use_alora", False):
+            raise ValueError(f"{self.__class__.__name__} does not support aLoRA (yet), please set use_alora to False")
+        if config.lora_bias:
+            # lora_bias is never applied to in_proj, so it would not train
+            raise ValueError(f"{self.__class__.__name__} does not support lora_bias, please set lora_bias to False")
+
+    def update_layer(self, adapter_name: str, r: int, lora_alpha: int, config: LoraConfig, **kwargs) -> None:
+        self._check_config(config, **kwargs)
+        super().update_layer(adapter_name, r, lora_alpha=lora_alpha, config=config, **kwargs)
         # Note: LoRA is applied to both in_proj and out_proj. There is currently no way to only specify one of them.
-        self.base_layer.out_proj.update_layer(*args, **kwargs)
+        self.base_layer.out_proj.update_layer(adapter_name, r, lora_alpha=lora_alpha, config=config, **kwargs)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -2150,8 +2159,8 @@ class MultiheadAttention(nn.Module, LoraLayer):
                     del base_layer.in_proj_weight
                     base_layer.in_proj_weight = orig_weight_in
 
-                    # Call out_proj.merge to handle lora_bias if present and mark the adapter as merged. Don't use the
-                    # merged weight though but the weight computed above.
+                    # Call out_proj.merge to mark the adapter as merged. Don't use the merged weight it computes
+                    # but the weight computed above.
                     base_layer.out_proj.merge(safe_merge=True, adapter_names=[active_adapter])
                     del base_layer.out_proj.get_base_layer().weight
                     base_layer.out_proj.get_base_layer().weight = orig_weight_out
@@ -2169,8 +2178,8 @@ class MultiheadAttention(nn.Module, LoraLayer):
                     # merging out_proj (subclass of nn.Linear)
                     delta_weight = base_layer.out_proj.get_delta_weight(active_adapter).to(orig_dtype)
                     weight_merged = base_layer.out_proj.weight.data.detach() + delta_weight
-                    # Call out_proj.merge to handle lora_bias if present and mark the adapter as merged. Don't use the
-                    # merged weight though but the weight computed above.
+                    # Call out_proj.merge to mark the adapter as merged. Don't use the merged weight it computes
+                    # but the weight computed above.
                     base_layer.out_proj.merge(adapter_names=[active_adapter])
                     del base_layer.out_proj.get_base_layer().weight
                     base_layer.out_proj.get_base_layer().weight = weight_merged

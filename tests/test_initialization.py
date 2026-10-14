@@ -1484,6 +1484,34 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config)
 
+    def test_mha_with_lora_bias_raises(self, mha_cls):
+        model = mha_cls()
+        config = LoraConfig(target_modules=["mha"], lora_bias=True)
+        msg = re.escape("MultiheadAttention does not support lora_bias, please set lora_bias to False")
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+        # the error is raised before the out_proj of the base model is wrapped
+        assert type(model.mha.out_proj) is nn.modules.linear.NonDynamicallyQuantizableLinear
+
+    def test_mha_add_adapter_with_lora_bias_raises(self, mha_cls):
+        model = get_peft_model(mha_cls(), LoraConfig(target_modules=["mha"]))
+        config = LoraConfig(target_modules=["mha"], lora_bias=True)
+        msg = re.escape("MultiheadAttention does not support lora_bias, please set lora_bias to False")
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", config)
+        # the failed adapter leaves nothing behind
+        assert "other" not in model.peft_config
+        assert "other" not in model.base_model.model.mha.lora_A
+        assert "other" not in model.base_model.model.mha.base_layer.out_proj.lora_A
+
+    def test_mha_add_adapter_with_dora_raises(self, mha_cls):
+        # adding an adapter goes through update_layer, which needs the same checks as __init__
+        model = get_peft_model(mha_cls(), LoraConfig(target_modules=["mha"]))
+        config = LoraConfig(target_modules=["mha"], use_dora=True)
+        msg = re.escape("MultiheadAttention does not support DoRA (yet), please set use_dora to False")
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", config)
+
     def test_mha_exposes_attributes(self, mha_cls):
         # MHA requires a bunch of attributes to be exposed, try to check them exhaustively here
         model = mha_cls()
