@@ -376,7 +376,9 @@ def test_cpt_forward_loss_matches_reference(adapter_name, loss_type):
 
 @pytest.mark.parametrize("decay_factor", [0.25, 0.5])
 def test_cpt_forward_loss_uses_switched_adapter_config(decay_factor):
-    # Regression for #3879: switching prompts must also switch the loss configuration.
+    # Each CPT adapter has its own prompt encoder and loss configuration. Compare switching from the unweighted
+    # "default" adapter to the weighted "experiment" adapter with a separate model using only that weighted adapter.
+    # Switching back must restore the default loss; matching logits isolates the loss configuration regression (#3879).
     config = CPTConfig(
         cpt_token_ids=[0, 1, 2, 3, 4, 5, 6, 7],
         cpt_mask=[1] * 8,
@@ -401,13 +403,13 @@ def test_cpt_forward_loss_uses_switched_adapter_config(decay_factor):
         default_output = model(**inputs)
         model.set_adapter("experiment")
         switched_output = model(**inputs)
-        expected_output = reference(**inputs)
+        weighted_adapter_output = reference(**inputs)
         model.set_adapter("default")
         restored_output = model(**inputs)
 
-    torch.testing.assert_close(switched_output.logits, expected_output.logits)
-    torch.testing.assert_close(switched_output.loss, expected_output.loss)
-    assert not torch.allclose(default_output.loss, expected_output.loss)
+    torch.testing.assert_close(switched_output.logits, weighted_adapter_output.logits)
+    torch.testing.assert_close(switched_output.loss, weighted_adapter_output.loss)
+    assert not torch.allclose(default_output.loss, weighted_adapter_output.loss)
     torch.testing.assert_close(restored_output.loss, default_output.loss)
 
     model.set_adapter("experiment")
