@@ -20,6 +20,7 @@ import warnings
 import pytest
 import torch
 from torch import nn
+from transformers import BartConfig, BartForConditionalGeneration
 
 import peft.optimizers.lorafa as lorafa_module
 from peft import LoraConfig, get_peft_model
@@ -449,3 +450,47 @@ def test_lorafa_respects_layer_specific_scaling_patterns(monkeypatch):
     assert torch.allclose(lin0_state["exp_avg_B"], expected_exp_avg_B(lin0, lin0_grad), rtol=1e-5, atol=1e-6), (
         "lin0 exp_avg_B does not match the expected layer-specific scaling"
     )
+
+
+@pytest.mark.parametrize("layerdrop", [0.0, 1.0])
+def test_lorafa_bart_layerdrop(layerdrop):
+    # Skipping an encoder layer leaves its LoRA gradients as None, not zero tensors. The optimizer must skip them
+    # before attempting a matrix multiplication with the missing gradient (#3900).
+    torch.manual_seed(42)
+    base = BartForConditionalGeneration(
+        BartConfig(
+            vocab_size=32,
+            d_model=16,
+            encoder_layers=1,
+            decoder_layers=1,
+            encoder_attention_heads=2,
+            decoder_attention_heads=2,
+            encoder_ffn_dim=32,
+            decoder_ffn_dim=32,
+            max_position_embeddings=32,
+            # Drop encoder layers only so active decoder adapters keep the loss connected to trainable parameters.
+            encoder_layerdrop=layerdrop,
+            decoder_layerdrop=0.0,
+            dropout=0.0,
+            attention_dropout=0.0,
+            activation_dropout=0.0,
+            bos_token_id=1,
+            eos_token_id=2,
+            pad_token_id=0,
+            decoder_start_token_id=1,
+        )
+    )
+    model = (
+        get_peft_model(
+            base, LoraConfig(r=2, lora_alpha=2, target_modules=["q_proj", "v_proj"], task_type="SEQ_2_SEQ_LM")
+        )
+        .to(torch_device)
+        .train()
+    )
+    optimizer = create_lorafa_optimizer(model, r=2, lora_alpha=2, lr=0.001, weight_decay=0.1)
+    ids = torch.tensor([[3, 4, 5, 2]], device=torch_device)
+    loss = model(input_ids=ids, attention_mask=torch.ones_like(ids), labels=ids).loss
+    loss.backward()
+    missing = [name for name, p in model.named_parameters() if "lora_B" in name and p.grad is None]
+    assert len(missing) == (2 if layerdrop else 0)
+    optimizer.step()
