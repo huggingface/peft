@@ -63,17 +63,17 @@ type_ids  = [1,      1,  1, 1,    1, 2,  2, 2,  3,     3, 4, 5,       5, 5, 6,  
                                                            # 1,       1, 1, 2,  2, 2, 3,     3,  4
 ```
 
-The `token_ids` variable corresponds to [~`CPTConfig.cpt_token_ids`] and `type_ids` corresponds to
-[~`CPTConfig.cpt_tokens_type_mask`].
+The `token_ids` variable corresponds to [`~CPTConfig.cpt_token_ids`] and `type_ids` corresponds to
+[`~CPTConfig.cpt_tokens_type_mask`].
 
 The individual ids have different effects on the training process:
 
 * 0: will be completely ignored, doesn't contribute to the loss and these tokens are not trained
 * 1 and 3: these tokens are considered for formatting and the maximum norm of their embedding delta is controlled by
-  [~`CPTConfig.opt_projection_format_epsilon`]. The norm controls the maximum magnitude in which the learned delta
+  [`~CPTConfig.opt_projection_format_epsilon`]. The norm controls the maximum magnitude in which the learned delta
   embeddings for this type can point. Higher norms mean a higher potential change in meaning.
 * 2: these tokens are considered for the input of an example and the maximum norm of their embedding delta is controlled
-  by [~`CPTConfig.opt_projection_epsilon`]. The norm controls the maximum magnitude in which the learned delta
+  by [`~CPTConfig.opt_projection_epsilon`]. The norm controls the maximum magnitude in which the learned delta
   embeddings for this type can point. Higher norms mean a higher potential change in meaning.
 * 4: The prompt's label tokens are added as extra next-token-prediction targets to the standard loss on your training
   data; every other soft-prompt token is masked out of the loss. The label token delta embeddings are never changed
@@ -82,9 +82,9 @@ The individual ids have different effects on the training process:
 You may have noticed that the numbers in `type_ids` for the second example are shifted by 4. CPT has an exponential
 weighting of the examples you provide in the prompt, the last example being the least decayed and the first example
 being the most decaying. This gives more weight to examples closer to the actual input query and is controlled by
-[~`CPTConfig.opt_loss_decay_factor`] when [~`CPTConfig.opt_weighted_loss_type`] is set to `"decay"`. By shifting the
-examples by 4 we can enumerate the different examples so that the loss can give the different decaying weightings
-to each example.
+[`~CPTConfig.opt_loss_decay_factor`] when [`~CPTConfig.opt_weighted_loss_type`] is set to `"decay"`. By
+shifting the examples by 4 we can enumerate the different examples so that the loss can give the different decaying
+weightings to each example.
 
 Note that `cpt_tokens_type_mask` only describes the soft prompt itself. When training, additionally pass an
 `input_type_mask` tensor alongside each batch, assigning type ids to the tokens of your actual input (using ids 0-4 as
