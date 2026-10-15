@@ -490,11 +490,15 @@ class TestShadowKVCache:
             uncached = model.generate(input_ids=ids, max_new_tokens=4, use_cache=False, do_sample=False)
         assert torch.equal(cached, uncached)
 
+    @pytest.mark.skipif(platform.system() != "Windows", reason="locale-encoding regression only manifests on Windows")
     def test_explicit_shadow_model_utf8_config(self, tmp_path):
-        # Regression for the UTF-8 pin in `_load_shadow_backbone`: a shadow checkpoint whose
-        # config.json contains literal non-ASCII (e.g. a CJK `_name_or_path`, hand-edited or written
-        # by another tool with ensure_ascii=False) must load on locales whose default encoding is
-        # not UTF-8 (e.g. cp936 on Windows, or LC_ALL=C on Linux).
+        # ShadowPEFT-specific counterpart of test_from_json_file_utf8_non_ascii in
+        # tests/test_config.py: that test covers PeftConfig.from_json_file, but the shadow
+        # backbone config is loaded through a separate code path (`_load_shadow_backbone`),
+        # so it needs its own regression. A shadow checkpoint whose config.json contains
+        # literal non-ASCII (e.g. a CJK `_name_or_path`, hand-edited or written by another
+        # tool with ensure_ascii=False) must load on Windows, where the locale encoding
+        # (e.g. cp936) is not UTF-8.
         base = make_llama_causal()
         shadow_hidden = base.config.hidden_size // 2
         shadow_cfg = LlamaConfig(
