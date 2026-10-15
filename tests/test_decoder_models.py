@@ -705,15 +705,18 @@ class TestDecoderModels(PeftCommonTester):
             assert any(param.requires_grad for param in model.prompt_encoder["default"].parameters())
 
             frozen_config = config_cls(**{**config_kwargs, "inference_mode": True})
-            # This is a separate inference-only model; model's default adapter remains trainable.
+            model.add_adapter("frozen", frozen_config)
+            assert not any(param.requires_grad for param in model.prompt_encoder["frozen"].parameters())
+            # Adding the inactive inference-only adapter leaves the default adapter trainable.
+            assert any(param.requires_grad for param in model.prompt_encoder["default"].parameters())
+
+            # Create a separate inference-only model with its own config instance.
             frozen_model = get_peft_model(
-                self.transformers_class.from_pretrained(model_id), frozen_config, adapter_name=adapter_name
+                self.transformers_class.from_pretrained(model_id),
+                config_cls(**{**config_kwargs, "inference_mode": True}),
+                adapter_name=adapter_name,
             )
             assert not any(param.requires_grad for param in frozen_model.parameters())
-            model.add_adapter("frozen", frozen_config)
-
-            assert not any(param.requires_grad for param in model.prompt_encoder["frozen"].parameters())
-            assert any(param.requires_grad for param in model.prompt_encoder["default"].parameters())
 
             inputs = {"input_ids": torch.tensor([[1, 2, 3]]), "task_ids": torch.tensor([0])}
             if config_cls != MultitaskPromptTuningConfig:
