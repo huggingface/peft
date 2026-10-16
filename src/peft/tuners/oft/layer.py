@@ -242,7 +242,7 @@ class OFTRotationModule(nn.Module):
 
         return x_folded
 
-    def forward(self, x):
+    def forward(self, x, dropout: Optional[nn.Module] = None):
         # This module doesn't need to implement the orthogonal transform
         # It's primarily a container for the parameter
         # The actual transformation logic stays in your OFTLayer
@@ -260,6 +260,9 @@ class OFTRotationModule(nn.Module):
         orth_rotate = self._cayley_batch(
             self.weight, self.block_size, self.use_cayley_neumann, self.num_cayley_neumann_terms
         )
+        if dropout is not None:
+            # multiplicative dropout: replace a fraction of the rotation blocks by the identity during training
+            orth_rotate = dropout(orth_rotate)
 
         # Unfold the input for Conv2d layer
         if len(orig_shape) == 4:
@@ -651,7 +654,7 @@ class Linear(nn.Module, OFTLayer):
                 oft_R = self.oft_R[active_adapter]
 
                 x = self._cast_input_dtype(x, oft_R.weight.dtype)
-                x = oft_R(x)
+                x = oft_R(x, dropout=self.oft_dropout[active_adapter])
 
             result = self.base_layer(x.to(previous_dtype), *args, **kwargs)
 
@@ -909,7 +912,7 @@ class Conv2d(nn.Module, OFTLayer):
 
                 oft_R = self.oft_R[active_adapter]
                 x = self._cast_input_dtype(x, oft_R.weight.dtype)
-                x = oft_R(x)
+                x = oft_R(x, dropout=self.oft_dropout[active_adapter])
 
             result = self.base_layer(x.to(previous_dtype), *args, **kwargs)
 

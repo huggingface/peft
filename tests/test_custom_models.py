@@ -2652,6 +2652,43 @@ class TestPeftCustomModel(PeftCommonTester):
                 )
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_dropout_is_applied_in_train_mode(self, test_name, model_id, config_cls, config_kwargs):
+        # Regression test for https://github.com/huggingface/peft/issues/3830: OFT's module_dropout had become a
+        # no-op. A dropout argument of a PEFT config must make the adapted model stochastic in train mode and must be
+        # inactive in eval mode. The dropout arguments are not named uniformly (`lora_dropout`, `rank_dropout`,
+        # `module_dropout`, `hira_dropout`, ...), so the test runs for every test case whose config_kwargs set an
+        # argument ending in "dropout" and raises those arguments to 0.5, which is enough for the block-wise
+        # multiplicative dropout of OFT and BOFT to replace at least one block.
+        dropout_kwargs = [key for key in config_kwargs if key.endswith("dropout")]
+        if not dropout_kwargs:
+            pytest.skip("This test case does not set a dropout argument.")
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        config_kwargs = {**config_kwargs, **dict.fromkeys(dropout_kwargs, 0.5)}
+
+        with hub_online_once(model_id):
+            base = self.transformers_class.from_pretrained(model_id)
+            # the base model's own dropout layers (MLP.drop) must not be what makes the output stochastic
+            for module in base.modules():
+                if isinstance(module, nn.Dropout):
+                    module.p = 0.0
+            config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+            model = get_peft_model(base, config).to(self.torch_device)
+            inputs = self.prepare_inputs_for_testing()
+
+            model.train()
+            torch.manual_seed(0)
+            with torch.no_grad():
+                outputs = [model(**inputs) for _ in range(20)]
+            assert not all(torch.allclose(outputs[0], output) for output in outputs[1:]), (
+                f"{', '.join(dropout_kwargs)} had no effect in train mode for {test_name}"
+            )
+
+            model.eval()
+            with torch.no_grad():
+                output_eval = model(**inputs)
+                assert torch.allclose(output_eval, model(**inputs))
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_safe_merge(self, test_name, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
