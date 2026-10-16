@@ -121,10 +121,10 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
                     f"adapters, but LN tuning does not allow inference with more than one adapter at a time"
                 )
             active_adapter = self.active_adapters[0]
-            if active_adapter in self.ln_tuning_layers:
-                result = self.ln_tuning_layers[active_adapter](x, *args, **kwargs)
-            else:
+            if active_adapter not in self.ln_tuning_layers:
                 result = self.base_layer(x, *args, **kwargs)
+            else:
+                result = self.ln_tuning_layers[active_adapter](x, *args, **kwargs)
 
         return result
 
