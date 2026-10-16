@@ -69,7 +69,7 @@ Nora uses the existing LoRA configuration, training, saving, and loading APIs. T
 
 ## Supported layers
 
-Use Nora with `torch.nn.Linear` target modules. Embedding initialization with Nora is not implemented. Explicitly select supported target modules when configuring the adapter.
+Use Nora with `torch.nn.Linear` target modules or `nn.Parameter`s directly with `target_parameters`. NoRA is not supported for embeddings, conv layers, etc.
 
 ## API
 
