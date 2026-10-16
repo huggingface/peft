@@ -403,7 +403,10 @@ def test_cpt_forward_loss_matches_reference():
 def test_cpt_partial_context_keeps_input_labels(
     model_class, model_config, prefix_types, explicit_input_mask, weighted_loss
 ):
-    # Regression for #3899: each token's role must survive separation of context and input groups.
+    # CPT uses four token types per demonstration; only positive multiples of four contribute to the loss.
+    # Input types must be shifted past the context types without changing their roles. With an incomplete context,
+    # an offset not divisible by four masks input answers (#3899), yielding NaN when no context answer remains.
+    # Compare incomplete and complete contexts against a loss reference that selects answers before any offset.
     torch.manual_seed(0)
     config_kwargs = (
         {}
@@ -423,6 +426,10 @@ def test_cpt_partial_context_keeps_input_labels(
 
     output = model(input_ids=input_ids, labels=input_ids.clone(), **kwargs)
 
+    # The explicit input mask mixes ignored tokens and type-4 answers; the default makes every input an answer.
+    # Select context and input answers separately, so the reference does not depend on the offset being tested.
+    # Each context has at most one answer group and each input has one: in decay mode, context answers get weight
+    # 0.95 and input answers get weight 1. Direct cross entropy then checks both label selection and group weighting.
     prefix_labels = torch.tensor(config.cpt_token_ids).expand(2, -1)
     prefix_types_tensor = torch.tensor(config.cpt_tokens_type_mask).expand(2, -1)
     prefix_answers = (prefix_types_tensor > 0) & (prefix_types_tensor % 4 == 0)
