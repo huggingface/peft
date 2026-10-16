@@ -5,7 +5,6 @@ import pytest
 import torch
 from torch import nn
 from transformers import AutoModelForCausalLM
-from transformers.pytorch_utils import Conv1D
 
 from peft import OSFConfig, get_peft_model
 
@@ -47,5 +46,3 @@ def test_osf_still_wraps_linear():
     model = get_peft_model(MLP(), OSFConfig(target_modules=["lin0"], effective_rank=2))
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     assert trainable > 0
-    # sanity: still Conv1D-aware type check unused but imported for clarity in gpt2 test
-    assert issubclass(Conv1D, nn.Module)
