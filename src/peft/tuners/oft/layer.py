@@ -895,6 +895,21 @@ class Conv2d(nn.Module, OFTLayer):
         else:
             return oft_R_module.get_weight()
 
+    def _apply_oft_to_conv_weight(self, weight: torch.Tensor, oft_mat: torch.Tensor) -> torch.Tensor:
+        """Apply an OFT rotation to a Conv2d weight the same way ``merge`` does.
+
+        Operating on the weight (``oft_mat @ W_flat.T``) is equivalent to the Linear OFT
+        formulation and stays consistent for kernels larger than 1x1. Rotating unfolded
+        input patches and folding them back is *not* equivalent once patches overlap, which
+        is why the previous unmerged forward disagreed with ``merge`` for k>1.
+        """
+        base_layer = self.get_base_layer()
+        # Match existing merge / unmerge: square kernels use kernel_size[0] twice.
+        filter_dim = self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
+        flat = weight.reshape(self.out_features, filter_dim)
+        rotated = torch.mm(oft_mat, flat.t().to(oft_mat.dtype)).t()
+        return rotated.view_as(weight)
+
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype
 
@@ -905,15 +920,19 @@ class Conv2d(nn.Module, OFTLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
+            # Weight-side OFT so unmerged == merged for any kernel size (see #3982).
+            base_layer = self.get_base_layer()
+            weight = base_layer.weight
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.oft_R.keys():
                     continue
+                # Same transform as merge; module_dropout is applied inside OFTRotationModule
+                # for Linear (block tensors), not on the assembled block-diagonal matrix.
+                oft_mat = self.get_delta_weight(active_adapter)
+                weight = self._apply_oft_to_conv_weight(weight, oft_mat)
 
-                oft_R = self.oft_R[active_adapter]
-                x = self._cast_input_dtype(x, oft_R.weight.dtype)
-                x = oft_R(x)
-
-            result = self.base_layer(x.to(previous_dtype), *args, **kwargs)
+            x = self._cast_input_dtype(x, weight.dtype)
+            result = base_layer._conv_forward(x, weight.to(x.dtype), base_layer.bias)
 
         result = result.to(previous_dtype)
         return result
