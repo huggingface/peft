@@ -13,6 +13,9 @@
 # limitations under the License.
 
 import copy
+import importlib.machinery
+import importlib.metadata
+import importlib.util
 import itertools
 import math
 import platform
@@ -3571,15 +3574,24 @@ class TestIncompatibleTorchaoInstalled:
         return MyModule()
 
     @pytest.fixture
-    def old_torchao_installed(self, tmp_path, monkeypatch):
-        # Simulate an installed torchao 0.10.0 (the version preinstalled on Google Colab) with an empty package and its
-        # metadata, so that the test doesn't require a real torchao installation.
-        (tmp_path / "torchao").mkdir()
-        (tmp_path / "torchao" / "__init__.py").touch()
-        dist_info = tmp_path / "torchao-0.10.0.dist-info"
-        dist_info.mkdir()
-        (dist_info / "METADATA").write_text("Metadata-Version: 2.1\nName: torchao\nVersion: 0.10.0\n")
-        monkeypatch.syspath_prepend(str(tmp_path))
+    def old_torchao_installed(self, monkeypatch):
+        # Simulate an installed torchao 0.10.0 (the version preinstalled on Google Colab), so that the test doesn't
+        # require a real torchao installation.
+        find_spec = importlib.util.find_spec
+        version = importlib.metadata.version
+
+        def fake_find_spec(name, *args, **kwargs):
+            if name == "torchao":
+                return importlib.machinery.ModuleSpec("torchao", None)
+            return find_spec(name, *args, **kwargs)
+
+        def fake_version(name):
+            if name == "torchao":
+                return "0.10.0"
+            return version(name)
+
+        monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+        monkeypatch.setattr(importlib.metadata, "version", fake_version)
         is_torchao_available.cache_clear()
         yield
         is_torchao_available.cache_clear()
