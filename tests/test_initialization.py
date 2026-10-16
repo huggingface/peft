@@ -553,6 +553,24 @@ class TestLoraInitialization:
         peft_model = get_peft_model(deepcopy(model), config)
         assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
 
+    def test_lora_olora_init_conv1d(self):
+        # GPT-2 uses transformers' Conv1D, which stores the weight as (in_features, out_features), see #3996
+        model_id = "peft-internal-testing/tiny-random-gpt2"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device).eval()
+        input_ids = torch.tensor([[1, 2, 3, 4]], device=self.torch_device)
+        with torch.no_grad():
+            output = model(input_ids).logits
+
+        # c_attn and c_fc are rectangular, the c_proj of the attention is square
+        config = LoraConfig(
+            init_lora_weights="olora", target_modules=["c_attn", "c_fc", "c_proj"], fan_in_fan_out=True
+        )
+        peft_model = get_peft_model(model, config)
+        with torch.no_grad():
+            assert torch.allclose(output, peft_model(input_ids).logits, atol=1e-06)
+            assert torch.allclose(output, peft_model.merge_and_unload()(input_ids).logits, atol=1e-06)
+
     def test_lora_pissa_conversion_same_output_after_loading(self, data, tmp_path):
         model = self.get_model()
         output_base = model(data)[0]

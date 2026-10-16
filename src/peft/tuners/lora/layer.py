@@ -400,7 +400,8 @@ class LoraLayer(BaseTunerLayer):
 
         scale_factor = self.scaling[adapter_name]
         r = self.r[adapter_name]
-        weight_tensor = weight_tensor.to(torch.float32)
+        # Factorize in the Linear layout even when the base layer stores (fan_in, fan_out), as in GPT-2.
+        weight_tensor = transpose(weight_tensor.to(torch.float32), self.fan_in_fan_out)
         Q, R = torch.linalg.qr(weight_tensor.data)
 
         Qr, Rr = Q[:, :r], R[:r]
@@ -409,6 +410,7 @@ class LoraLayer(BaseTunerLayer):
         self.lora_B[adapter_name].weight.data = Qr.contiguous()
 
         weight_tensor.data -= scale_factor * self.lora_B[adapter_name].weight @ self.lora_A[adapter_name].weight
+        weight_tensor = transpose(weight_tensor, self.fan_in_fan_out)
         if bnb_param_type == "4bit":
             weight_tensor = orig_weight.__class__(
                 weight_tensor,
