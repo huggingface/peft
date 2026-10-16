@@ -24,7 +24,6 @@ from contextlib import contextmanager
 from typing import Any, Optional
 
 import torch
-import torch.nn.functional as F
 from torch import nn
 from torch.autograd import Function
 
@@ -989,13 +988,7 @@ class Conv2d(nn.Module, BOFTLayer):
             )
             x = self._cast_input_dtype(x, scaled_rotated_weight.dtype)
             bias = self._cast_input_dtype(self.base_layer.bias, scaled_rotated_weight.dtype)
-            result = F.conv2d(
-                input=x,
-                weight=scaled_rotated_weight,
-                bias=bias,
-                padding=self.base_layer.padding[0],
-                stride=self.base_layer.stride[0],
-            )
+            result = self.base_layer._conv_forward(x, scaled_rotated_weight, bias)
 
         result = result.to(previous_dtype)
         return result

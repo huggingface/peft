@@ -14,6 +14,7 @@
 
 # This is not a full on test suite of vision models, since we already run many tests on dummy models with Conv2d layers
 # and on stable diffusion models. Instead, this file contains specific tests for bugs that have been found in the past.
+import copy
 import gc
 
 import numpy as np
@@ -21,6 +22,7 @@ import pytest
 import torch
 from accelerate.utils.memory import clear_device_cache
 from safetensors.torch import load_file
+from torch import nn
 from transformers import (
     AutoImageProcessor,
     AutoModelForImageClassification,
@@ -29,8 +31,11 @@ from transformers import (
 )
 
 from peft import (
+    AdaLoraConfig,
     BOFTConfig,
+    HiraConfig,
     HRAConfig,
+    IA3Config,
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
@@ -45,6 +50,7 @@ from .testing_utils import load_cat_image
 
 CONFIGS = {
     "lora": LoraConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
+    "dora": LoraConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"], use_dora=True),
     "loha": LoHaConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     "lokr": LoKrConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     "oft": OFTConfig(
@@ -56,6 +62,18 @@ CONFIGS = {
     # > Error in forward_fast_block_diag_cuda_kernel: an illegal memory access was encountered
     "boft": BOFTConfig(
         target_modules=["0.layer.0.convolution"], modules_to_save=["classifier", "normalization"], boft_block_size=2
+    ),
+    "adalora": AdaLoraConfig(
+        target_modules=["convolution"], modules_to_save=["classifier", "normalization"], total_step=1
+    ),
+    "hira": HiraConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
+    "ia3": IA3Config(
+        target_modules=["convolution"], feedforward_modules=[], modules_to_save=["classifier", "normalization"]
+    ),
+    "ia3_ff": IA3Config(
+        target_modules=["convolution"],
+        feedforward_modules=["convolution"],
+        modules_to_save=["classifier", "normalization"],
     ),
 }
 
@@ -158,3 +176,133 @@ class TestResnet:
         # note that the model has twice as many "running_mean", as there is one copy per ModulesToSaveWrapper, we need
         # to multiply by 2 to get the same number
         assert model_running_mean == checkpoint_running_mean * 2
+
+
+class TestConvArguments:
+    """
+    Generic tests for PEFT methods adapting Conv2d layers.
+
+    Omitting `groups` for now, as that easily becomes more complex.
+    """
+
+    conv_kwargs = [
+        {"kernel_size": 3},
+        {"kernel_size": (3, 3)},
+        {"kernel_size": (1, 1)},
+        {"kernel_size": (3, 2)},
+        {"bias": False},  # default: True
+        {"dilation": 2},  # default: 1
+        {"dilation": (2, 1)},
+        {"dilation": (1, 2)},
+        {"stride": 2, "padding": 1},  # default stride: 1
+        {"stride": (2, 1), "padding": 1},
+        {"padding": 1},  # default: 0
+        {"padding": (2, 0)},
+        {"padding": 1, "padding_mode": "reflect"},  # default mode: "zeros"
+        # combining
+        {"kernel_size": 3, "bias": False, "dilation": 2, "stride": 2, "padding": 1, "padding_mode": "reflect"},
+    ]
+
+    def get_conv_model(self, in_channels=4, out_channels=16, kernel_size=3, **kwargs):
+
+        class ModelConv2D(nn.Module):
+            def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
+                super().__init__()
+                self.convolution = nn.Conv2d(in_channels, out_channels, kernel_size, **kwargs)
+
+            def forward(self, x):
+                return self.convolution(x)
+
+        return ModelConv2D(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, **kwargs)
+
+    def get_inputs(
+        self,
+        batch_size=4,
+        in_channels=4,
+        kernel_size=3,
+        dilation=1,
+        **kwargs,
+    ):
+        kws_to_ignore = ("bias", "padding", "padding_mode", "stride")
+        [kwargs.pop(kw, None) for kw in kws_to_ignore if kw in kwargs]
+        if kwargs:
+            raise ValueError(f"Unexpected keyword arguments: {kwargs}")
+
+        torch.manual_seed(0)
+
+        def pair(x) -> tuple[int, int]:
+            output = x if isinstance(x, (list, tuple)) else (x, x)
+            assert len(output) == 2, f"Expected a pair, got {output}"
+            return output
+
+        kernel_size = pair(kernel_size)
+        dilation = pair(dilation)
+        # An unpadded kernel must fit in the input for OFT's rotation. Padding and stride can still change the output.
+        spatial_size = tuple(d * (k - 1) + 1 for k, d in zip(kernel_size, dilation))
+
+        return torch.randn(batch_size, in_channels, *spatial_size)
+
+    def should_skip(self, config, conv_kwargs):
+        kernel_size = conv_kwargs.get("kernel_size", 3)
+        kernel_is_square = isinstance(kernel_size, int) or len(set(kernel_size)) == 1
+        return config.peft_type in {"OFT", "HRA", "BOFT"} and not kernel_is_square
+
+    @pytest.mark.parametrize("config", CONFIGS.values(), ids=CONFIGS.keys())
+    @pytest.mark.parametrize("conv_kwargs", conv_kwargs)
+    def test_base_output_preserved_in_forward(self, config, conv_kwargs):
+        # Compare raw convolution outputs so that shape errors and missing convolution arguments are visible.
+        if self.should_skip(config, conv_kwargs):
+            pytest.skip("This method assumes square convolution kernels throughout its weight handling")
+
+        torch.manual_seed(0)
+        model = self.get_conv_model(**conv_kwargs)
+
+        inputs = self.get_inputs(**conv_kwargs)
+        with torch.inference_mode():
+            output_base = model(inputs)
+
+        config = copy.deepcopy(config)
+        config.target_modules = {"convolution"}
+
+        if config.peft_type == "OFT" and conv_kwargs.get("dilation", 1) != 1:
+            with pytest.raises(ValueError, match="Conv2d with dilation > 1 is not supported by OFT"):
+                model = get_peft_model(model, config).eval()
+            return
+
+        model = get_peft_model(model, config).eval()
+        with torch.inference_mode():
+            output_peft = model(inputs)
+
+        atol, rtol = 1e-4, 1e-4
+        assert torch.allclose(output_base, output_peft, atol=atol, rtol=rtol)
+
+    @pytest.mark.parametrize("config", CONFIGS.values(), ids=CONFIGS.keys())
+    @pytest.mark.parametrize("conv_kwargs", conv_kwargs)
+    def test_base_output_preserved_after_merging(self, config, conv_kwargs):
+        # Same test as test_base_output_preserved_in_forward, but after merging the PEFT model into the base model.
+        if self.should_skip(config, conv_kwargs):
+            pytest.skip("This method assumes square convolution kernels throughout its weight handling")
+
+        torch.manual_seed(0)
+        model = self.get_conv_model(**conv_kwargs)
+
+        inputs = self.get_inputs(**conv_kwargs)
+        with torch.inference_mode():
+            output_base = model(inputs)
+
+        config = copy.deepcopy(config)
+        config.target_modules = {"convolution"}
+
+        if (config.peft_type == "OFT") and (conv_kwargs.get("dilation", 1) != 1):
+            with pytest.raises(ValueError, match="Conv2d with dilation > 1 is not supported by OFT"):
+                model = get_peft_model(model, config).eval()
+            return
+
+        model = get_peft_model(model, config).eval()
+        model.merge_adapter()
+
+        with torch.inference_mode():
+            output_merged = model(inputs)
+
+        atol, rtol = 1e-4, 1e-4
+        assert torch.allclose(output_base, output_merged, atol=atol, rtol=rtol)

@@ -55,7 +55,7 @@ Do not add standalone test scripts or new files that duplicate what the matrix a
 When adding a new method, coverage means adding it to the existing matrices rather than writing a separate suite:
 
 1. Add test cases to `TEST_CASES` and `MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES` in `test_custom_models.py` first; this covers most of the PEFT functionality and is quick to iterate on.
-2. Add entries to the model-architecture files (`test_decoder_models.py` etc.) as applicable to the method's task types.
+2. Add entries to the model-architecture files (`test_decoder_models.py` etc.) as applicable to the method's task types. If the method supports `nn.Conv2d`, also extend `test_vision_models.py`.
 3. Add the config class to `ALL_CONFIG_CLASSES` in `test_config.py` and to the cases in `test_initialization.py` where applicable.
 4. If the method supports quantization, extend `test_quantization.py`.
 5. Only add `test_<method>.py` for genuinely method-specific behavior.

@@ -720,7 +720,7 @@ class Conv2d(nn.Module, OFTLayer):
 
         # layer information from the base layer
         base_layer = self.get_base_layer()
-        if base_layer.dilation[0] > 1:
+        if any(dilation > 1 for dilation in base_layer.dilation):
             raise ValueError("Conv2d with dilation > 1 is not supported by OFT.")
 
         conv_filter_dim = self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
