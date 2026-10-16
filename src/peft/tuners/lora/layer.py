@@ -291,6 +291,9 @@ class LoraLayer(BaseTunerLayer):
         elif isinstance(init_lora_weights, str) and init_lora_weights.startswith("corda"):
             with gather_params_ctx(self.get_base_layer().weight):
                 self.corda_init(adapter_name, init_lora_weights)
+        elif isinstance(init_lora_weights, str) and init_lora_weights.startswith("astra"):
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.astra_init(adapter_name, init_lora_weights)
         elif isinstance(init_lora_weights, str) and init_lora_weights.lower() == "olora":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.olora_init(adapter_name)
@@ -568,6 +571,75 @@ class LoraLayer(BaseTunerLayer):
         lora_B = U.mul(S.sqrt()).contiguous()
         self.lora_A[adapter_name].weight.data = lora_A
         self.lora_B[adapter_name].weight.data = lora_B
+
+        # For Conv1D, lora_B @ lora_A gives (out_dim, in_dim) but weight is (in_dim, out_dim)
+        # So we need to transpose before subtraction
+        delta = self.scaling[adapter_name] * lora_B @ lora_A
+        delta = transpose(delta, fan_in_fan_out=self.fan_in_fan_out)
+        weight = weight.data - delta
+        weight = weight.to(dtype)
+        self.get_base_layer().weight.data = weight
+
+        # Remove redundant fields
+        del linear.eigens
+
+    def astra_init(self, adapter_name, init_lora_weights):
+        linear = self.get_base_layer()
+        weight = linear.weight
+        dtype = weight.dtype
+        if dtype not in [torch.float32, torch.float16, torch.bfloat16]:
+            raise TypeError(
+                "Please initialize Astra under float32, float16, or bfloat16. "
+                "Subsequently, re-quantize the residual model to help minimize quantization errors."
+            )
+        weight = weight.to(torch.float32)
+        # For Conv1D, weight is stored as (in_features, out_features), transposed compared to Linear
+        if isinstance(linear, Conv1D):
+            out_dim = weight.data.size(1)
+            in_dim = weight.data.size(0)
+        else:
+            out_dim = weight.data.size(0)
+            in_dim = weight.data.size(1)
+
+        if not hasattr(linear, "eigens"):
+            raise ValueError(
+                "`eigens` attribute not found for layer, please run `preprocess_astra` first. "
+                "More information can be found at "
+                "https://github.com/huggingface/peft/blob/main/examples/astra_finetuning/README.md."
+            )
+        eigens = linear.eigens
+        V = eigens.V
+        r = self.r[adapter_name]
+
+        # nan or inf check
+        if torch.isnan(V).any() or torch.isinf(V).any():
+            raise ValueError(
+                "Invalid value found in matrix V. Please file an issue at https://github.com/huggingface/peft/issues."
+            )
+
+        if r > out_dim:
+            raise ValueError(
+                f"Astra requires `r` <= out_features but got r={r} for a layer with weight shape "
+                f"{tuple(weight.shape)} (max usable r is {out_dim})."
+            )
+
+        # Sanity check
+        if V.size(0) != out_dim or V.size(1) != r:
+            raise ValueError(
+                f"Matrix V size mismatch: {V.size()} vs. ({out_dim}, {r}). Please make sure the `lora_config` and "
+                "`model` argument of `preprocess_astra` is consistent with `get_peft_model`. If you're using cache "
+                "in `preprocess_astra`, please make sure the cache is built with the same model and LoRA rank."
+            )
+
+        # Init lora_A and lora_B weights. V contains the eigenvectors of the output activations' covariance matrix,
+        # so the base weight (out_dim, in_dim) is projected onto the space spanned by them. For Conv1D, the stored
+        # weight is (in_dim, out_dim), so it is transposed first to match the Linear layout.
+        linear_weight = weight.data.t() if isinstance(linear, Conv1D) else weight.data
+        lora_A = (V.t() @ linear_weight).contiguous()
+        lora_B = V.contiguous()
+        # the residual weight is computed with the fp32 factors below, hence they are only cast on assignment
+        self.lora_A[adapter_name].weight.data = lora_A.to(dtype)
+        self.lora_B[adapter_name].weight.data = lora_B.to(dtype)
 
         # For Conv1D, lora_B @ lora_A gives (out_dim, in_dim) but weight is (in_dim, out_dim)
         # So we need to transpose before subtraction
@@ -1620,9 +1692,20 @@ class _ConvNd(nn.Module, LoraLayer):
         kernel_size = base_layer.kernel_size
         stride = base_layer.stride
         padding = base_layer.padding
+        dilation = base_layer.dilation
+        padding_mode = base_layer.padding_mode
         conv_layer = type(base_layer)
         out_kernel = out_stride = (1,) * (self._kernel_dim - 2)
-        self.lora_A[adapter_name] = conv_layer(self.in_features, r, kernel_size, stride, padding, bias=False)
+        self.lora_A[adapter_name] = conv_layer(
+            self.in_features,
+            r,
+            kernel_size,
+            stride,
+            padding,
+            dilation=dilation,
+            padding_mode=padding_mode,
+            bias=False,
+        )
         self.lora_B[adapter_name] = conv_layer(
             r, self.out_features, out_kernel, out_stride, groups=base_layer.groups, bias=lora_bias
         )
@@ -1776,7 +1859,7 @@ class _ConvNd(nn.Module, LoraLayer):
             weight_B = weight_B.float()
 
         # https://github.com/bmaltais/kohya_ss/blob/feb6728762a8f463d15ba936d189d4c3abfaa1ab/networks/lora.py#L117
-        if self.get_base_layer().weight.size()[2:4] == (1, 1):
+        if self.get_base_layer().weight.shape[2:] == (1, 1):
             # conv2d 1x1
             output_tensor = (weight_B.squeeze(3).squeeze(2) @ weight_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(
                 3
@@ -2067,9 +2150,11 @@ class MultiheadAttention(nn.Module, LoraLayer):
                     del base_layer.in_proj_weight
                     base_layer.in_proj_weight = orig_weight_in
 
+                    # Call out_proj.merge to handle lora_bias if present and mark the adapter as merged. Don't use the
+                    # merged weight though but the weight computed above.
+                    base_layer.out_proj.merge(safe_merge=True, adapter_names=[active_adapter])
                     del base_layer.out_proj.get_base_layer().weight
                     base_layer.out_proj.get_base_layer().weight = orig_weight_out
-                    base_layer.out_proj.merge(adapter_names=[active_adapter])
                 else:
                     # merging in_proj (nn.Parameter)
                     # TODO: work with separate weights
@@ -2084,9 +2169,11 @@ class MultiheadAttention(nn.Module, LoraLayer):
                     # merging out_proj (subclass of nn.Linear)
                     delta_weight = base_layer.out_proj.get_delta_weight(active_adapter).to(orig_dtype)
                     weight_merged = base_layer.out_proj.weight.data.detach() + delta_weight
+                    # Call out_proj.merge to handle lora_bias if present and mark the adapter as merged. Don't use the
+                    # merged weight though but the weight computed above.
+                    base_layer.out_proj.merge(adapter_names=[active_adapter])
                     del base_layer.out_proj.get_base_layer().weight
                     base_layer.out_proj.get_base_layer().weight = weight_merged
-                    base_layer.out_proj.merge(adapter_names=[active_adapter])
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -2112,15 +2199,12 @@ class MultiheadAttention(nn.Module, LoraLayer):
                 del base_layer.in_proj_weight
                 base_layer.register_parameter("in_proj_weight", nn.Parameter(old_weight, requires_grad=False))
 
-                # out_proj
-                delta_weight = base_layer.out_proj.get_delta_weight(active_adapter).to(orig_dtype)
-                old_weight = base_layer.out_proj.base_layer.weight.data - delta_weight
-                del base_layer.out_proj.base_layer.weight
-                base_layer.out_proj.base_layer.register_parameter(
-                    "weight", nn.Parameter(old_weight, requires_grad=False)
-                )
-
-        self.get_base_layer().out_proj.unmerge()
+        # out_proj
+        base_layer.out_proj.unmerge()
+        out_proj_base = base_layer.out_proj.get_base_layer()
+        old_weight = out_proj_base.weight.data
+        del out_proj_base.weight
+        out_proj_base.register_parameter("weight", nn.Parameter(old_weight, requires_grad=False))
 
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
@@ -2472,6 +2556,9 @@ class ParamWrapper(nn.Module, LoraLayer):
         elif isinstance(init_lora_weights, str) and init_lora_weights.startswith("corda"):
             with gather_params_ctx(self.get_base_layer().weight):
                 self.corda_init(adapter_name, init_lora_weights)
+        elif isinstance(init_lora_weights, str) and init_lora_weights.startswith("astra"):
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.astra_init(adapter_name, init_lora_weights)
         elif isinstance(init_lora_weights, str) and init_lora_weights.lower() == "olora":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.olora_init(adapter_name)

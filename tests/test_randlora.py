@@ -16,14 +16,16 @@
 # These tests are copied from the test_vera.py file
 
 import os
+import warnings
 
 import pytest
 import torch
 from accelerate.utils.imports import is_bf16_available
 from safetensors import safe_open
+from safetensors.torch import save_file
 from torch import nn
 
-from peft import PeftModel, RandLoraConfig, get_peft_model
+from peft import PeftModel, RandLoraConfig, get_peft_model, get_peft_model_state_dict, set_peft_model_state_dict
 
 
 class MLP(nn.Module):
@@ -183,6 +185,79 @@ class TestRandLora:
         assert randlora_B.data_ptr() == mlp_same_prng.base_model.model.lin2.randlora_B["default"].data_ptr()
         # sanity check: these tensors shouldn't share the same data
         assert randlora_A.data_ptr() != randlora_B.data_ptr()
+
+    def test_save_projection_true_deduplicates_shared_projections(self, mlp, tmp_path):
+        # Shared RandLoRA projections should be serialized once for #3709, both to avoid safetensors alias errors
+        # and to reduce checkpoint size.
+        config = RandLoraConfig(target_modules=["lin0", "lin1", "lin2"], init_weights=False, save_projection=True)
+        peft_model = get_peft_model(mlp, config)
+
+        state_dict = get_peft_model_state_dict(peft_model)
+        projection_tensors = {
+            projection_name: [tensor for key, tensor in state_dict.items() if projection_name in key]
+            for projection_name in ("randlora_A", "randlora_B")
+        }
+        for tensors in projection_tensors.values():
+            assert tensors
+            # Catch duplicate projection entries that alias the same storage as well as independent copies with
+            # identical values.
+            assert len({tensor.data_ptr() for tensor in tensors}) == len(tensors)
+            assert all(
+                not torch.equal(tensor, other)
+                for index, tensor in enumerate(tensors)
+                for other in tensors[index + 1 :]
+            )
+
+        # Direct serialization should succeed once the shared projections have no aliased entries in the state dict.
+        save_file(state_dict, tmp_path / "adapter.safetensors")
+
+    def test_save_projection_true_roundtrip(self, mlp, tmp_path):
+        torch.manual_seed(1)
+        config = RandLoraConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=True)
+        peft_model = get_peft_model(mlp, config)
+        peft_model.eval()
+
+        inputs = torch.randn(5, 10)
+        output = peft_model(inputs)
+        peft_model.save_pretrained(tmp_path)
+
+        torch.manual_seed(0)
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always")
+            loaded_model = PeftModel.from_pretrained(MLP(), tmp_path)
+        assert not any("Found missing adapter keys" in str(warning.message) for warning in caught_warnings)
+        loaded_model.eval()
+        torch.testing.assert_close(loaded_model(inputs), output)
+
+    def test_load_projection_true_with_duplicated_aliases(self, mlp):
+        # This recreates the pre-#3709 checkpoint layout with duplicated layer-level aliases. It complements the
+        # previous test by verifying that existing checkpoints remain loadable after the compact format is introduced.
+        torch.manual_seed(1)
+        config = RandLoraConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=True)
+        source_model = get_peft_model(mlp, config)
+        source_model.eval()
+
+        inputs = torch.randn(5, 10)
+        expected_output = source_model(inputs)
+        old_state_dict = {
+            key.removesuffix(".default"): value.clone()
+            for key, value in source_model.state_dict().items()
+            if "randlora_" in key and key.endswith(".default")
+        }
+        # Confirm that this state dict represents the legacy format with multiple aliases for each shared projection.
+        for projection_name in ("randlora_A", "randlora_B"):
+            projection_values = [value for key, value in old_state_dict.items() if projection_name in key]
+            assert len(projection_values) > 1
+            assert all(torch.equal(projection_values[0], value) for value in projection_values[1:])
+
+        torch.manual_seed(0)
+        loaded_model = get_peft_model(MLP(), config)
+        load_result = set_peft_model_state_dict(loaded_model, old_state_dict)
+
+        assert not [key for key in load_result.missing_keys if "randlora_" in key]
+        assert not load_result.unexpected_keys
+        loaded_model.eval()
+        torch.testing.assert_close(loaded_model(inputs), expected_output)
 
     def test_randlora_lambda_dont_share_memory(self, mlp_same_prng):
         # sanity check: these tensors shouldn't share the same data

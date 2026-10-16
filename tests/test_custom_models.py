@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import copy
+import json
 import os
 import platform
 import re
@@ -22,12 +23,15 @@ from contextlib import contextmanager
 from functools import partial
 from unittest.mock import MagicMock
 
+import packaging.version
 import pytest
 import torch
 import torch.distributed as dist
 from safetensors.torch import load_file as safe_load_file
 from torch import nn
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.tensor import DTensor
 from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
 from transformers.pytorch_utils import Conv1D
 
@@ -226,6 +230,8 @@ TEST_CASES = [
     ("Conv3d 2 LoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"]}),
     ("Conv3d 1 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "use_dora": True}),
     ("Conv3d 2 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"], "use_dora": True}),
+    ("Conv3d 1x1 LoRA", "Conv3d1x1", LoraConfig, {"target_modules": ["conv3d"]}),
+    ("Conv3d 1x1 LoRA with DoRA", "Conv3d1x1", LoraConfig, {"target_modules": ["conv3d"], "use_dora": True}),
     # LoRA with lora_B bias enabled (note: embedding is not supported)
     # It's important to set lora_alpha != r to ensure that scaling is taken into account correctly
     (
@@ -1297,6 +1303,7 @@ TEST_CASES = [
     ("Conv2d 2 HiRA", "Conv2d", HiraConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv3d 1 HiRA", "Conv3d", HiraConfig, {"target_modules": ["conv3d"]}),
     ("Conv3d 2 HiRA", "Conv3d", HiraConfig, {"target_modules": ["conv3d", "lin0"]}),
+    ("Conv3d 1x1 HiRA", "Conv3d1x1", HiraConfig, {"target_modules": ["conv3d"]}),
     ##########
     # Adamss #
     ##########
@@ -2298,6 +2305,31 @@ class ModelConv3D(nn.Module):
         return X
 
 
+class ModelConv3D1x1(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # pointwise 3d convolution, as used e.g. in the downsample shortcuts of 3d resnets, see #3768
+        self.conv3d = nn.Conv3d(5, 10, kernel_size=1)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin0 = nn.Linear(10 * 3 * 3 * 3, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
+
+    def forward(self, X):
+        X = X.to(self.dtype)
+        # If necessary, convert from 2D image to 3D volume
+        if X.dim() == 2:
+            X = torch.stack([X] * 3, dim=-1)
+        X = X.reshape(-1, 5, 3, 3, 3)
+        X = self.conv3d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin0(X)
+        X = self.sm(X)
+        return X
+
+
 class ModelMha(nn.Module):
     def __init__(self):
         super().__init__()
@@ -2398,6 +2430,9 @@ class MockTransformerWrapper:
         if model_id == "Conv3d":
             return ModelConv3D().to(dtype)
 
+        if model_id == "Conv3d1x1":
+            return ModelConv3D1x1().to(dtype)
+
         if model_id == "MLP_LayerNorm":
             return MLP_LayerNorm().to(dtype)
 
@@ -2431,6 +2466,44 @@ class TestPeftCustomModel(PeftCommonTester):
         X = torch.arange(90).view(9, 10).to(self.torch_device)
         return {"X": X}
 
+    @pytest.mark.parametrize(
+        ("conv_cls", "input_shape"),
+        [
+            pytest.param(nn.Conv1d, (2, 1, 8), id="conv1d"),
+            pytest.param(nn.Conv2d, (2, 1, 8, 8), id="conv2d"),
+            pytest.param(nn.Conv3d, (2, 1, 8, 8, 8), id="conv3d"),
+        ],
+    )
+    def test_lora_conv_preserves_dilation_and_padding_mode(self, conv_cls, input_shape):
+        # Regression test for https://github.com/huggingface/peft/issues/3697
+        class DilatedConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = conv_cls(1, 2, kernel_size=3, padding=2, dilation=2, padding_mode="reflect")
+
+            def forward(self, X):
+                return self.conv(X)
+
+        torch.manual_seed(0)
+        inputs = torch.randn(input_shape)
+        model = DilatedConvModel()
+        base_output_shape = model(inputs).shape
+        model = get_peft_model(
+            model,
+            LoraConfig(target_modules=["conv"], r=2, init_lora_weights=False),
+        )
+        layer = model.base_model.model.conv
+
+        assert layer.lora_A["default"].dilation == layer.base_layer.dilation
+        assert layer.lora_A["default"].padding_mode == layer.base_layer.padding_mode
+
+        output_unmerged = model(inputs)
+        assert output_unmerged.shape == base_output_shape
+
+        model.merge_adapter()
+        output_merged = model(inputs)
+        assert torch.allclose(output_unmerged, output_merged, atol=1e-6, rtol=1e-5)
+
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_attributes_parametrized(self, test_name, model_id, config_cls, config_kwargs):
         self._test_model_attr(model_id, config_cls, config_kwargs)
@@ -2447,6 +2520,10 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_save_pretrained(self, test_name, model_id, config_cls, config_kwargs):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_save_pretrained_failure(self, test_name, model_id, config_cls, config_kwargs, tmp_path):
+        self._test_save_pretrained_failure(model_id, config_cls, config_kwargs, tmp_path)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_save_load_roundtrip_direct_injection(self, test_name, model_id, config_cls, config_kwargs):
@@ -3545,6 +3622,27 @@ class TestPeftCustomModel(PeftCommonTester):
         for key, value in state_dict_before.items():
             assert torch.equal(state_dict_after[key], value)
 
+    def test_set_adapter_on_merged_model_warns_and_unmerges(self, recwarn):
+        # Switching the active adapter on a model with a merged layer has to unmerge that layer first, a merge
+        # and a newly active adapter can't coexist, and it should warn about doing so, since the caller may not
+        # expect their merge to be undone as a side effect of switching adapters.
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False))
+        model.add_adapter("other", LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False))
+        msg = "Adapter cannot be set when the model is merged. Unmerging the model first."
+
+        # sanity check: nothing is merged yet, so switching the adapter should not warn about a merge
+        model.set_adapter("default")
+        assert not any(msg in str(warning.message) for warning in recwarn.list)
+
+        model.merge_adapter()
+        assert model.base_model.model.lin0.merged
+
+        with pytest.warns(UserWarning, match=msg):
+            model.set_adapter("other")
+
+        assert not model.base_model.model.lin0.merged
+        assert model.active_adapter == "other"
+
     @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
     def test_set_adapter_non_overlapping_modules(self, config_cls):
         # Ensure that when setting multiple adapters, the active adapters are correctly being set, even if
@@ -4594,6 +4692,46 @@ class TestPeftCustomModel(PeftCommonTester):
                 if max_mse is not None:
                     assert mse < max_mse
 
+    @pytest.mark.parametrize(
+        "conv_layer",
+        [
+            nn.Conv1d(10, 10, 3),
+            nn.Conv2d(10, 10, 3),
+            nn.Conv2d(10, 10, 1),
+            nn.Conv3d(10, 10, 3),
+        ],
+    )
+    def test_add_weighted_adapter_svd_conv_layers(self, conv_layer):
+        # SVD based combination types used to flatten the delta weight only for Conv2d, so Conv1d and Conv3d failed
+        torch.manual_seed(0)
+
+        class ConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = conv_layer
+
+            def forward(self, X):
+                return self.conv(X)
+
+        config = LoraConfig(target_modules=["conv"], r=4, init_lora_weights=False)
+        model = get_peft_model(ConvModel(), config, adapter_name="adapter1")
+        model.add_adapter("adapter2", config)
+        # with r1 + r2 <= svd_rank <= min(out_channels, in_channels * prod(kernel_size)) the SVD is exact and the
+        # merged delta weight must equal the weighted sum
+        model.add_weighted_adapter(
+            adapters=["adapter1", "adapter2"],
+            weights=[0.5, 0.5],
+            adapter_name="merged",
+            combination_type="svd",
+            svd_rank=8,
+        )
+
+        module = model.base_model.model.conv
+        expected = 0.5 * module.get_delta_weight("adapter1") + 0.5 * module.get_delta_weight("adapter2")
+        dw_merged = module.get_delta_weight("merged")
+        assert dw_merged.shape == module.base_layer.weight.shape
+        assert torch.allclose(dw_merged, expected, atol=1e-5, rtol=1e-5)
+
     def test_multiple_adapters_no_needless_copy_modules_to_save(self):
         # See 2206
         # The problem was that we keep a "global" modules_to_save on the model which contains all possible
@@ -4964,6 +5102,64 @@ class TestPeftCustomModel(PeftCommonTester):
         assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is True
         assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is True
 
+    def test_mha_merge_applies_delta_weight_once(self):
+        # check for this bug: https://github.com/huggingface/peft/pull/3774
+        # The out_proj delta weight used to be applied twice when merging. Since forward of lora MHA merges the weights
+        # too, checking that the outputs with and without merging are the same is not sufficient to detect this.
+        base_model = ModelMha()
+        config = LoraConfig(target_modules=["mha"], init_lora_weights=False)
+        model = get_peft_model(base_model, config)
+        model = model.to(self.torch_device)
+        mha = model.base_model.model.mha.base_layer
+        lora_mha = model.base_model.model.mha
+
+        in_proj_expected = mha.in_proj_weight + lora_mha.get_delta_weight("default")
+        out_proj_expected = mha.out_proj.base_layer.weight + mha.out_proj.get_delta_weight("default")
+        model.merge_adapter()
+
+        assert torch.allclose(mha.in_proj_weight, in_proj_expected)
+        assert torch.allclose(mha.out_proj.base_layer.weight, out_proj_expected)
+
+    @pytest.mark.parametrize(
+        "peft_version, factor",
+        [
+            (None, 2),
+            ("0.19.0.dev0", 2),
+            ("0.21.0", 2),
+            ("0.21.2", 2),
+            ("0.21.3.dev0@abc123", 1),
+            ("0.22.0.dev0@abc123", 1),
+            ("0.22.0", 1),
+        ],
+    )
+    def test_mha_load_adapter_from_older_peft_version(self, peft_version, factor, tmp_path):
+        # Before PEFT 0.22.0, the out_proj delta weight of MHA was applied twice (#3774), so when loading such an
+        # adapter, the out_proj lora_B is doubled to keep its outputs unchanged. Configs from before PEFT 0.18.0 have
+        # no version. Dev versions after 0.21.0 come from main, which stays on 0.21.x dev versions after the fix, so
+        # they are not adjusted.
+        config = LoraConfig(target_modules=["mha"], init_lora_weights=False)
+        model = get_peft_model(ModelMha(), config)
+        model.save_pretrained(tmp_path / "old")
+
+        config_path = tmp_path / "old" / "adapter_config.json"
+        config_dict = json.loads(config_path.read_text())
+        if peft_version is None:
+            del config_dict["peft_version"]
+        else:
+            config_dict["peft_version"] = peft_version
+        config_path.write_text(json.dumps(config_dict))
+
+        lora_B = model.base_model.model.mha.base_layer.out_proj.lora_B["default"].weight
+        loaded = PeftModel.from_pretrained(ModelMha(), tmp_path / "old")
+        lora_B_loaded = loaded.base_model.model.mha.base_layer.out_proj.lora_B["default"].weight
+        assert torch.allclose(lora_B_loaded, factor * lora_B)
+
+        # saving and loading the adapter again must not double the weight a second time
+        loaded.save_pretrained(tmp_path / "new")
+        reloaded = PeftModel.from_pretrained(ModelMha(), tmp_path / "new")
+        lora_B_reloaded = reloaded.base_model.model.mha.base_layer.out_proj.lora_B["default"].weight
+        assert torch.allclose(lora_B_reloaded, lora_B_loaded)
+
     def test_monteclora_variational_loss_computation(self):
         config = LoraConfig(
             r=8,
@@ -5210,6 +5406,20 @@ class TestMultipleActiveAdapters:
         if tuner_method == "ia3":
             return MLP(bias=False)
         return MLP(bias=True)
+
+    @pytest.mark.parametrize("adapter_name", [["test-adapter"], ("test-adapter",), None])
+    def test_peft_model_multi_adapter_raises(self, adapter_name):
+        # Regression test for https://github.com/huggingface/peft/issues/3723
+        config = LoraConfig(target_modules=["lin0"])
+        model = get_peft_model(MLP(), config, adapter_name="test-adapter")
+        msg = (
+            "PeftModel.set_adapter only supports a single adapter name as a string. "
+            "To activate multiple adapters, use model.base_model.set_adapter(adapter_names) "
+            "if the PEFT method supports it."
+        )
+        with pytest.raises(TypeError, match=re.escape(msg)):
+            model.set_adapter(adapter_name)
+        assert model.active_adapter == "test-adapter"
 
     @pytest.mark.parametrize(
         "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
@@ -8164,8 +8374,24 @@ class TestDefaultTargetModules:
         assert model.peft_config["default"].target_modules == {"lin0", "lin1"}
 
 
+@pytest.fixture(scope="class")
+def fsdp_process_group():
+    # robust and minimal FSDP setup
+    dist.init_process_group(
+        backend="gloo",
+        store=dist.HashStore(),
+        rank=0,
+        world_size=1,
+    )
+    try:
+        yield
+    finally:
+        dist.destroy_process_group()
+
+
 @pytest.mark.skipif(platform.system() != "Linux", reason="Run FSDP tests only on Linux")
 @pytest.mark.skipif(not dist.is_available(), reason="These tests require torch.distributed")
+@pytest.mark.usefixtures("fsdp_process_group")
 class TestPeftFsdpStateDict:
     """
     Tests with FSDP-wrapped models.
@@ -8182,20 +8408,6 @@ class TestPeftFsdpStateDict:
     def prepare_inputs_for_testing(self):
         X = torch.arange(90).view(9, 10).to(self.torch_device)
         return {"X": X}
-
-    @pytest.fixture(autouse=True, scope="class")
-    def fsdp_process_group(self):
-        # robust and minimal FSDP setup
-        dist.init_process_group(
-            backend="gloo",
-            store=dist.HashStore(),
-            rank=0,
-            world_size=1,
-        )
-        try:
-            yield
-        finally:
-            dist.destroy_process_group()
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_save_load_roundtrip_fsdp_wrapped(self, test_name, model_id, config_cls, config_kwargs):
@@ -8291,3 +8503,146 @@ class TestPeftFsdpStateDict:
         with torch.no_grad():
             output_after = model(**X)
         assert torch.allclose(output_after, output_before)
+
+
+@pytest.mark.skipif(platform.system() != "Linux", reason="Run FSDP tests only on Linux")
+@pytest.mark.skipif(not dist.is_available(), reason="These tests require torch.distributed")
+@pytest.mark.skipif(
+    packaging.version.parse(torch.__version__) < packaging.version.parse("2.6"), reason="FSDP2 requires torch >= 2.6"
+)
+@pytest.mark.usefixtures("fsdp_process_group")
+class TestFsdp2UnshardedParams:
+    """
+    Changes to `requires_grad` must reach the FSDP2 shards while a forward left unsharded parameters, see #3800.
+    """
+
+    def get_model(self, adapter_names=("default",), reshard_after_forward=False, fsdp_module_names=("lin0",)):
+        # imported here, as FSDP2 is public from torch 2.6 on
+        from torch.distributed.fsdp import fully_shard
+
+        torch.manual_seed(0)
+        config = LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False)
+        model = get_peft_model(MLP(), config, adapter_name=adapter_names[0])
+        for adapter_name in adapter_names[1:]:
+            model.add_adapter(adapter_name, config)
+        mesh = init_device_mesh("cpu", (1,))
+        # by default, lin0 gets its own FSDP module and lin1 belongs to the root FSDP module, which is the PeftModel
+        for name in fsdp_module_names:
+            module = model.base_model.model.get_submodule(name)
+            fully_shard(module, mesh=mesh, reshard_after_forward=reshard_after_forward)
+        fully_shard(model, mesh=mesh, reshard_after_forward=reshard_after_forward)
+        return model
+
+    def get_input(self):
+        return torch.arange(90).view(9, 10).float()
+
+    def get_lora_params(self, model, adapter_name="default"):
+        # called before the first forward, so these are the sharded parameters that FSDP2 keeps
+        params = [param for name, param in model.named_parameters() if f"lora_A.{adapter_name}." in name]
+        params += [param for name, param in model.named_parameters() if f"lora_B.{adapter_name}." in name]
+        assert len(params) == 4
+        assert all(isinstance(param, DTensor) for param in params)
+        return params
+
+    @pytest.mark.parametrize("reshard_after_forward", [False, None])
+    def test_disable_adapter_after_backward(self, reshard_after_forward):
+        model = self.get_model(reshard_after_forward=reshard_after_forward)
+        X = self.get_input()
+        lora_params = self.get_lora_params(model)
+
+        model(X).sum().backward()  # the backward reshards all FSDP modules
+        with torch.no_grad(), model.disable_adapter():
+            model(X)
+        assert all(param.requires_grad for param in lora_params)
+
+        for _ in range(2):
+            for param in lora_params:
+                param.grad = None
+            model(X).sum().backward()
+            assert all(param.grad is not None for param in lora_params)
+
+    def test_set_requires_grad_after_forward(self):
+        model = self.get_model()
+        lora_params = self.get_lora_params(model)
+
+        with torch.no_grad():
+            model(self.get_input())
+        model.set_requires_grad("default", requires_grad=False)
+        assert not any(param.requires_grad for param in lora_params)
+
+    def test_set_adapter_after_forward(self):
+        model = self.get_model(adapter_names=("default", "other"))
+        default_params = self.get_lora_params(model, "default")
+        other_params = self.get_lora_params(model, "other")
+
+        with torch.no_grad():
+            model(self.get_input())
+        model.set_adapter("other")
+        assert all(param.requires_grad for param in other_params)
+        assert not any(param.requires_grad for param in default_params)
+
+    def test_set_adapter_after_merge_keeps_training_new_adapter(self):
+        # Regression test for #3872: set_adapter() reshards before base_model.set_adapter() unmerges a merged
+        # layer, so the reshard is skipped (resharding a merged layer would drop the merge) and the new adapter's
+        # requires_grad=True lands on a transient unsharded copy instead of the FSDP2 shard. The first backward
+        # still trains the new adapter through that unsharded copy, but it also reshards, so a second backward
+        # gathers from the shard, where the new adapter is still frozen, and silently trains nothing.
+        model = self.get_model(adapter_names=("default", "other"))
+        other_params = self.get_lora_params(model, "other")
+        X = self.get_input()
+
+        with torch.no_grad():
+            model(X)
+        model.merge_adapter()
+        model.set_adapter("other")
+
+        for _ in range(3):
+            for param in other_params:
+                param.grad = None
+            loss = model(X).sum()
+            assert loss.requires_grad, "no trainable adapter is active"
+            loss.backward()
+            assert all(param.grad is not None for param in other_params)
+
+    @pytest.mark.parametrize("merged_name, other_name", [("lin0", "lin1"), ("lin1", "lin0")])
+    def test_set_requires_grad_with_merged_layer_in_other_fsdp_module(self, merged_name, other_name):
+        # a merged layer only keeps the FSDP module that shards its parameters from resharding
+        model = self.get_model()
+        other_params = [param for name, param in model.named_parameters() if f".{other_name}.lora_" in name]
+        assert len(other_params) == 2
+
+        with torch.no_grad():
+            model(self.get_input())
+        model.base_model.model.get_submodule(merged_name).merge()
+        model.set_requires_grad("default", requires_grad=False)
+        assert not any(param.requires_grad for param in other_params)
+
+    @pytest.mark.parametrize("operation", ["disable_adapter", "set_requires_grad", "set_adapter"])
+    # FSDP wrapping by size can also give the base layer inside a LoRA layer its own FSDP module
+    @pytest.mark.parametrize("fsdp_module_names", [("lin0",), ("lin0.base_layer", "lin0")])
+    def test_merged_after_forward_keeps_base_weights(self, operation, fsdp_module_names):
+        # A merge after a forward goes into the unsharded parameters. Resharding would drop it, and the unmerge would
+        # then subtract the delta from the sharded base weights.
+        model = self.get_model(adapter_names=("default", "other"), fsdp_module_names=fsdp_module_names)
+        base_weights = {
+            name: model.base_model.model.get_submodule(name).base_layer.weight.full_tensor().clone()
+            for name in ("lin0", "lin1")
+        }
+
+        with torch.no_grad():
+            model(self.get_input())
+        model.merge_adapter()
+        if operation == "disable_adapter":
+            with model.disable_adapter():
+                pass
+        elif operation == "set_requires_grad":
+            model.set_requires_grad("default")
+        else:
+            model.set_adapter("other")  # unmerges first
+        if model.base_model.model.lin0.merged:
+            model.unmerge_adapter()
+
+        state_dict = model.state_dict()  # reshards, so this returns the sharded weights
+        for name, base_weight in base_weights.items():
+            weight = state_dict[f"base_model.model.{name}.base_layer.weight"].full_tensor()
+            assert torch.allclose(weight, base_weight, atol=1e-6)

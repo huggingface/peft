@@ -1107,8 +1107,9 @@ class BaseTuner(nn.Module, ABC):
                     RuntimeWarning,
                 )
 
-        # Warn about rank_pattern / alpha_pattern entries that matched no targeted module. The
+        # Warn about rank_pattern / alpha_pattern entries that matched no targeted module or parameter. The
         # matching semantics are identical to `get_pattern_key`.
+        targeted_names = targeted_module_names + targeted_parameter_names
         for pattern_attr in ("rank_pattern", "alpha_pattern"):
             patterns = getattr(peft_config, pattern_attr, None)
             if not patterns:
@@ -1116,13 +1117,13 @@ class BaseTuner(nn.Module, ABC):
             matched = {
                 pattern_key
                 for pattern_key in patterns
-                if any(re.match(rf"(.*\.)?({pattern_key})$", module_name) for module_name in targeted_module_names)
+                if any(re.match(rf"(.*\.)?({pattern_key})$", name) for name in targeted_names)
             }
             unmatched = sorted(set(patterns) - matched)
             if unmatched:
                 warnings.warn(
-                    f"The following {pattern_attr} keys did not match any targeted module and were ignored: "
-                    f"{unmatched}.",
+                    f"The following {pattern_attr} keys did not match any targeted module or parameter and were "
+                    f"ignored: {unmatched}.",
                     RuntimeWarning,
                 )
 
@@ -1318,6 +1319,11 @@ class BaseTuner(nn.Module, ABC):
         memory, which is required to unmerge the adapters. In order to merge the adapter weights without keeping them
         in memory, please call `merge_and_unload`.
 
+        Once a layer has merged adapter weights, its forward pass uses only those weights. Therefore, if
+        `adapter_names` does not cover all active adapters, the remaining active adapters are silently not applied,
+        even though they are still reported as active. Either merge all active adapters or call `unmerge_adapter`
+        first. Note that this behavior is planned to change in the v1.0 release.
+
         Args:
             adapter_names (`list[str]`, *optional*):
                 The list of adapter names that should be merged. If `None`, all active adapters will be merged.
@@ -1327,6 +1333,7 @@ class BaseTuner(nn.Module, ABC):
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
         """
+        # TODO: update docstring about the interaction of active/merged adapters for PEFT v1.0
         # Note: The order of arguments here is:
         #   adapter_names, safe_merge
         # For layer.merge, the order is:

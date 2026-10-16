@@ -7,7 +7,8 @@
 # open PEFT issue approved by a listed maintainer or public Hugging
 # Face member with "/peft-triage: approved" on its own line outside a
 # code block, or link one of the discussions allowlisted in
-# scripts/triage_prs.py. Accepted issue references: #123,
+# scripts/triage_prs.py. The command may include a username to limit
+# approval to that PR author. Accepted issue references: #123,
 # huggingface/peft#123, or a full GitHub issue URL. Allowlisted
 # discussions must use their full GitHub URL.
 # Contributor allowlists do not grant approval authority. Only public
@@ -30,9 +31,9 @@
 name: PR triage
 
 on:
-  # TODO: set up automatic cron job
-  # schedule:
-  #   - cron: "17 */4 * * *"
+  schedule:
+    # every 4 hours, 17 minutes past the hour (some arbitrary offset to avoid congestion)
+    - cron: "17 */4 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -62,7 +63,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
-          python-version: "3.13"
+          python-version: "3.14"
       - name: Install script dependency
         run: python -m pip install requests
       - name: Triage open PRs

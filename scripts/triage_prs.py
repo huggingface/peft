@@ -11,7 +11,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Enforce issue approval for new PRs. Setup and policy are documented in triage_prs.yml."""
+"""Enforce issue approval for new PRs. Setup and policy are documented in triage_prs.yml.
+
+Add the string
+
+      /peft-triage approved
+
+to approve an issue. Add a GitHub username to limit approval to that contributor, for example `/peft-triage approved
+username` or `/peft-triage approved @username`.
+"""
 
 import os
 import re
@@ -31,14 +39,18 @@ BOT_NAME = "peft-triage"
 
 # see: https://api.github.com/users/<user-id>
 MAINTAINERS = {"BenjaminBossan": 6229650, "githubnemo": 264196}
-ALLOW_LIST_USERS = {"dependabot[bot]": 49699333, "peft-jambot": 295153068}
+ALLOW_LIST_USERS = {"dependabot[bot]": 49699333, "peft-jambot": 295153068, "hf-security-analysis": 265538906}
 ALLOW_LIST_ORGANIZATIONS = {}  # Organization name -> immutable organization ID.
 # see: https://api.github.com/orgs/huggingface
 HF_ORGANIZATION_ID = 25720743
 GITHUB_ACTIONS_BOT_ID = 41898282
 MAX_ISSUE_REFERENCES = 10
+# Issue numbers listed here are accepted without an approval comment or API lookup.
+ALLOWED_ISSUES = {
+    2310,  # method comparison thread
+}
 # Discussion numbers listed here are accepted without an approval comment or API lookup.
-ALLOW_LIST_DISCUSSIONS: set[str] = {
+ALLOWED_DISCUSSIONS: set[str] = {
     3521,  # MetaMathQA benchmark discussion
     3522,  # image-gen benchmark discussion
 }
@@ -47,9 +59,10 @@ CLOSURE_MESSAGE = (
     "{closure_marker}\n\n"
     "Thank you for your interest in contributing to PEFT. This PR is being closed because its description "
     "does not reference an accepted PEFT discussion or an open PEFT issue with explicit approval from a "
-    "maintainer or public Hugging Face organization member.\n\n"
+    "maintainer or public Hugging Face organization member that applies to this PR's author.\n\n"
     "Please open or find an issue, discuss the proposed contribution, and wait for an authorized "
-    "person to comment `/{bot_name} approved` before opening a PR. "
+    "person to comment `/{bot_name} approved` before opening a PR. To limit approval to one contributor, "
+    "the commenter can add that person's username after `approved`. "
     "Once approved, reference it in this PR's description (for example, `Fixes #123`) and reopen the PR; "
     "there is no need to create another PR.\n\n"
     "If you believe this PR was closed incorrectly, please ping the maintainers here.\n\n"
@@ -139,11 +152,21 @@ def strip_html_comments(body):
 def extract_issue_numbers(body, repository):
     """Extract local #123, owner/repo#123 and GitHub issue URLs in description order."""
     numbers = []
+    body = strip_html_comments(body)
+    # Ignore reference-like text in labels, e.g. `discussion #3521` in
+    # `[discussion #3521](https://github.com/huggingface/peft/discussions/3521)`.
+    markdown_link = re.compile(
+        r"""
+        \[[^\]]*\]                            # display label
+        \( (?P<destination>https?://[^)\s]+)  # destination URL
+        (?:\s+[^)]*)? \)                      # optional title and closing parenthesis
+        """,
+        re.VERBOSE,
+    )
+    body = markdown_link.sub(r"\g<destination>", body)
     # Consume whole URLs and qualified references so foreign references cannot be
     # mistaken for local issue numbers (including URL fragments).
-    references = re.finditer(
-        r"https?://[^\s<>`]+|(?<![\w/.-])(?:[\w.-]+/[\w.-]+)?#[1-9][0-9]*", strip_html_comments(body)
-    )
+    references = re.finditer(r"https?://[^\s<>`]+|(?<![\w/.-])(?:[\w.-]+/[\w.-]+)?#[1-9][0-9]*", body)
     for reference in references:
         text = reference.group().rstrip(".,;:)]}")
         if text.startswith(("https://", "http://")):
@@ -207,11 +230,19 @@ def iter_unfenced_lines(body):
             yield line
 
 
-def contains_approval(body, bot_name):
-    """Require the command on its own line, outside HTML comments and Markdown code fences."""
-    return any(
-        re.fullmatch(rf" {{0,3}}/{re.escape(bot_name)} approved[ \t]*", line) for line in iter_unfenced_lines(body)
-    )
+def contains_approval(body, bot_name, author_login=None):
+    """Match a general approval or one scoped to this PR author, outside HTML comments and Markdown code fences."""
+    username = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?"
+    pattern = re.compile(rf" {{0,3}}/{re.escape(bot_name)} approved(?:[ \t]+@?({username}))?[ \t]*")
+    for line in iter_unfenced_lines(body):
+        match = pattern.fullmatch(line)
+        if match:
+            approved_author = match[1]
+            if approved_author is None or (
+                author_login is not None and approved_author.casefold() == author_login.casefold()
+            ):
+                return True
+    return False
 
 
 def is_eligible_pr(pr, since):
@@ -233,6 +264,7 @@ class PullRequestTriage:
         maintainers,
         allowed_users,
         allowed_organizations,
+        allowed_issues,
         allowed_discussions,
     ):
         self.client = client
@@ -243,6 +275,7 @@ class PullRequestTriage:
         self.maintainers = set(maintainers)
         self.allowed_users = set(allowed_users)
         self.allowed_organizations = dict(allowed_organizations)
+        self.allowed_issues = allowed_issues
         self.allowed_discussions = allowed_discussions
 
     def can_approve(self, user_id):
@@ -259,15 +292,23 @@ class PullRequestTriage:
             )
         )
 
-    def has_approved_issue(self, body):
+    def has_approved_issue(self, body, author_login):
         for number in extract_issue_numbers(body, self.repository):
-            issue = self.client.get(f"{self.path}/issues/{number}")
+            try:
+                issue = self.client.get(f"{self.path}/issues/{number}")
+            except requests.HTTPError as error:
+                if error.response is None or error.response.status_code != 404:
+                    raise
+                print(f"Ignoring missing issue reference #{number}; continuing triage.")
+                continue
+
             if "pull_request" in issue or issue.get("state") != "open":
                 continue
 
             comments = self.client.list_items(f"{self.path}/issues/{number}/comments")
             if any(
-                contains_approval(comment["body"], self.bot_name) and self.can_approve(comment["user"]["id"])
+                contains_approval(comment["body"], self.bot_name, author_login=author_login)
+                and self.can_approve(comment["user"]["id"])
                 for comment in comments
             ):
                 return True
@@ -276,6 +317,9 @@ class PullRequestTriage:
 
     def has_allowed_discussion(self, body):
         return any(number in self.allowed_discussions for number in extract_discussion_numbers(body, self.repository))
+
+    def has_allowed_issue(self, body):
+        return any(number in self.allowed_issues for number in extract_issue_numbers(body, self.repository))
 
     def is_human_author(self, body):
         """Require a standalone declaration or checked checkbox outside comments and code fences."""
@@ -300,8 +344,9 @@ class PullRequestTriage:
         approved = (
             self.is_human_author(pr["body"])
             or self.is_exempt_author(pr["user"]["id"])
+            or self.has_allowed_issue(pr["body"])
             or self.has_allowed_discussion(pr["body"])
-            or self.has_approved_issue(pr["body"])
+            or self.has_approved_issue(pr["body"], pr["user"]["login"])
         )
         comments = [] if approved else self.client.list_items(f"{self.path}/issues/{number}/comments")
         current = self.client.get(f"{self.path}/pulls/{number}")
@@ -353,7 +398,8 @@ def main():
         maintainers=MAINTAINERS.values(),
         allowed_users=ALLOW_LIST_USERS.values(),
         allowed_organizations=ALLOW_LIST_ORGANIZATIONS,
-        allowed_discussions=ALLOW_LIST_DISCUSSIONS,
+        allowed_issues=ALLOWED_ISSUES,
+        allowed_discussions=ALLOWED_DISCUSSIONS,
     )
     triage.run(dry_run=str_to_bool(os.environ.get("DRY_RUN", "false")))
 

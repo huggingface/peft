@@ -15,14 +15,13 @@ import importlib
 import itertools
 import os
 import re
-import socket
 import tempfile
 import unittest
 import warnings
 from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
-from functools import partial
+from functools import lru_cache, partial
 from pathlib import Path
 from typing import Any, Union
 
@@ -91,6 +90,7 @@ from peft import (
     replace_lora_weights_loftq,
     set_peft_model_state_dict,
 )
+from peft.helpers import KappaTuneSelector, find_kappa_target_modules
 from peft.import_utils import (
     is_diffusers_available,
     is_te_available,
@@ -131,6 +131,11 @@ from .testing_utils import (
 device, _, _ = get_backend()
 if device == "cpu":
     pytest.skip(allow_module_level=True, reason="GPU tests require hardware accelerator, got CPU only")
+
+
+@lru_cache
+def is_mslk_available() -> bool:
+    return importlib.util.find_spec("mslk") is not None
 
 
 # A full testing suite that tests all the necessary features on GPU. The tests should
@@ -4628,6 +4633,7 @@ class TestPeftTorchao:
             # Int8Tensor supports dequantize, so DoRA works
             get_peft_model(model, config)
 
+    @pytest.mark.skipif(not is_mslk_available(), reason="Skipping this test because torchao int4 now uses MSLK.")
     @pytest.mark.single_gpu_tests
     def test_causal_lm_training_single_gpu_torchao_int4_raises(self):
         # TODO: Once proper torchao support for int4 is added, remove this test and add int4 to supported_quant_types
@@ -4743,6 +4749,7 @@ class TestPeftTorchao:
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
+    @pytest.mark.skipif(not is_mslk_available(), reason="Skipping this test because torchao int4 now uses MSLK.")
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_accelerator
     def test_causal_lm_training_multi_accelerator_torchao_int4_raises(self):
@@ -6749,40 +6756,30 @@ def _get_tp_kwargs(tp_plan=None, tp_size=WORLD_SIZE):
     return {"tp_plan": tp_plan, "tp_size": tp_size}
 
 
-def _find_free_port():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))
-        return s.getsockname()[1]
-
-
-_BASE_PORT = _find_free_port()
-
-
-def _setup_dist(rank, world_size, port):
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = str(port)
+def _setup_dist(rank, world_size, init_method):
     os.environ["LOCAL_RANK"] = str(rank)
     os.environ["RANK"] = str(rank)
     os.environ["WORLD_SIZE"] = str(world_size)
     if torch.cuda.is_available():
-        dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+        dist.init_process_group(backend="nccl", init_method=init_method, rank=rank, world_size=world_size)
     else:
-        dist.init_process_group(backend="gloo", rank=rank, world_size=world_size)
+        dist.init_process_group(backend="gloo", init_method=init_method, rank=rank, world_size=world_size)
 
 
 def _teardown_dist():
-    dist.destroy_process_group()
+    if dist.is_initialized():
+        dist.destroy_process_group()
 
 
-def _test_function_wrapper(fn, rank, world_size, port, *extra_args):
+def _test_function_wrapper(fn, rank, world_size, init_method, *extra_args):
     try:
-        _setup_dist(rank, world_size, port)
-        fn(rank, world_size, port, *extra_args)
+        _setup_dist(rank, world_size, init_method)
+        fn(rank, world_size, *extra_args)
     finally:
         _teardown_dist()
 
 
-def _test_lora_weight_synchronization(rank, world_size, port):
+def _test_lora_weight_synchronization(rank, world_size):
     """
     Test that non-sharded LoRA weights are identical across ranks after training step.
     """
@@ -6838,7 +6835,7 @@ def _test_lora_weight_synchronization(rank, world_size, port):
                 assert torch.allclose(weight, g), f"{name}.lora_embedding_B differs between rank {rank} and rank {i}"
 
 
-def _test_lora_gradient_synchronization(rank, world_size, port):
+def _test_lora_gradient_synchronization(rank, world_size):
     """
     Tests that the gradients of the LoRA weights are:
         1. DTensor if the weight is a DTensor, and that placements match,
@@ -6902,7 +6899,7 @@ def _test_lora_gradient_synchronization(rank, world_size, port):
     assert checked_at_least_one, "No LoRA parameter was found to check"
 
 
-def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
+def _test_load_from_checkpoint(rank, world_size, tmp_dir):
     """
     Test that loading from a checkpoint correctly handles the sharding of LoRA weights according to the TP plan.
     """
@@ -6957,7 +6954,7 @@ def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
     assert torch.isfinite(outputs.loss), f"Loss not finite after checkpoint load: {outputs.loss}"
 
 
-def _test_save_unsharded_weights(rank, world_size, port, tmp_dir_reference, tmp_dir_tp):
+def _test_save_unsharded_weights(rank, world_size, tmp_dir_reference, tmp_dir_tp):
     """
     Test that saving a TP PEFT model produces fully unsharded weights identical to the original non-TP weights.
 
@@ -6997,7 +6994,7 @@ def _test_save_unsharded_weights(rank, world_size, port, tmp_dir_reference, tmp_
             )
 
 
-def _test_multiple_adapters(rank, world_size, port):
+def _test_multiple_adapters(rank, world_size):
     """Two LoRA adapters coexist on a TP model and can be switched between."""
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
@@ -7019,7 +7016,7 @@ def _test_multiple_adapters(rank, world_size, port):
             assert torch.isfinite(outputs.loss), f"Loss not finite with adapter '{adapter_name}': {outputs.loss}"
 
 
-def _test_load_adapter_forward(rank, world_size, port, tmp_dir_reference):
+def _test_load_adapter_forward(rank, world_size, tmp_dir_reference):
     """
     Test that load_adapter (with a peft_config) works with a TP base model and the forward pass produces the same loss
     on every rank and that it is finite.
@@ -7068,7 +7065,7 @@ def _test_load_adapter_forward(rank, world_size, port, tmp_dir_reference):
     assert torch.isfinite(outputs.loss), f"Loss is not finite: {outputs.loss}"
 
 
-def _test_load_adapter_save(rank, world_size, port, tmp_dir_reference, tmp_dir_tp):
+def _test_load_adapter_save(rank, world_size, tmp_dir_reference, tmp_dir_tp):
     """
     Test that get_peft_model_state_dict correctly gathers unsharded TP weights when using load_adapter with a
     peft_config.
@@ -7136,66 +7133,103 @@ is_transformers_ge_v5_6_0 = packaging.version.parse(transformers.__version__) >=
 )
 @pytest.mark.multi_gpu_tests
 class TestLoraTensorParallel:
-    def _spawn(self, fn, *extra_args, port_offset=0):
-        port = _BASE_PORT + port_offset
-        wrapped_fn = partial(_test_function_wrapper, fn)
-        mp.spawn(wrapped_fn, args=(WORLD_SIZE, port) + extra_args, nprocs=WORLD_SIZE, join=True)
+    def _spawn(self, fn, *extra_args):
+        with tempfile.TemporaryDirectory(prefix="peft-tp-") as rendezvous_dir:
+            init_method = (Path(rendezvous_dir) / "rendezvous").as_uri()
+            wrapped_fn = partial(_test_function_wrapper, fn)
+            mp.spawn(wrapped_fn, args=(WORLD_SIZE, init_method) + extra_args, nprocs=WORLD_SIZE, join=True)
 
     def test_lora_weight_synchronization(self):
-        self._spawn(_test_lora_weight_synchronization, port_offset=0)
+        self._spawn(_test_lora_weight_synchronization)
 
     def test_lora_gradient_synchronization(self):
-        self._spawn(_test_lora_gradient_synchronization, port_offset=2)
+        self._spawn(_test_lora_gradient_synchronization)
 
     def test_from_checkpoint(self, tmp_path):
-        self._spawn(_test_load_from_checkpoint, tmp_path, port_offset=1)
+        self._spawn(_test_load_from_checkpoint, tmp_path)
 
     def test_save_unsharded_weights(self, tmp_path):
         tmp_dir_reference = tmp_path / "reference"
         tmp_dir_tp = tmp_path / "tp"
-        self._spawn(_test_save_unsharded_weights, tmp_dir_reference, tmp_dir_tp, port_offset=3)
+        self._spawn(_test_save_unsharded_weights, tmp_dir_reference, tmp_dir_tp)
 
     def test_multiple_adapters(self):
-        self._spawn(_test_multiple_adapters, port_offset=4)
+        self._spawn(_test_multiple_adapters)
 
     def test_load_adapter_forward(self, tmp_path):
-        self._spawn(_test_load_adapter_forward, tmp_path, port_offset=5)
+        self._spawn(_test_load_adapter_forward, tmp_path)
 
     def test_load_adapter_save(self, tmp_path):
         tmp_dir_reference = tmp_path / "reference"
         tmp_dir_tp = tmp_path / "tp"
-        self._spawn(_test_load_adapter_save, tmp_dir_reference, tmp_dir_tp, port_offset=6)
+        self._spawn(_test_load_adapter_save, tmp_dir_reference, tmp_dir_tp)
 
 
 @pytest.mark.single_gpu_tests
 @require_bitsandbytes
-def test_kappatune_with_4bit_model():
-    """Test that KappaTune works with 4-bit quantized models on GPU."""
-    import torch
-    from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+class TestKappaTune:
+    def test_kappatune_with_4bit_model(self):
+        """Test that KappaTune works with 4-bit quantized models on GPU."""
+        # Use a very small model for faster testing
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+        )
 
-    from peft.helpers import find_kappa_target_modules
+        model_id = "hf-internal-testing/tiny-random-LlamaForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                quantization_config=quantization_config,
+                device_map=torch_device,
+                dtype=torch.float16,
+            )
 
-    # Use a very small model for faster testing
-    quantization_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_compute_dtype=torch.float16,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_use_double_quant=True,
-    )
+        # Run KappaTune
+        targets = find_kappa_target_modules(model, top_p=0.3)
 
-    model = AutoModelForCausalLM.from_pretrained(
-        "hf-internal-testing/tiny-random-LlamaForCausalLM",
-        quantization_config=quantization_config,
-        device_map=torch_device,
-        dtype=torch.float16,
-    )
+        # Basic assertions
+        assert isinstance(targets, dict)
+        assert "target_modules" in targets
+        assert isinstance(targets["target_modules"], list)
+        assert len(targets["target_modules"]) > 0, "Should return at least some target modules"
 
-    # Run KappaTune
-    targets = find_kappa_target_modules(model, top_p=0.3)
+    def test_kappatune_with_8bit_model(self, tmp_path):
+        """Test that KappaTune dequantizes 8-bit quantized weights before computing condition numbers.
 
-    # Basic assertions
-    assert isinstance(targets, dict)
-    assert "target_modules" in targets
-    assert isinstance(targets["target_modules"], list)
-    assert len(targets["target_modules"]) > 0, "Should return at least some target modules"
+        Reading the int8 values without their per-row scales does not raise, it silently returns condition numbers that
+        are orders of magnitude off, so they are compared to those of the same model in full precision. See #3736.
+        """
+        model_id = "hf-internal-testing/tiny-random-LlamaForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+        # Give the rows of each weight very different scales. 8-bit quantization stores one scale per row, so condition
+        # numbers computed on the int8 values without these scales would differ strongly from those of the actual
+        # weights.
+        with torch.no_grad():
+            for module in model.modules():
+                if isinstance(module, torch.nn.Linear):
+                    module.weight.mul_(torch.logspace(-2, 1, module.out_features).unsqueeze(1))
+        model.save_pretrained(tmp_path)
+
+        model_fp = AutoModelForCausalLM.from_pretrained(tmp_path, device_map=torch_device, dtype=torch.float32)
+        model_8bit = AutoModelForCausalLM.from_pretrained(
+            tmp_path,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+            device_map=torch_device,
+        )
+
+        selector_fp = KappaTuneSelector(model_fp, show_progress=False)
+        selector_fp._compute_kappas()
+        selector_8bit = KappaTuneSelector(model_8bit, show_progress=False)
+        selector_8bit._compute_kappas()
+
+        kappas_fp = selector_fp._condition_numbers
+        kappas_8bit = selector_8bit._condition_numbers
+        assert kappas_8bit.keys() == kappas_fp.keys()
+        # Quantization noise can still noticeably change the condition number of nearly singular weights, hence the
+        # loose bound. Without dequantization, the condition numbers would be off by a much larger factor.
+        for name, kappa_fp in kappas_fp.items():
+            assert 0.5 < kappas_8bit[name] / kappa_fp < 2
