@@ -2879,6 +2879,30 @@ class TestPeftCustomModel(PeftCommonTester):
         assert torch.isfinite(output).all()
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_forward_input_with_more_dims(self, test_name, model_id, config_cls, config_kwargs):
+        # Like nn.Linear, the adapted layers should accept inputs of shape (*, in_features), e.g. the channels-last
+        # (batch, height, width, channels) inputs of ConvNeXt, see https://github.com/huggingface/peft/issues/3968.
+        # These models process each row of the input independently, so adding leading dimensions to the input must
+        # not change the output.
+        if model_id not in ("MLP", "MLP2", "MLP_LayerNorm", "MlpUsingParameters"):
+            pytest.skip("Only the MLP models process each row of the input independently")
+
+        X = self.prepare_inputs_for_testing()["X"]
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model.eval()
+        with torch.no_grad():
+            expected = model(X=X)
+            for shape in [(9, 1, 10), (3, 3, 1, 10), (3, 1, 3, 1, 10)]:
+                output = model(X=X.view(shape))
+                assert torch.allclose(output.view(expected.shape), expected)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_forward_float16(self, test_name, model_id, config_cls, config_kwargs):
         # The user manually sets the dtype of the base model to fp16 precision. This should not cause an error for the
         # different PEFT methods.
