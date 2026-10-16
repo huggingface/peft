@@ -129,20 +129,47 @@ def _get_tp_info(model) -> TpInfo | None:
 
 
 def _filter_state_dict_for_adapter_name(
-    state_dict: dict[str, torch.Tensor], unwanted_adapter_names: list[str]
+    state_dict: dict[str, torch.Tensor],
+    unwanted_adapter_names: list[str],
+    model: torch.nn.Module,
 ) -> dict[str, torch.Tensor]:
-    """Filter the state dict to remove keys that correspond to the unwanted adapter
+    """Filter the state dict to remove keys that correspond to the unwanted adapter.
 
-    Use a negative filter to avoid removing keys that correspond to keys that contain no adapter name at all, e.g. when
-    using modules_to_save.
+    A key is dropped if it ends with an unwanted adapter name, or if the segment immediately after a tuner prefix (e.g.
+    `lora_A`, `lora_B`, `ia3_l`) is an unwanted adapter name. Both checks are needed: the suffix check covers
+    adapter-keyed entries whose container is not a parameter or buffer, thus not part of the structural prefixes (the
+    SHiRA indices live in a plain dict on the layer), while the positional check avoids dropping the selected adapter's
+    tensors when an unwanted adapter's *name* happens to equal a base-model module path segment (e.g. an adapter called
+    "mlp"). Keys outside any tuner prefix are kept unless they end with an unwanted adapter name; auxiliary modules
+    such as `modules_to_save` are resolved per adapter downstream.
     """
-    return {
-        k: v
-        for k, v in state_dict.items()
-        if not any(
-            f".{adapter_name}." in k or k.endswith(f".{adapter_name}") for adapter_name in unwanted_adapter_names
-        )
-    }
+    # avoid circular import
+    from peft.tuners.tuners_utils import _get_tuner_state_dict_key_prefixes
+
+    prefixes = _get_tuner_state_dict_key_prefixes(model)
+    unwanted = set(unwanted_adapter_names)
+
+    filtered_state_dict = {}
+    for key, value in state_dict.items():
+        if any(key.endswith(f".{adapter_name}") for adapter_name in unwanted):
+            continue
+
+        keep = True
+        for prefix in prefixes:
+            prefix = prefix + "."
+            if not key.startswith(prefix):
+                continue
+
+            suffix = key[len(prefix) :]
+            adapter_name = suffix.partition(".")[0]
+            if adapter_name in unwanted:
+                keep = False
+                break
+
+        if keep:
+            filtered_state_dict[key] = value
+
+    return filtered_state_dict
 
 
 def get_peft_model_state_dict(
@@ -193,7 +220,9 @@ def get_peft_model_state_dict(
     if not config.is_prompt_learning:
         # Prompt learning methods don't support multiple adapters and hence don't have the adapter name in the Parameter
         # name.
-        state_dict_filtered_for_adapter_name = _filter_state_dict_for_adapter_name(state_dict, unwanted_adapter_names)
+        state_dict_filtered_for_adapter_name = _filter_state_dict_for_adapter_name(
+            state_dict, unwanted_adapter_names, model
+        )
         if len(state_dict_filtered_for_adapter_name) > 0:
             # If, after filtering the state dict for the adapter name, we end up with an empty state dict, it means that
             # the adapter weights are not stored with the adapter name as suffix. This can happen e.g. for adaption
