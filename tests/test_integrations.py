@@ -573,21 +573,26 @@ class TestTransformersV5:
 
         targeted_modules = {name.removeprefix("base_model.model.") for name in peft_model.targeted_module_names}
         assert mlp_linears <= targeted_modules
-        # the fused experts and the router are still targeted as parameters
+        # the fused experts are still targeted as parameters
         targeted_parameters = set(peft_model.targeted_parameter_names)
         assert "model.layers.1.mlp.experts.gate_up_proj" in targeted_parameters
         assert "model.layers.1.mlp.experts.down_proj" in targeted_parameters
-        assert any(name.endswith(".gate.weight") for name in targeted_parameters)
+        if model_type != "afmoe":
+            # afmoe's router is itself an nn.Linear (see test_all_linear_afmoe_linear_router_targeted_once below),
+            # every other architecture here has a non-Linear router module, so its weight is targeted as a
+            # parameter instead.
+            assert any(name.endswith(".gate.weight") for name in targeted_parameters)
 
     def test_all_linear_afmoe_linear_router_targeted_once(self):
         # https://github.com/huggingface/peft/issues/3801
-        # afmoe's router `mlp.router.gate` is an nn.Linear on v5. Its weight is targeted as a parameter via the router
-        # mapping (gate -> gate.weight), so it must not also be targeted as a module, which would raise.
+        # afmoe's router `mlp.router.gate` is an nn.Linear on v5, unlike the other architectures covered above. It
+        # must be targeted once, as the plain module it is, not also as a parameter through its own weight, which
+        # would raise.
         model = self._get_tiny_moe_model("afmoe")
         peft_model = get_peft_model(model, LoraConfig(r=2, target_modules="all-linear"))  # does not raise
 
-        assert "model.layers.1.mlp.router.gate.weight" in peft_model.targeted_parameter_names
-        assert not any(name.endswith(".router.gate") for name in peft_model.targeted_module_names)
+        assert "model.layers.1.mlp.router.gate" in peft_model.targeted_module_names
+        assert not any(name.endswith(".router.gate.weight") for name in peft_model.targeted_parameter_names)
 
     def test_all_linear_dense_and_shared_expert_layers_save_load_roundtrip(self, tmp_path):
         # The dense and shared-expert projections are stored as qualified names in the converted config. Reloading
