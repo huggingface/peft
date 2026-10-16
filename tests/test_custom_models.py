@@ -8727,6 +8727,44 @@ class TestFsdp2UnshardedParams:
             model(X).sum().backward()
             assert all(param.grad is not None for param in lora_params)
 
+    @pytest.mark.parametrize("reshard_after_forward", [False, None])
+    def test_disable_adapter_after_forward_keeps_unsharded_params(self, reshard_after_forward):
+        # A reference pass between the forward and the backward runs on the parameters that the forward left
+        # registered, so exiting the context doesn't reshard and the backward reuses them, see #3800.
+        model = self.get_model(reshard_after_forward=reshard_after_forward)
+        X = self.get_input()
+        lora_params = self.get_lora_params(model)
+
+        output = model(X)
+        registered_params = dict(model.named_parameters())
+        with torch.no_grad(), model.disable_adapter():
+            model(X)
+        assert all(param is registered_params[name] for name, param in model.named_parameters())
+
+        output.sum().backward()
+        assert all(param.grad is not None for param in lora_params)
+        for param in lora_params:
+            param.grad = None
+        model(X).sum().backward()  # the next step still trains the adapters
+        assert all(param.grad is not None for param in lora_params)
+
+    @pytest.mark.parametrize("adapter_name, requires_grad", [("default", False), ("other", True)])
+    def test_disable_adapter_after_forward_sets_requires_grad_on_shards(self, adapter_name, requires_grad):
+        # Exiting the context makes the active adapter trainable and the others frozen, as without FSDP. If that
+        # changes `requires_grad`, it has to reach the shards while the unsharded parameters are registered, see #3800.
+        model = self.get_model(adapter_names=("default", "other"))
+        X = self.get_input()
+        default_params = self.get_lora_params(model, "default")
+        other_params = self.get_lora_params(model, "other")
+
+        model.set_requires_grad(adapter_name, requires_grad=requires_grad)
+        with torch.no_grad():
+            model(X)
+        with torch.no_grad(), model.disable_adapter():
+            model(X)
+        assert all(param.requires_grad for param in default_params)
+        assert not any(param.requires_grad for param in other_params)
+
     def test_set_requires_grad_after_forward(self):
         model = self.get_model()
         lora_params = self.get_lora_params(model)
