@@ -355,7 +355,7 @@ _MOE_FUSED_TARGETS: dict[str, dict[str, set[str]]] = {
 def _resolve_string_target_modules(
     peft_config: PeftConfig, model: torch.nn.Module, target_module_mapping: dict[str, str]
 ) -> set[str]:
-    """Resolve a string `target_modules` (a regex or `"all-linear"`) to the concrete leaf names it targets.
+    """Resolve a string `target_modules` (a regex or `"all-linear"`) to the concrete names it targets.
 
     The keys of `target_module_mapping` are the v4 projection names that were renamed/fused on v5: the expert
     projections (`gate_proj`, `up_proj`, `down_proj`) and the router `gate`. Resolving the string to leaf names up
@@ -363,14 +363,38 @@ def _resolve_string_target_modules(
 
     `"all-linear"` matched every `nn.Linear` on the v4 model, so it targeted all of those projections; on v5 they are
     no longer `nn.Linear` (the experts are fused into stacked parameters, the router became a custom module), so they
-    are added directly by name. A regex only targets what it spells out, so the experts -- which no longer exist as
-    real keys -- are recovered by probing each reconstructed v4 key against the pattern.
+    are added directly by name. `nn.Linear` modules found by type whose leaf name is also an expert name (e.g. dense
+    MLP and shared-expert layers such as `layers.0.mlp.gate_proj`) are kept as fully qualified names, so they stay
+    module targets instead of being remapped to the fused expert parameters. A regex only targets what it spells out,
+    so the experts -- which no longer exist as real keys -- are recovered by probing each reconstructed v4 key against
+    the pattern.
     """
     if peft_config.target_modules.lower() == INCLUDE_LINEAR_LAYERS_SHORTHAND:
-        # attention projections are still `nn.Linear` on v5, so resolve them by type; the experts and router were
-        # `nn.Linear` in v4 too but are now parameters / a custom module, so add their v4 names (the mapping keys).
+        # attention, dense MLP and shared-expert projections are still `nn.Linear` on v5, so resolve them by type; the
+        # experts and router were `nn.Linear` in v4 too but are now parameters / a custom module, so add their v4 names
+        # (the mapping keys).
         resolved = _maybe_include_all_linear_layers(copy.copy(peft_config), model).target_modules
-        return {name.rsplit(".", 1)[-1] for name in resolved} | target_module_mapping.keys()
+        modules = dict(model.named_modules())
+        mapped_parameters = set(target_module_mapping.values())
+        names = set()
+        for name in resolved:
+            leaf = name.rsplit(".", 1)[-1]
+            if leaf not in target_module_mapping:
+                # unambiguous (e.g. `q_proj`), the leaf name is enough
+                names.add(leaf)
+                continue
+            # A router can still be an `nn.Linear` on v5 (e.g. afmoe's `mlp.router.gate`). Its weight is already
+            # targeted through the mapping (`gate` -> `gate.weight`), so targeting the module as well would target it
+            # twice.
+            if any(
+                f"{name}.{param_name}".endswith(f".{mapped}")
+                for param_name, _ in modules[name].named_parameters(recurse=False)
+                for mapped in mapped_parameters
+            ):
+                continue
+            # The leaf name is shared with the experts, the qualified name keeps this module a module target, see #3801
+            names.add(name)
+        return names | target_module_mapping.keys()
 
     # regex: leaf names of the real module/parameter keys it matches (q/k/v_proj, the router module, `down_proj`, ...)
     module_keys = [name for name, _ in model.named_modules()]
