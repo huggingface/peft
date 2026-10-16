@@ -71,9 +71,13 @@ class OSFModel(BaseTuner):
         *,
         parameter_name: str | None = None,
     ) -> None:
-        # OSF only works on 2D weight matrices
+        # OSF only works on 2D ``nn.Linear`` weights. Raise instead of silently skipping so
+        # callers (e.g. gpt2 ``Conv1D`` targets) notice that nothing was wrapped (#3986).
         if not hasattr(target, "weight") or len(target.weight.shape) != 2:
-            return
+            raise ValueError(
+                f"Target module {target} is not supported. Currently, only the following modules are "
+                "supported: `torch.nn.Linear`."
+            )
 
         # Determine effective rank for this target (supports int or fractional in (0,1])
         def _resolve_rank(value, min_dim: int) -> int:
@@ -106,7 +110,10 @@ class OSFModel(BaseTuner):
         else:
             new_module = dispatch_default(target, adapter_name, osf_config, **kwargs)
             if new_module is None:
-                return
+                raise ValueError(
+                    f"Target module {target} is not supported. Currently, only the following modules are "
+                    "supported: `torch.nn.Linear`."
+                )
             # If adding an additional adapter, keep it frozen initially
             if adapter_name not in self.active_adapters:
                 new_module.requires_grad_(False)
