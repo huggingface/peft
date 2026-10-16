@@ -1,0 +1,17 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "exclude_modules": null,
+  "fan_in_fan_out": false,
+  "gate_init_mean": 1.0,
+  "gate_init_std": 0.1,
+  "gate_noise_std": 0.1,
+  "inference_mode": false,
+  "modules_to_save": null,
+  "peft_type": "FINEGATES",
+  "revision": null,
+  "sparsity_loss_weight": 0.01,
+  "target_modules": null,
+  "target_sparsity": 0.2,
+  "task_type": null
+}

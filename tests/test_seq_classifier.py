@@ -25,6 +25,7 @@ from peft import (
     C3AConfig,
     DeftConfig,
     DeloraConfig,
+    FineGatesConfig,
     FourierFTConfig,
     FrodConfig,
     GloraConfig,
@@ -111,6 +112,13 @@ ALL_CONFIGS = [
             "task_type": "SEQ_CLS",
             "target_modules": None,
             "r": 2,
+        },
+    ),
+    (
+        FineGatesConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
         },
     ),
     (
