@@ -60,7 +60,7 @@ config = LoraConfig(
     use_rslora=False,
 )
 model = get_peft_model(model, config)
-model.print_trainable_parameters()
+model.print_healthcheck()
 ```
 
 For a Transformers model, set `target_modules` to the names of the linear layers you want to adapt, such as `["q_proj", "v_proj"]` when those names are present in the model.
