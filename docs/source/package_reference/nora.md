@@ -22,7 +22,7 @@ rendered properly in your Markdown viewer.
 
 For a linear layer, the adapter weight update is $\Delta W = sBA$, where $A$ has shape `(r, in_features)`, $B$ has shape `(out_features, r)`, and $s$ is the LoRA scaling factor.
 
-Nora starts from the random A weight created by the LoRA linear layer and normalizes each column across the rank dimension:
+NoRA starts from the random A weight created by the LoRA linear layer and normalizes each column across the rank dimension:
 
 $$
 A_{:,j} \leftarrow \frac{A_{:,j}}{\max(\lVert A_{:,j} \rVert_2, 10^{-6})}, \qquad B \leftarrow 0.
