@@ -39,9 +39,11 @@ embedding of your normal input. CPT differs from Prompt Tuning in that your soft
 marking specific parts NOT to be trained. The CPT-specific token embedding matrix consists of a static embedding
 initialized from the base model's embedding matrix and learnable token-specific delta values.
 
-CPT is useful when you have prompts with instructions alongside examples and labels. Instructions can be suboptimal
-and therefore benefit from being trained but your examples with correct labels do not need to change. CPT also trains
-on the examples in the prompt, using only their labels as additional targets and ignoring the rest of each example.
+CPT is useful when you have a prompt with instructions alongside examples and ground-truth/labels. Instructions can be
+suboptimal and therefore benefit from being optimized during training (like with prompt tuning) but the examples/labels
+you included in the prompt are not supposed to change. This can be enforced by explicitly defining where prompting ends
+and examples begin. CPT also adds a token loss to the standard next token prediction loss of your model for the
+examples in the prompt to make optimal use of the given examples.
 
 CPT uses five different type ids to mark the different sections in the prompt:
 
@@ -57,18 +59,20 @@ We assume that each word = 1 token for simplicity:
 ```
 prompt_text = "Example 1: Input: 1+1 Answer: 2 Example 2: 1+3 Answer: 4"
 
-token_ids = [2,      11, 9, 1,    9, 11, 3, 11, 8,     9, 4, 2,       4, 9, 11, 3, 6, 8,     9,  10]
-#            Example 1   :  Input :  1   +  1   Answer :  2  Example  2  :  1   +  3  Answer :   4
-type_ids  = [1,      1,  1, 1,    1, 2,  2, 2,  3,     3, 4, 5,       5, 5, 6,  6, 6, 7,     7,  8]
-                                                           # 1,       1, 1, 2,  2, 2, 3,     3,  4
+token_ids = [15,  2,      11, 9, 1,    9, 11, 3, 11, 8,     9, 4, 2,       4, 9, 11, 3, 6, 8,     9,  10]
+#            BOS, Example 1   :  Input :  1   +  1   Answer :  2  Example  2  :  1   +  3  Answer :   4
+type_ids  = [0,   1,      1,  1, 1,    1, 2,  2, 2,  3,     3, 4, 5,       5, 5, 6,  6, 6, 7,     7,  8]
+                                                                # 1,       1, 1, 2,  2, 2, 3,     3,  4
 ```
 
-The `token_ids` variable corresponds to [`~CPTConfig.cpt_token_ids`] and `type_ids` corresponds to
+The `token_ids` are your prompt encoded by the base model's tokenizer and correspond to [`~CPTConfig.cpt_token_ids`].
+`type_ids` are the prompt token type ids, defining the different sections of the prompt and correspond to
 [`~CPTConfig.cpt_tokens_type_mask`].
 
 The individual ids have different effects on the training process:
 
-* 0: will be completely ignored, doesn't contribute to the loss and these tokens are not trained
+* 0: will be completely ignored, doesn't contribute to the loss and these tokens are not trained, useful for tokens
+  that are just there for technical reasons and would otherwise uselessly enlarge the parameter space (e.g., EOS tokens)
 * 1 and 3: these tokens are considered for formatting and the maximum norm of their embedding delta is controlled by
   [`~CPTConfig.opt_projection_format_epsilon`]. The norm controls the maximum magnitude in which the learned delta
   embeddings for this type can point. Higher norms mean a higher potential change in meaning.
@@ -80,19 +84,19 @@ The individual ids have different effects on the training process:
   to keep the label semantics intact.
 
 You may have noticed that the numbers in `type_ids` for the second example are shifted by 4. CPT has an exponential
-weighting of the examples you provide in the prompt, the last example being the least decayed and the first example
-being the most decaying. This gives more weight to examples closer to the actual input query and is controlled by
-[`~CPTConfig.opt_loss_decay_factor`] when [`~CPTConfig.opt_weighted_loss_type`] is set to `"decay"`. By
+weighting for the loss of the examples you provide in the prompt, the last example being the least decayed and the first
+example's loss being the most decaying. This gives more weight to examples closer to the actual input query and is
+controlled by [`~CPTConfig.opt_loss_decay_factor`] when [`~CPTConfig.opt_weighted_loss_type`] is set to `"decay"`. By
 shifting the examples by 4 we can enumerate the different examples so that the loss can give the different decaying
 weightings to each example.
 
 Note that `cpt_tokens_type_mask` only describes the soft prompt itself. When training, additionally pass an
 `input_type_mask` tensor alongside each batch, assigning type ids to the tokens of your actual input (using ids 0-4 as
 above, with padding or end-of-sentence tokens marked as 0). CPT automatically shifts these ids by the number of
-examples in your prompt, so you don't need to shift them yourself. Keep in mind that the ids are interpreted modulo 4:
-shifting them by a multiple of 4 is harmless, but any other offset silently changes which tokens contribute to the loss.
-If no `input_type_mask` is passed, CPT falls back to computing the loss over the whole input sequence, i.e. assuming
-type 4 for all input tokens.
+examples in your prompt, so you don't need to shift them yourself. This is then the same as adding the input at the end
+of your list of examples in the prompt. Keep in mind that the ids are interpreted modulo 4: shifting them by a multiple
+of 4 is harmless, but any other offset silently changes which tokens contribute to the loss.  If no `input_type_mask` is
+passed, CPT falls back to computing the loss over the whole input sequence, i.e. assuming type 4 for all input tokens.
 
 
 ## Benchmark overview
