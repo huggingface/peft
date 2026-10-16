@@ -34,6 +34,7 @@ from peft import (
     LoHaConfig,
     LoraConfig,
     PeftModel,
+    TrainableTokensConfig,
     VeraConfig,
     get_peft_model,
     get_peft_model_state_dict,
@@ -414,6 +415,20 @@ class TestModulesToSaveUnloadOriginalModule:
         torch.manual_seed(0)
         return MLP()
 
+    @pytest.fixture
+    def model_with_embedding(self):
+        class ModelWithEmbedding(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = nn.Embedding(10, 8)
+                self.lin0 = nn.Linear(8, 8)
+
+            def forward(self, x):
+                return self.lin0(self.emb(x))
+
+        torch.manual_seed(0)
+        return ModelWithEmbedding()
+
     # It is sufficient to test LoHa because all PEFT methods share the same code path. Exceptions are LoRA, AdaLoRA, and
     # HiRA, which override BaseTuner._replace_module and are thus tested explicitly.
     @pytest.mark.parametrize(
@@ -446,6 +461,42 @@ class TestModulesToSaveUnloadOriginalModule:
             # the trained copy is kept
             assert unloaded.lin1 is trained_lin1
             assert torch.allclose(out_unloaded, out_peft, atol=1e-6, rtol=1e-6)
+
+        # Trainable tokens are used either alongside LoRA via trainable_token_indices, or as a standalone PEFT method
+        @pytest.mark.parametrize(
+            "config_cls, config_kwargs",
+            [
+                (LoraConfig, {"target_modules": ["lin0"], "trainable_token_indices": {"emb": [0, 1]}}),
+                (TrainableTokensConfig, {"target_modules": ["emb"], "token_indices": [0, 1]}),
+            ],
+        )
+        @pytest.mark.parametrize("unload_method", ["unload", "merge_and_unload"])
+        def test_unload_trainable_tokens(self, model_with_embedding, config_cls, config_kwargs, unload_method):
+            x = torch.arange(10).unsqueeze(0)
+            out_base = model_with_embedding(x)
+            emb_weight = model_with_embedding.emb.weight.detach().clone()
+            config = config_cls(**config_kwargs)
+            model = get_peft_model(model_with_embedding, config).eval()
+
+            # change the trainable tokens so that they produce a different output
+            with torch.no_grad():
+                for name, param in model.named_parameters():
+                    if "trainable_tokens_delta" in name:
+                        param.add_(1.0)
+            out_peft = model(x)
+
+            unloaded = getattr(model, unload_method)()
+            out_unloaded = unloaded(x)
+
+            assert isinstance(unloaded.emb, nn.Embedding)
+            if unload_method == "unload":
+                # the base model is restored
+                assert torch.equal(unloaded.emb.weight, emb_weight)
+                assert torch.allclose(out_unloaded, out_base, atol=1e-6, rtol=1e-6)
+            else:
+                # the trained tokens are merged
+                assert torch.allclose(out_unloaded, out_peft, atol=1e-6, rtol=1e-6)
+                assert not torch.allclose(out_unloaded, out_base, atol=1e-6, rtol=1e-6)
 
 
 class TestModulesToSaveNameSubstringBug:
