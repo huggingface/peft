@@ -80,11 +80,13 @@ def _filter_state_dict_for_adapter_name(
 ) -> dict[str, torch.Tensor]:
     """Filter the state dict to remove keys that correspond to the unwanted adapter.
 
-    Matching is positional: a key is dropped only when the segment immediately after a tuner prefix (e.g. `lora_A`,
-    `lora_B`, `ia3_l`) is an unwanted adapter name. A plain substring check would also drop the selected adapter's
-    tensors whenever an unwanted adapter's *name* happens to equal a base-model module path segment (e.g. an adapter
-    called "mlp"). Keys outside any tuner prefix are always kept; auxiliary modules such as `modules_to_save` are
-    resolved per adapter downstream.
+    A key is dropped if it ends with an unwanted adapter name, or if the segment immediately after a tuner prefix (e.g.
+    `lora_A`, `lora_B`, `ia3_l`) is an unwanted adapter name. Both checks are needed: the suffix check covers
+    adapter-keyed entries whose container is not a parameter or buffer, thus not part of the structural prefixes (the
+    SHiRA indices live in a plain dict on the layer), while the positional check avoids dropping the selected adapter's
+    tensors when an unwanted adapter's *name* happens to equal a base-model module path segment (e.g. an adapter called
+    "mlp"). Keys outside any tuner prefix are kept unless they end with an unwanted adapter name; auxiliary modules
+    such as `modules_to_save` are resolved per adapter downstream.
     """
     # avoid circular import
     from peft.tuners.tuners_utils import _get_tuner_state_dict_key_prefixes
@@ -94,6 +96,9 @@ def _filter_state_dict_for_adapter_name(
 
     filtered_state_dict = {}
     for key, value in state_dict.items():
+        if any(key.endswith(f".{adapter_name}") for adapter_name in unwanted):
+            continue
+
         keep = True
         for prefix in prefixes:
             prefix = prefix + "."
