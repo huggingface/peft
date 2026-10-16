@@ -2626,6 +2626,37 @@ class TestRankAndAlphaPattern:
         assert model.module.module.foo.scaling["default"] == 0.125
         assert model.module.module.barfoo.scaling["default"] == 1.0
 
+    @pytest.mark.parametrize("pattern", ["rank_pattern", "alpha_pattern"])
+    def test_overlapping_pattern_keys_order_survives_save_load(self, model, pattern, tmp_path):
+        # When more than one key matches a module, the first key in dict order wins. The order used to be lost on
+        # save, since the keys were written sorted, so the reloaded adapter resolved to a different rank or alpha.
+        # See #3818. Here, the keys are not in alphabetical order.
+        base_model = deepcopy(model)
+        config = LoraConfig(
+            target_modules="all-linear", init_lora_weights=False, **{pattern: {"module.foo": 16, "foo": 4}}
+        )
+        model = get_peft_model(model, config)
+        model.save_pretrained(tmp_path)
+
+        with open(tmp_path / "adapter_config.json") as f:
+            assert list(json.load(f)[pattern]) == ["module.foo", "foo"]
+
+        # Before the fix, loading failed with a shape mismatch for rank_pattern, since module.foo was created with
+        # rank 4 instead of 16. For alpha_pattern, loading worked but the scaling of module.foo was incorrect.
+        loaded = PeftModel.from_pretrained(base_model, tmp_path)
+        for name in ["foo", "module.foo", "module.module.foo"]:
+            layer, layer_loaded = (
+                model.get_submodule(f"base_model.model.{name}"),
+                loaded.get_submodule(f"base_model.model.{name}"),
+            )
+            assert layer.r["default"] == layer_loaded.r["default"]
+            assert layer.scaling["default"] == layer_loaded.scaling["default"]
+
+        x = torch.rand(5, 1)
+        outer, outer_loaded = model.base_model.model, loaded.base_model.model
+        for name in ["foo", "module.foo", "module.module.foo"]:
+            assert torch.allclose(outer.get_submodule(name)(x), outer_loaded.get_submodule(name)(x))
+
 
 class TestTunerStateDictKeyPrefixes:
     # Unit tests for the helper functions that structurally determine which state dict keys belong to the PEFT method,

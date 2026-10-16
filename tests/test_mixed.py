@@ -180,6 +180,25 @@ class TestMixedAdapterTypes(unittest.TestCase):
             assert torch.allclose(output_mixed_reversed, output_mixed_01, atol=atol, rtol=rtol)
             assert torch.allclose(output_mixed_reversed, output_mixed_10, atol=atol, rtol=rtol)
 
+    def test_inference_mode_controls_mixed_adapter_dropouts(self):
+        model = get_peft_model(
+            SimpleNet(),
+            LoraConfig(target_modules=["lin0"], lora_dropout=0.5),
+            adapter_name="adapter_lora",
+            mixed=True,
+        )
+        model.add_adapter("adapter_oft", OFTConfig(target_modules=["lin1"], module_dropout=0.5, oft_block_size=20))
+        model.set_adapter(["adapter_lora", "adapter_oft"], inference_mode=True)
+
+        assert not model.base_model.model.lin0.lora_dropout["adapter_lora"].training
+        assert not model.base_model.model.lin1.oft_dropout["adapter_oft"].training
+        assert model.base_model.model.lin0.training
+        assert model.base_model.model.lin1.training
+
+        model.set_adapter(["adapter_lora", "adapter_oft"], inference_mode=False)
+        assert model.base_model.model.lin0.lora_dropout["adapter_lora"].training
+        assert model.base_model.model.lin1.oft_dropout["adapter_oft"].training
+
     def _check_merging(self, model_cls, config0, config1, input):
         # Ensure that when merging mixed adapters, the result is the same as when applying the adapters separately.
         # Merging requires a bit higher tolerance for some adapters, which can also vary depending on CPU vs GPU.

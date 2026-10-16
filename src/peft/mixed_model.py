@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
-from typing import Any, Optional, Union
+from typing import Any, Optional, Self, Union
 
 import torch
 from accelerate.hooks import remove_hook_from_submodules
@@ -403,7 +403,7 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         is_trainable: bool = False,
         config: Optional[PeftConfig] = None,
         **kwargs: Any,
-    ):
+    ) -> Self:
         r"""
         Instantiate a PEFT mixed model from a pretrained model and loaded PEFT weights.
 

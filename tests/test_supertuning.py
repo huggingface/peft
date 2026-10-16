@@ -21,6 +21,8 @@ from peft import SupertuningConfig, get_peft_model
 from peft.tuners.supertuning.layer import Linear as SupertuningLinear
 from peft.utils import infer_device
 
+from .testing_utils import require_non_cpu
+
 
 class TestSupertuning:
     device = infer_device()
@@ -85,6 +87,7 @@ class TestSupertuning:
         bot_idx = set(bot_layer.supertuning_indices["default"].tolist())
         assert top_idx.isdisjoint(bot_idx)
 
+    @require_non_cpu
     def test_supra_hybrid_forward_bf16_base_fp32_lora(self):
         """Regression: Supra forward under bf16 base + fp32 LoRA promotes activations correctly.
 
@@ -92,9 +95,6 @@ class TestSupertuning:
         promote incoming bf16 activations to the LoRA dtype and downcast the result. A prior version fed bf16
         activations directly into an fp32 matmul and crashed with `expected mat1 and mat2 to have the same dtype`.
         """
-        if not torch.cuda.is_available():
-            pytest.skip("bf16 requires CUDA")
-
         torch.manual_seed(0)
         model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(self.device)

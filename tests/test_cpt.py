@@ -446,3 +446,45 @@ def test_cpt_partial_context_keeps_input_labels(
     expected = (losses[valid] * weights[:, 1:][valid]).mean()
 
     torch.testing.assert_close(output.loss, expected)
+
+
+def test_cpt_forward_does_not_mutate_input_type_mask():
+    """A forward pass must leave the caller-provided input_type_mask unchanged.
+
+    The CPT forward used to shift the mask in place, so every call rewrote the tensor held by the caller (e.g. a batch
+    stored in a dataset and reused across epochs) and the drift compounded on each forward.
+    """
+    config = CPTConfig(
+        cpt_token_ids=[0, 1, 2, 3],
+        cpt_mask=[1, 1, 1, 1],
+        cpt_tokens_type_mask=[1, 2, 3, 4],
+        opt_weighted_loss_type="none",
+        tokenizer_name_or_path=MODEL_NAME,
+        task_type=TaskType.CAUSAL_LM,
+    )
+    base_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
+    model = get_peft_model(base_model, config)
+    model.eval()
+
+    torch.manual_seed(0)
+    input_ids = torch.randint(0, base_model.config.vocab_size, (2, 6))
+    attention_mask = torch.ones_like(input_ids)
+    input_type_mask = torch.full_like(input_ids, 4)
+    input_type_mask_before = input_type_mask.clone()
+
+    with torch.no_grad():
+        model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=input_ids.clone(),
+            input_type_mask=input_type_mask,
+        )
+        # a second forward catches the drift compounding across calls
+        model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=input_ids.clone(),
+            input_type_mask=input_type_mask,
+        )
+
+    assert torch.equal(input_type_mask, input_type_mask_before)

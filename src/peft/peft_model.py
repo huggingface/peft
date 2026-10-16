@@ -24,7 +24,7 @@ from collections.abc import Sequence
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal, Optional, Self, Union
 
 import packaging.version
 import torch
@@ -448,7 +448,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         low_cpu_mem_usage: bool = False,
         key_mapping: Optional[dict[str, str]] = None,
         **kwargs: Any,
-    ) -> PeftModel:
+    ) -> Self:
         r"""
         Instantiate a PEFT model from a pretrained model and loaded PEFT weights.
 
@@ -1706,7 +1706,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         Sets the active adapter.
 
-        Only one adapter can be active at a time.
+        Only one adapter can be active at a time because not all PEFT methods support multiple active adapters. To
+        activate multiple adapters for supported methods, use `model.base_model.set_adapter(adapter_names)`.
 
         Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True) unless
         inference_mode is True.
@@ -1717,6 +1718,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             inference_mode (`bool`, optional):
                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
+        if not isinstance(adapter_name, str):
+            raise TypeError(
+                "PeftModel.set_adapter only supports a single adapter name as a string. "
+                "To activate multiple adapters, use model.base_model.set_adapter(adapter_names) "
+                "if the PEFT method supports it."
+            )
         if adapter_name not in self.peft_config:
             raise ValueError(f"Adapter {adapter_name} not found.")
         is_prompt_learning = self.peft_config[adapter_name].is_prompt_learning
@@ -2346,7 +2353,8 @@ class PeftModelForCausalLM(PeftModel):
             prefix_type_mask = (
                 torch.Tensor(cpt_tokens_type_mask).long().view(1, -1).repeat(batch_size, 1).to(labels.device)
             )
-            adjusted_input_type_mask = input_type_mask
+            # Copy before shifting so the caller-provided mask is not modified in place.
+            adjusted_input_type_mask = input_type_mask.clone()
             # Round an incomplete prefix group up to a multiple of four before shifting the input types.
             prefix_type_offset = ((prefix_type_mask.max() + 3) // 4) * 4
             adjusted_input_type_mask[adjusted_input_type_mask > 0] += prefix_type_offset
