@@ -7099,6 +7099,11 @@ class TestRequiresGrad:
             "base_model.model.layernorm1.ln_tuning_layers.adapter1.bias",
         )
 
+        # adapter1 does not target layernorm0, so forward and merge must fall back to the base layer there
+        peft_model(torch.randn(4, 10))
+        peft_model.merge_adapter()
+        peft_model.unmerge_adapter()
+
     def test_requires_grad_lntuning_same_targets(self):
         config0 = LNTuningConfig(
             target_modules=["layernorm0"],
@@ -7142,6 +7147,9 @@ class TestRequiresGrad:
             "base_model.model.layernorm0.ln_tuning_layers.adapter1.weight",
             "base_model.model.layernorm0.ln_tuning_layers.adapter1.bias",
         )
+
+        # both adapters target the same layer, forward must use the active adapter
+        peft_model(torch.randn(4, 10))
 
     def test_requires_grad_vera_different_targets(self):
         # Test two different VeRA adapters that target different modules. Most notably, ensure that vera_A and vera_B
