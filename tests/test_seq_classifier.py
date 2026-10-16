@@ -36,6 +36,7 @@ from peft import (
     LoraConfig,
     MissConfig,
     OFTConfig,
+    PacaConfig,
     PeanutConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
@@ -262,6 +263,15 @@ ALL_CONFIGS = [
             "task_type": "SEQ_CLS",
             "variant": "road_1",
             "group_size": 2,
+        },
+    ),
+    (
+        PacaConfig,
+        {
+            "r": 2,
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "init_weights": False,
         },
     ),
     (

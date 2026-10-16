@@ -45,6 +45,7 @@ class PeftType(str, enum.Enum):
     - MISS
     - RANDLORA
     - SHIRA
+    - PACA
     - C3A
     - ROAD
     - WAVEFT
@@ -101,6 +102,7 @@ class PeftType(str, enum.Enum):
     SHADOW = "SHADOW"
     SUPERTUNING = "SUPERTUNING"
     DEFT = "DEFT"
+    PACA = "PACA"
 
 
 class TaskType(str, enum.Enum):
