@@ -3595,6 +3595,13 @@ class TestIncompatibleTorchaoInstalled:
         with pytest.warns(UserWarning, match="incompatible version of torchao"):
             get_peft_model(custom_module, config_cls(target_modules=["lin"], **config_kwargs))
 
+    @pytest.mark.parametrize("config_cls, config_kwargs", config_cases, ids=config_ids)
+    def test_no_warning_without_old_torchao(self, custom_module, config_cls, config_kwargs, recwarn):
+        # without an incompatible torchao installed, there should be no warning
+        is_torchao_available.cache_clear()
+        get_peft_model(custom_module, config_cls(target_modules=["lin"], **config_kwargs))
+        assert not any("incompatible version of torchao" in str(warning.message) for warning in recwarn.list)
+
 
 class TestLowCpuMemUsage:
     """Test for the low CPU memory usage option for loading PEFT models.
