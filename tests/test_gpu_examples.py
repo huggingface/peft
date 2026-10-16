@@ -2351,7 +2351,10 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
     @pytest.mark.single_gpu_tests
     def test_bnb_8bit_merge_bias_applies_scaling(self):
-        # Regression test for #3741: the 8-bit merge/unmerge dropped `* scaling` on the bias.
+        # Regression test for #3741: the 8-bit merge/unmerge dropped `* scaling` on the bias,
+        # unlike the base path (`lora/layer.py`). Check output parity: merge/unmerge must
+        # reproduce the original output exactly, proving scaling is applied on both merge and
+        # unmerge. Runs on a real quantized model, so the dequant path is genuine.
         model_id = "peft-internal-testing/opt-125m"
 
         with hub_online_once(model_id):
@@ -2364,7 +2367,13 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         torch.manual_seed(0)
         model = get_peft_model(
             model,
-            LoraConfig(r=4, lora_alpha=32, target_modules=["q_proj"], lora_bias=True, init_lora_weights=False),
+            LoraConfig(
+                r=4,
+                lora_alpha=32,
+                target_modules=["q_proj"],
+                lora_bias=True,
+                init_lora_weights=False,
+            ),
         ).eval()
 
         inputs = torch.tensor([[1, 2, 3, 4, 5]], device=model.device)
@@ -2377,33 +2386,29 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with torch.inference_mode():
             out_merged = model(inputs).logits
 
-        # With `lora_bias=True`, merging must reproduce the LoRA contribution including `* scaling`
-        # (scaling is 8.0 for r=4, lora_alpha=32). A dropped factor shifts the logits by several units.
-        mse = ((out_before - out_merged) ** 2).mean()
-        assert mse < 1.0
+        assert torch.allclose(out_before.float(), out_merged.float(), atol=1e-3, rtol=1e-3)
 
         model.unmerge_adapter()
 
         with torch.inference_mode():
             out_unmerged = model(inputs).logits
 
-        mse = ((out_before - out_unmerged) ** 2).mean()
-        assert mse < 1.0
+        assert torch.allclose(out_before.float(), out_unmerged.float(), atol=1e-3, rtol=1e-3)
 
-        # safe_merge must raise ValueError on NaNs (a missing `.all()` raised an ambiguous-Boolean RuntimeError)
+        # safe_merge NaN guard must raise ValueError (the missing `.all()` raised an
+        # ambiguous-Boolean RuntimeError instead on multi-element bias).
         layer = next(
             module
             for module in model.modules()
             if isinstance(module, LoraLayer) and module.get_base_layer().bias is not None
         )
         layer.lora_B["default"].bias.data.fill_(float("nan"))
-
         with pytest.raises(ValueError, match="NaNs detected"):
             model.merge_adapter(safe_merge=True)
 
     @pytest.mark.single_gpu_tests
     def test_bnb_4bit_merge_bias_applies_scaling(self):
-        # Regression test for #3741: the 4-bit merge/unmerge dropped `* scaling` on the bias.
+        # Same as above for the 4-bit path (#3741 comment scope), on a real quantized model.
         model_id = "peft-internal-testing/opt-125m"
 
         with hub_online_once(model_id):
@@ -2416,7 +2421,13 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         torch.manual_seed(0)
         model = get_peft_model(
             model,
-            LoraConfig(r=4, lora_alpha=32, target_modules=["q_proj"], lora_bias=True, init_lora_weights=False),
+            LoraConfig(
+                r=4,
+                lora_alpha=32,
+                target_modules=["q_proj"],
+                lora_bias=True,
+                init_lora_weights=False,
+            ),
         ).eval()
 
         inputs = torch.tensor([[1, 2, 3, 4, 5]], device=model.device)
@@ -2429,16 +2440,24 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with torch.inference_mode():
             out_merged = model(inputs).logits
 
-        mse = ((out_before - out_merged) ** 2).mean()
-        assert mse < 1.0
+        assert torch.allclose(out_before.float(), out_merged.float(), atol=1e-3, rtol=1e-3)
 
         model.unmerge_adapter()
 
         with torch.inference_mode():
             out_unmerged = model(inputs).logits
 
-        mse = ((out_before - out_unmerged) ** 2).mean()
-        assert mse < 1.0
+        assert torch.allclose(out_before.float(), out_unmerged.float(), atol=1e-3, rtol=1e-3)
+
+        # safe_merge NaN guard must raise ValueError.
+        layer = next(
+            module
+            for module in model.modules()
+            if isinstance(module, LoraLayer) and module.get_base_layer().bias is not None
+        )
+        layer.lora_B["default"].bias.data.fill_(float("nan"))
+        with pytest.raises(ValueError, match="NaNs detected"):
+            model.merge_adapter(safe_merge=True)
 
 
 @require_non_cpu
