@@ -548,7 +548,7 @@ class LoraConfig(PeftConfig):
             use the original default value of `lora_alpha/r`.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
-        init_lora_weights (`bool` | `Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "astra", "loftq", "orthogonal", "mica"]`):
+        init_lora_weights (`bool` | `Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "astra", "loftq", "orthogonal", "mica", "nora"]`):
             How to initialize the weights of the adapter layers. Passing True (default) results in the default
             initialization from the reference implementation from Microsoft, with the LoRA B weight being set to 0.
             This means that without further training, the LoRA adapter will be a no-op. Setting the initialization to
@@ -577,7 +577,9 @@ class LoraConfig(PeftConfig):
             href='https://arxiv.org/abs/2604.01694' >Minor Component Adaptation (MiCA)</a>, which initializes B from
             the r left singular vectors of the base weight associated with the smallest singular values, sets A to
             zero, and freezes B during training; only A is updated. Currently supported for linear and embedding
-            layers.
+            layers. Passing `"nora"` normalizes each column of the randomly initialized LoRA A weight to unit L2 norm,
+            with the norm clamped to a minimum of `1e-6`, and sets the LoRA B weight to zero. The base weights are left
+            unchanged. Currently supported for linear layers.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -757,6 +759,7 @@ class LoraConfig(PeftConfig):
             "loftq",
             "orthogonal",
             "mica",
+            "nora",
         ]
     ) = field(
         default=True,
@@ -781,7 +784,10 @@ class LoraConfig(PeftConfig):
                 "Pass `'orthogonal'` for orthogonal initialization of LoRA A and B. "
                 "Pass `'mica'` to use MiCA initialization, where B is set to the r left singular vectors of the "
                 "base weight associated with the smallest singular values, A is set to zero, and B is frozen during "
-                "training (only A is updated)."
+                "training (only A is updated). "
+                "Pass 'nora' to normalize each column of the randomly initialized LoRA A weight to unit L2 norm, "
+                "with the norm clamped to a minimum of 1e-6, and set the LoRA B weight to zero without changing "
+                "the base weights. Currently supported for linear layers."
             ),
             # lora_variants: lists the string values (or prefixes) of init_lora_weights
             # that activate a LoRA variant (e.g. "mica" activates MiCALinearVariant).
