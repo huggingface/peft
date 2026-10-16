@@ -2345,7 +2345,8 @@ class PeftModelForCausalLM(PeftModel):
             # Generate prefix type mask and shift input type mask values to avoid conflicts
             prefix_type_mask = torch.Tensor(cpt_tokens_type_mask).long().view(1, -1)
             prefix_type_mask = prefix_type_mask.repeat(batch_size, 1).to(labels.device)
-            adjusted_input_type_mask = input_type_mask
+            # copy before shifting so the caller-provided mask is not modified in place
+            adjusted_input_type_mask = input_type_mask.clone()
             adjusted_input_type_mask[adjusted_input_type_mask > 0] += prefix_type_mask.max()
             # Concatenate prefix and shifted input type masks
             cpt_type_mask = torch.cat((prefix_type_mask, adjusted_input_type_mask), dim=1)
