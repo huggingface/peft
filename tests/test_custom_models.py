@@ -8268,6 +8268,51 @@ class TestMixedAdapterBatches:
         time_separate = sum(times_separate) / 3
         assert time_separate > time_mixed
 
+    def test_mixed_adapter_batches_missing_modules_to_save(self):
+        torch.manual_seed(0)
+
+        base_model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Linear(4, 4),
+        ).to(self.torch_device).eval()
+
+        model = get_peft_model(
+            base_model,
+            LoraConfig(
+                target_modules=["0"],
+                modules_to_save=["1"],
+                init_lora_weights=False,
+            ),
+            adapter_name="adapter0",
+        ).eval()
+
+        model.add_adapter(
+            "adapter1",
+            LoraConfig(
+                target_modules=["0"],
+                init_lora_weights=False,
+            ),
+        )
+
+        inputs = torch.ones(3, 4, device=self.torch_device)
+
+        model.set_adapter("adapter0")
+        output0 = model(inputs[0:1])
+
+        model.set_adapter("adapter1")
+        output1 = model(inputs[1:2])
+
+        with model.disable_adapter():
+            output_base = model(inputs[2:3])
+
+        mixed_output = model(
+            inputs,
+            adapter_names=["adapter0", "adapter1", "__base__"],
+        )
+
+        assert torch.allclose(mixed_output[0:1], output0)
+        assert torch.allclose(mixed_output[1:2], output1)
+        assert torch.allclose(mixed_output[2:3], output_base)
 
 class TestDynamicDispatch:
     # These are tests for the dynamic dispatch feature for LoRA. We create a custom module and a custom LoRA layer

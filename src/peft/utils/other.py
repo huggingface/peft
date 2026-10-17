@@ -490,7 +490,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         for i, active_adapter in enumerate(unique_adapters):
             sub_batch = input[sub_batch_indices_list[i]]
 
-            if active_adapter == "__base__":
+            if active_adapter == "__base__" or active_adapter not in self._adapters:
                 output = self.original_module(sub_batch, *args, **kwargs)
             else:
                 output = self._forward_wrapped_mixed_batch(sub_batch, active_adapter, *args, **kwargs)
