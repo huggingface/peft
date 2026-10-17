@@ -242,6 +242,15 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     return in_features, out_features
 
 
+def _raise_target_parameter_target_module_collision(module_name: str, module: nn.Module) -> None:
+    raise ValueError(
+        f"Trying to wrap an `nn.Parameter` of layer '{module_name}' of type "
+        f"{type(module).__name__}, which is not a valid target. Make sure that this layer is not "
+        "also targeted with `target_modules`. For some models, PEFT will do this automatically, "
+        "try setting `target_modules=[]` to prevent it."
+    )
+
+
 def _extend_unique(existing: list[str], new_names: list[str]) -> None:
     """
     Append the entries of new_names that are missing from existing, preserving order.
@@ -976,6 +985,9 @@ class BaseTuner(nn.Module, ABC):
             # the model was torch.compiled beforehand
             module_names = {k.rsplit("." + prefix, 1)[0].removeprefix("_orig_mod.") for k in state_dict}
 
+        # Discover all targets before mutating the model. This ensures that a late validation error, such as an
+        # incompatible target module, cannot leave earlier targets partially injected.
+        module_names_to_inject: list[str] = []
         for key, module in named_modules:
             if not key:
                 continue
@@ -1002,13 +1014,7 @@ class BaseTuner(nn.Module, ABC):
                     unmatched_modules.append(key)
                 else:
                     targeted_module_names.append(key)
-                    parent, target, target_name = _get_submodules(model, key)
-                    self._check_target_module_compatiblity(peft_config, model, target_name)
-                    ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
-                    with ctx():
-                        self._create_and_replace(
-                            peft_config, adapter_name, target, target_name, parent, current_key=key
-                        )
+                    module_names_to_inject.append(key)
             else:
                 # defensively remove _orig_mod prefix in case the model is compiled
                 key = key.removeprefix("_orig_mod.")
@@ -1024,17 +1030,29 @@ class BaseTuner(nn.Module, ABC):
                         targets_to_tie.append(key)
                         continue
                     targeted_module_names.append(key)
-                    parent, target, target_name = _get_submodules(model, key)
-                    self._check_target_module_compatiblity(peft_config, model, target_name)
-                    ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
-                    with ctx():
-                        self._create_and_replace(
-                            peft_config, adapter_name, target, target_name, parent, current_key=key
-                        )
+                    module_names_to_inject.append(key)
 
                 # still record what would have been matched via the config so that the two results can be compared
                 if self._check_target_module_exists(peft_config, key):
                     targeted_modules_from_peft_config.append(key)
+
+        # Validate every discovered target while the model is still untouched. In particular, this catches
+        # architecture-specific incompatibilities before any adapter layer is created.
+        for key in module_names_to_inject + targets_to_tie:
+            _, _, target_name = _get_submodules(model, key)
+            self._check_target_module_compatiblity(peft_config, model, target_name)
+
+        if getattr(peft_config, "target_parameters", []):
+            # Validate potential collisions between targeted parameter names and targeted module names.
+            target_parameter_names = set(peft_config.target_parameters)
+            for module_name in module_names_to_inject + targets_to_tie:
+                module = model.get_submodule(module_name)
+                for parameter_name, _ in module.named_parameters(recurse=False):
+                    key = f"{module_name}.{parameter_name}"
+                    if (key in target_parameter_names) or any(
+                        key.endswith(f".{target_name}") for target_name in target_parameter_names
+                    ):
+                        _raise_target_parameter_target_module_collision(module_name, module)
 
         if getattr(peft_config, "target_parameters", []):
             # Note: We don't need to check for no state_dict being passed, since we already checked this earlier.
@@ -1042,15 +1060,8 @@ class BaseTuner(nn.Module, ABC):
                 peft_config=peft_config, model=model, adapter_name=adapter_name, low_cpu_mem_usage=low_cpu_mem_usage
             )
 
-        # Here we inject tied adapters for all the layers which were tied
-        # Only applicable if `ensure_weight_tying = True` for LoraConfig
-        for key in targets_to_tie:
-            targeted_module_names.append(key)
-            parent, target, target_name = _get_submodules(model, key)
-            self._check_target_module_compatiblity(peft_config, model, target_name)
-            ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
-            with ctx():
-                self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
+        # Keep tied targets after regular targets.
+        targeted_module_names.extend(targets_to_tie)
 
         ####################
         # CHECK FOR ERRORS #
@@ -1163,6 +1174,20 @@ class BaseTuner(nn.Module, ABC):
         _extend_unique(self.targeted_module_names, targeted_module_names)
         _extend_unique(self.targeted_parameter_names, targeted_parameter_names)
 
+        # Only mutate the model after all target discovery and validation has completed. The module names were
+        # collected from the pre-injection module tree, so newly created adapter modules cannot be targeted recursively.
+        for key in module_names_to_inject:
+            parent, target, target_name = _get_submodules(model, key)
+            ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
+            with ctx():
+                self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
+
+        for key in targets_to_tie:
+            parent, target, target_name = _get_submodules(model, key)
+            ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
+            with ctx():
+                self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
+
         ################
         # HOUSEKEEPING #
         ################
@@ -1233,12 +1258,7 @@ class BaseTuner(nn.Module, ABC):
             unwrapped_module = model.get_submodule(unwrapped_module_name)
             # use the class name for checking to avoid circular import
             if isinstance(unwrapped_module, BaseTunerLayer) and unwrapped_module.__class__.__name__ != "ParamWrapper":
-                raise ValueError(
-                    f"Trying to wrap an `nn.Parameter` of layer '{unwrapped_module_name}' of type "
-                    f"{type(target).__name__}, which is not a valid target. Make sure that this layer is not "
-                    "also targeted with `target_modules`. For some models, PEFT will do this automatically, "
-                    "try setting `target_modules=[]` to prevent it."
-                )
+                _raise_target_parameter_target_module_collision(unwrapped_module_name, target)
 
             short_param_name = param_name.rpartition(".")[-1]  # "foo.bar.gate_up_proj" -> "gate_up_proj"
             # If a previous adapter already wraps this parameter, reuse that wrapper instead of nesting a new one.
