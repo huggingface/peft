@@ -18,127 +18,17 @@
 from __future__ import annotations
 
 import math
-import os
 import warnings
-from contextlib import contextmanager
 from typing import Any, Optional
 
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.autograd import Function
 
 from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
 from peft.utils import quantization_extra_repr, resolve_quantization_backend
 
 from .config import BOFTConfig
-
-
-_FBD_CUDA = None
-
-
-# this function is a 1:1 copy from accelerate
-@contextmanager
-def patch_environment(**kwargs):
-    """
-    A context manager that will add each keyword argument passed to `os.environ` and remove them when exiting.
-
-    Will convert the values in `kwargs` to strings and upper-case all the keys.
-
-    Example:
-
-    ```python
-    >>> import os
-    >>> from accelerate.utils import patch_environment
-
-    >>> with patch_environment(FOO="bar"):
-    ...     print(os.environ["FOO"])  # prints "bar"
-    >>> print(os.environ["FOO"])  # raises KeyError
-    ```
-    """
-    existing_vars = {}
-    for key, value in kwargs.items():
-        key = key.upper()
-        if key in os.environ:
-            existing_vars[key] = os.environ[key]
-        os.environ[key] = str(value)
-
-    yield
-
-    for key in kwargs:
-        key = key.upper()
-        if key in existing_vars:
-            # restore previous value
-            os.environ[key] = existing_vars[key]
-        else:
-            os.environ.pop(key, None)
-
-
-def get_fbd_cuda():
-    global _FBD_CUDA
-
-    if _FBD_CUDA is not None:
-        return _FBD_CUDA
-
-    # This import initializes cuda context and should thus be local, see issue 1877
-    from torch.utils.cpp_extension import load
-
-    curr_dir = os.path.dirname(__file__)
-    # need ninja to build the extension
-    try:
-        with patch_environment(CC="gcc", CXX="gcc"):
-            fbd_cuda = load(
-                name="fbd_cuda",
-                sources=[f"{curr_dir}/fbd/fbd_cuda.cpp", f"{curr_dir}/fbd/fbd_cuda_kernel.cu"],
-                verbose=True,
-                # build_directory='/tmp/'  # for debugging
-            )
-            # extra_cuda_cflags = ['-std=c++14', '-ccbin=$$(which gcc-7)']) # cuda10.2 is not compatible with gcc9. Specify gcc 7
-    except Exception as e:
-        warnings.warn(f"Failed to load the CUDA extension: {e}, check if ninja is available.")
-        warnings.warn("Setting boft_n_butterfly_factor to 1 to speed up the finetuning process.")
-        fbd_cuda = None
-
-    _FBD_CUDA = fbd_cuda
-    return _FBD_CUDA
-
-
-class FastBlockDiag(Function):
-    """
-    Implements a custom autograd Function for a fast block diagonal operation using CUDA.
-
-    This function is optimized for 4D tensors where the last two dimensions are equal, representing block diagonal
-    matrices for efficient computation on CUDA devices.
-    """
-
-    @staticmethod
-    def forward(ctx, input):
-        """
-        The forward method for FastBlockDiag.
-
-        Computes the block diagonal operation on the input tensor using a CUDA-optimized function. This method assumes
-        that the input is a 4D tensor where the last two dimensions are equal, which represent the blocks to be
-        diagonalized.
-
-        Parameters:
-        ctx: A context object that can be used to stash information for backward computation.
-        input (Tensor): The input tensor of shape (N, D, H, H), where `N` is the batch size,
-                        `D` represents one additional dimension (In BOFT, the number of BOFT blocks), and `H` is the
-                        size of the square blocks along the last two dimensions (In BOFT, the block size).
-
-        Returns:
-        Tensor: The resulting tensor after applying the block diagonal operation,
-                will have the shape (N, DxH, DxH).
-        """
-        output = get_fbd_cuda().forward(input)[0]
-        ctx.save_for_backward(input)
-        return output
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        (input,) = ctx.saved_tensors
-        grad_input = get_fbd_cuda().backward(grad_output, input)[0]
-        return grad_input
 
 
 class MultiplicativeDropoutLayer(nn.Module):
@@ -279,14 +169,6 @@ class BOFTLayer(BaseTunerLayer):
         init_weights = config.init_weights
         inference_mode = config.inference_mode
 
-        # Attempt to load the CUDA extension during model initialization
-        if not get_fbd_cuda():
-            self.fbd_cuda_available = False
-            # If the CUDA extension is not available, set the butterfly factor to 1 to speed up the finetuning process
-            boft_n_butterfly_factor = 1
-        else:
-            self.fbd_cuda_available = True
-
         # to be consistent with the paper notation
         boft_n_butterfly_factor = boft_n_butterfly_factor - 1
         if boft_n_butterfly_factor < 0:
@@ -350,16 +232,18 @@ class BOFTLayer(BaseTunerLayer):
             if boft_block_size % 2 != 0:
                 raise ValueError(f"boft_block_size ({boft_block_size}) must be an even number!")
 
-        # If there is no butterfly factor, then permutation matrix P will be an identity matrix.
-        P = torch.empty((boft_n_butterfly_factor + 1, self.in_features, self.in_features))
+        # The permutation P of each butterfly factor is stored as indices, as applying it via indexing is equivalent to,
+        # but much faster than, multiplying with the corresponding permutation matrix. If there is no butterfly factor,
+        # the permutation is the identity.
+        P = torch.empty((boft_n_butterfly_factor + 1, self.in_features), dtype=torch.long)
         for i in range(boft_n_butterfly_factor + 1):
-            perm = self.block_butterfly_perm(
+            P[i] = self.block_butterfly_perm(
                 self.in_features, int(boft_block_num / (2 ** (i))), int(boft_block_size / 2), boft_n_butterfly_factor
             )
-            perm_mat = self.perm2mat(perm)
-            P[i] = perm_mat
 
         self.register_buffer("boft_P", P, persistent=False)
+        # the inverse permutations, i.e. boft_P_inv[i][boft_P[i]] == arange
+        self.register_buffer("boft_P_inv", torch.argsort(P, dim=-1), persistent=False)
 
         self.boft_R[adapter_name] = nn.Parameter(
             torch.zeros(boft_n_butterfly_factor + 1, boft_block_num, boft_block_size, boft_block_size)
@@ -391,25 +275,6 @@ class BOFTLayer(BaseTunerLayer):
                 nn.init.ones_(self.boft_s[adapter_name])
             else:
                 raise ValueError(f"Unknown initialization {init_weights=}")
-
-    def perm2mat(self, indices):
-        """
-        Convert permutation indices to permutation matrix.
-
-        Args:
-        indices: A list of indices representing the permutation.
-        """
-        # Number of indices determines the size of the square matrix
-        n = len(indices)
-
-        # Initialize a matrix of zeros
-        perm_mat = torch.zeros((n, n))
-
-        # Set the 1s according to the indices
-        for i, idx in enumerate(indices):
-            perm_mat[i, idx] = 1
-
-        return perm_mat
 
     def block_butterfly_perm(self, n, b, r=3, n_butterfly_factor=1):
         """
@@ -574,16 +439,17 @@ class Linear(nn.Module, BOFTLayer):
         boft_R = boft_R.view(N * D, H, H)
         orth_rotate_butterfly = self.cayley_batch(boft_R)
         orth_rotate_butterfly = orth_rotate_butterfly.view(N, D, H, H)
-        if self.fbd_cuda_available:
-            block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
-        else:
-            orth_rotate_butterfly = orth_rotate_butterfly.squeeze(0)
-            block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
-            block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
+        # For merging, the rotation matrix of each butterfly factor is materialized: scatter the rotation blocks into
+        # a block diagonal matrix B, then apply the permutation from both sides (P @ B @ P^T) by indexing the rows and
+        # columns of B.
+        block_diagonal_butterfly = orth_rotate_butterfly.new_zeros(N, D, H, D, H)
+        block_diagonal_butterfly.diagonal(dim1=1, dim2=3).copy_(orth_rotate_butterfly.permute(0, 2, 3, 1))
+        block_diagonal_butterfly = block_diagonal_butterfly.view(N, D * H, D * H)
 
-        boft_P = self.boft_P.to(block_diagonal_butterfly.device, block_diagonal_butterfly.dtype)
-        butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
-        butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
+        boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+        butterfly_oft_mat_batch = torch.stack(
+            [mat[perm][:, perm] for mat, perm in zip(block_diagonal_butterfly, boft_P)]
+        )
         butterfly_oft_mat = butterfly_oft_mat_batch[0]
 
         for i in range(1, butterfly_oft_mat_batch.shape[0]):
@@ -601,10 +467,12 @@ class Linear(nn.Module, BOFTLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            boft_rotation = torch.eye(self.in_features, device=x.device, dtype=previous_dtype)
             boft_scale = torch.ones((int(self.out_features), 1), device=x.device, dtype=previous_dtype)
 
-            for active_adapter in self.active_adapters:
+            # The rotation of each adapter is applied to x directly instead of composing the full rotation matrix
+            # first. As x is multiplied from the left of the composed rotation, the adapters are iterated in reverse
+            # order to preserve the order in which the rotation matrices used to be composed.
+            for active_adapter in reversed(self.active_adapters):
                 if active_adapter not in self.boft_R.keys():
                     continue
                 boft_R = self.boft_R[active_adapter]
@@ -616,30 +484,24 @@ class Linear(nn.Module, BOFTLayer):
                 orth_rotate_butterfly = self.cayley_batch(boft_R)
                 orth_rotate_butterfly = orth_rotate_butterfly.view(N, D, H, H)
                 orth_rotate_butterfly = dropout(orth_rotate_butterfly)
-                if self.fbd_cuda_available:
-                    block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
-                else:
-                    orth_rotate_butterfly = orth_rotate_butterfly.squeeze(0)
-                    block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
-                    block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
+                # cayley_batch and dropout only return fp32 outputs
+                orth_rotate_butterfly = orth_rotate_butterfly.to(x)
 
-                # The BOFT author's cayley_batch, dropout and FastBlockDiag ONLY return fp32 outputs.
-                boft_P = self.boft_P.to(x)
-                block_diagonal_butterfly = block_diagonal_butterfly.to(x)
-                butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
-                butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
-                butterfly_oft_mat = butterfly_oft_mat_batch[0]
+                boft_P = self.boft_P.to(x.device)
+                boft_P_inv = self.boft_P_inv.to(x.device)
+                batch_shape = x.shape[:-1]
+                # Multiply x with the rotation matrix P_i @ B_i @ P_i^T of each butterfly factor i without materializing
+                # it: indexing applies the permutation P_i and the blockwise matmul (analogous to the OFT forward)
+                # applies the block diagonal B_i. The factors are iterated in reverse order because x is multiplied from
+                # the left of the composed rotation.
+                for i in range(N - 1, -1, -1):
+                    x = x[..., boft_P_inv[i]]  # x @ P_i
+                    x = torch.einsum("...dh,dhk->...dk", x.reshape(*batch_shape, D, H), orth_rotate_butterfly[i])
+                    x = x.reshape(*batch_shape, self.in_features)[..., boft_P[i]]  # x @ P_i^T
 
-                for i in range(1, butterfly_oft_mat_batch.shape[0]):
-                    butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
-
-                boft_rotation = butterfly_oft_mat @ boft_rotation
                 boft_scale = boft_s * boft_scale
 
-            boft_rotation = boft_rotation.to(previous_dtype)
-            x_rotated = x @ boft_rotation
-
-            result = self.base_layer(x_rotated, *args, **kwargs)
+            result = self.base_layer(x, *args, **kwargs)
             bias = self.base_layer.bias
             if bias is not None:
                 result = result - bias
@@ -691,14 +553,6 @@ class Conv2d(nn.Module, BOFTLayer):
         boft_dropout = config.boft_dropout
         init_weights = config.init_weights
         inference_mode = config.inference_mode
-
-        # Attempt to load the CUDA extension during model initialization
-        if not get_fbd_cuda():
-            self.fbd_cuda_available = False
-            # If the CUDA extension is not available, set the butterfly factor to 1 to speed up the finetuning process
-            boft_n_butterfly_factor = 1
-        else:
-            self.fbd_cuda_available = True
 
         # to be consistent with the paper notation
         boft_n_butterfly_factor = boft_n_butterfly_factor - 1
@@ -775,16 +629,18 @@ class Conv2d(nn.Module, BOFTLayer):
             if boft_block_size % 2 != 0:
                 raise ValueError(f"boft_block_size ({boft_block_size}) must be an even number!")
 
-        # If there is no butterfly factor, then permutation matrix P will be an identity matrix.
-        P = torch.empty((boft_n_butterfly_factor + 1, conv_filter_dim, conv_filter_dim))
+        # The permutation P of each butterfly factor is stored as indices, as applying it via indexing is equivalent to,
+        # but much faster than, multiplying with the corresponding permutation matrix. If there is no butterfly factor,
+        # the permutation is the identity.
+        P = torch.empty((boft_n_butterfly_factor + 1, conv_filter_dim), dtype=torch.long)
         for i in range(boft_n_butterfly_factor + 1):
-            perm = self.block_butterfly_perm(
+            P[i] = self.block_butterfly_perm(
                 conv_filter_dim, int(boft_block_num / (2 ** (i))), int(boft_block_size / 2), boft_n_butterfly_factor
             )
-            perm_mat = self.perm2mat(perm)
-            P[i] = perm_mat
 
         self.register_buffer("boft_P", P, persistent=False)
+        # the inverse permutations, i.e. boft_P_inv[i][boft_P[i]] == arange
+        self.register_buffer("boft_P_inv", torch.argsort(P, dim=-1), persistent=False)
 
         self.boft_R[adapter_name] = nn.Parameter(
             torch.zeros(boft_n_butterfly_factor + 1, boft_block_num, boft_block_size, boft_block_size)
@@ -906,16 +762,17 @@ class Conv2d(nn.Module, BOFTLayer):
         boft_R = boft_R.view(N * D, H, H)
         orth_rotate_butterfly = self.cayley_batch(boft_R)
         orth_rotate_butterfly = orth_rotate_butterfly.view(N, D, H, H)
-        if self.fbd_cuda_available:
-            block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
-        else:
-            orth_rotate_butterfly = orth_rotate_butterfly.squeeze(0)
-            block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
-            block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
+        # For merging, the rotation matrix of each butterfly factor is materialized: scatter the rotation blocks into
+        # a block diagonal matrix B, then apply the permutation from both sides (P @ B @ P^T) by indexing the rows and
+        # columns of B.
+        block_diagonal_butterfly = orth_rotate_butterfly.new_zeros(N, D, H, D, H)
+        block_diagonal_butterfly.diagonal(dim1=1, dim2=3).copy_(orth_rotate_butterfly.permute(0, 2, 3, 1))
+        block_diagonal_butterfly = block_diagonal_butterfly.view(N, D * H, D * H)
 
-        boft_P = self.boft_P.to(block_diagonal_butterfly.device, block_diagonal_butterfly.dtype)
-        butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
-        butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
+        boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+        butterfly_oft_mat_batch = torch.stack(
+            [mat[perm][:, perm] for mat, perm in zip(block_diagonal_butterfly, boft_P)]
+        )
         butterfly_oft_mat = butterfly_oft_mat_batch[0]
 
         for i in range(1, butterfly_oft_mat_batch.shape[0]):
@@ -933,13 +790,20 @@ class Conv2d(nn.Module, BOFTLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            boft_rotation = torch.eye(
-                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
-                device=x.device,
-                dtype=x.dtype,
-            )
             boft_scale = torch.ones((int(self.out_features), 1), device=x.device, dtype=x.dtype)
 
+            orig_weight = self.get_base_weight()
+            x = x.to(orig_weight.dtype)
+
+            orig_weight = orig_weight.view(
+                self.out_features,
+                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
+            )
+            rotated_weight = torch.transpose(orig_weight, 0, 1)
+
+            # The rotation of each adapter is applied to the weight directly instead of composing the full rotation
+            # matrix first. As the weight is multiplied from the right of the composed rotation, the adapters are
+            # iterated in their original order.
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.boft_R.keys():
                     continue
@@ -952,34 +816,22 @@ class Conv2d(nn.Module, BOFTLayer):
                 orth_rotate_butterfly = self.cayley_batch(boft_R)
                 orth_rotate_butterfly = orth_rotate_butterfly.view(N, D, H, H)
                 orth_rotate_butterfly = dropout(orth_rotate_butterfly)
-                if self.fbd_cuda_available:
-                    block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
-                else:
-                    orth_rotate_butterfly = orth_rotate_butterfly.squeeze(0)
-                    block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
-                    block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
+                orth_rotate_butterfly = orth_rotate_butterfly.to(rotated_weight)
 
-                boft_P = self.boft_P.to(x)
-                block_diagonal_butterfly = block_diagonal_butterfly.to(x)
-                butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
-                butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
-                butterfly_oft_mat = butterfly_oft_mat_batch[0]
+                boft_P = self.boft_P.to(rotated_weight.device)
+                boft_P_inv = self.boft_P_inv.to(rotated_weight.device)
+                # Multiply the weight with the rotation matrix P_i @ B_i @ P_i^T of each butterfly factor i without
+                # materializing it: indexing the rows applies the permutation P_i and the blockwise matmul (analogous
+                # to the OFT forward) applies the block diagonal B_i.
+                for i in range(N):
+                    rotated_weight = rotated_weight[boft_P_inv[i]]  # P_i^T @ weight
+                    rotated_weight = torch.einsum(
+                        "dhk,dko->dho", orth_rotate_butterfly[i], rotated_weight.reshape(D, H, -1)
+                    )
+                    rotated_weight = rotated_weight.reshape(D * H, -1)[boft_P[i]]  # P_i @ (B_i @ P_i^T @ weight)
 
-                for i in range(1, butterfly_oft_mat_batch.shape[0]):
-                    butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
-
-                boft_rotation = butterfly_oft_mat @ boft_rotation
                 boft_scale = boft_s * boft_scale
 
-            orig_weight = self.get_base_weight()
-            x = x.to(orig_weight.dtype)
-
-            orig_weight = orig_weight.view(
-                self.out_features,
-                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
-            )
-            orig_weight = torch.transpose(orig_weight, 0, 1)
-            rotated_weight = torch.mm(boft_rotation, orig_weight)
             rotated_weight = torch.transpose(rotated_weight, 0, 1)
 
             scaled_rotated_weight = rotated_weight * boft_scale
