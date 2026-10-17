@@ -1318,6 +1318,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         that something went wrong and that you should check that you didn't accidentally change some attributes on the
         model incorrectly.
 
+        For prompt learning and adaption prompt, the report includes model information and parameter counts without
+        layer-specific status, which these methods do not support.
+
         If the check found something suspicious, it will be reported in the `"findings"` field. An empty `"findings""`
         list means that no suspicious adapter state was detected, not that a training run is guaranteed to succeed.
 

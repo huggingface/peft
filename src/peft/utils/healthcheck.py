@@ -21,7 +21,8 @@ import torch
 import transformers
 
 from .. import __version__
-from ..peft_model import get_layer_status, get_model_status
+from ..peft_model import PeftModel, get_layer_status, get_model_status
+from ..tuners.tuners_utils import BaseTuner
 
 
 SEVERITY = Literal["warning", "error"]
@@ -93,6 +94,80 @@ def _get_model_runtime(model) -> dict[str, Any]:
     }
 
 
+def _get_parameter_findings(
+    trainable_params: int, total_params: int, min_trainable_params: int, max_trainable_params_percent: int
+) -> tuple[float, list[dict[str, str]]]:
+    trainable_percent = 100 * trainable_params / total_params
+    findings = []
+    if trainable_params < min_trainable_params:
+        findings.append(
+            _format_finding(
+                "TOO_FEW_TRAINABLE_PARAMETERS",
+                "error",
+                f"The model should have at least {min_trainable_params} trainable parameter(s).",
+            )
+        )
+    elif trainable_percent > max_trainable_params_percent:
+        findings.append(
+            _format_finding(
+                "HIGH_TRAINABLE_PARAMETER_FRACTION",
+                "warning",
+                (
+                    f"{trainable_percent:.2f}% of model parameters are trainable; expected no more than "
+                    f"{max_trainable_params_percent}% for PEFT training."
+                ),
+            )
+        )
+    return trainable_percent, findings
+
+
+def _get_environment() -> dict[str, Any]:
+    return {
+        "python_version": platform.python_version(),
+        "platform": platform.platform(),
+        "peft_version": __version__,
+        "torch_version": torch.__version__,
+        "transformers_version": transformers.__version__,
+        "accelerate_version": accelerate.__version__,
+        "cuda_version": torch.version.cuda,
+    }
+
+
+def _run_healthcheck_no_tuner_layers(
+    model: PeftModel, min_trainable_params: int, max_trainable_params_percent: int
+) -> dict[str, Any]:
+    trainable_params, total_params = model.get_nb_trainable_parameters()
+    trainable_percent, findings = _get_parameter_findings(
+        trainable_params, total_params, min_trainable_params, max_trainable_params_percent
+    )
+    model_id = getattr(getattr(model, "config", None), "name_or_path", "other")
+    peft_types = {name: str(config.peft_type).partition(".")[-1] for name, config in model.peft_config.items()}
+
+    summary = {
+        "model_id": model_id,
+        "base_model_type": model.get_base_model().__class__.__name__,
+        "peft_types": peft_types,
+        "trainable_params": trainable_params,
+        "total_params": total_params,
+        "trainable_percent": trainable_percent,
+    }
+    if model.active_peft_config.is_adaption_prompt:
+        summary["adapter_model_type"] = model.base_model.__class__.__name__
+    adapter_state = {
+        "active_adapters": model.active_adapters,
+        "available_adapters": sorted(model.peft_config),
+    }
+    return {
+        "is_ready": not any(finding["severity"] == "error" for finding in findings),
+        "environment": _get_environment(),
+        "summary": summary,
+        "adapter_configurations": _get_adapter_configurations(model),
+        "model_runtime": _get_model_runtime(model),
+        "adapter_state": adapter_state,
+        "findings": findings,
+    }
+
+
 def run_healthcheck(model, min_trainable_params: int = 1, max_trainable_params_percent: int = 50) -> dict[str, Any]:
     """
     Inspect a PEFT model for states that are suspicious before training.
@@ -103,6 +178,9 @@ def run_healthcheck(model, min_trainable_params: int = 1, max_trainable_params_p
     status will be reported as `"irregular"` if inconsistencies are found in the model, e.g. when for the same adapter,
     some layers are enabled and some layers are disabled. This almost always means that something went wrong and that
     you should check that you didn't accidentally change some attributes on the model incorrectly.
+
+    Prompt learning and adaption prompt models have no tuner layer status, so their reports contain model information
+    and parameter counts without layer-specific fields.
 
     If the check found something suspicious, it will be reported in the `"findings"` field. An empty `"findings""` list
     means that no suspicious adapter state was detected, not that a training run is guaranteed to succeed.
@@ -120,31 +198,18 @@ def run_healthcheck(model, min_trainable_params: int = 1, max_trainable_params_p
         result
             Dictionary containing the different findings. The returned dictionary is JSON-serializable.
     """
+    if isinstance(model, PeftModel) and not isinstance(model.base_model, BaseTuner):
+        # prompt learning, adaption prompt
+        return _run_healthcheck_no_tuner_layers(model, min_trainable_params, max_trainable_params_percent)
+
     model_status = get_model_status(model)
     layer_status = get_layer_status(model)
-
-    trainable_percent = 100 * model_status.trainable_params / model_status.total_params
-    findings: list[dict[str, str]] = []
-
-    if model_status.trainable_params < min_trainable_params:
-        findings.append(
-            _format_finding(
-                "NO_TRAINABLE_PARAMETERS",
-                "error",
-                f"The model should have at least {min_trainable_params} trainable parameter(s).",
-            )
-        )
-    elif trainable_percent > max_trainable_params_percent:
-        findings.append(
-            _format_finding(
-                "HIGH_TRAINABLE_PARAMETER_FRACTION",
-                "warning",
-                (
-                    f"{trainable_percent:.2f}% of model parameters are trainable; expected no more than "
-                    f"{max_trainable_params_percent}% for PEFT training."
-                ),
-            )
-        )
+    trainable_percent, findings = _get_parameter_findings(
+        model_status.trainable_params,
+        model_status.total_params,
+        min_trainable_params,
+        max_trainable_params_percent,
+    )
 
     if model_status.enabled == "irregular":
         findings.append(
@@ -225,15 +290,7 @@ def run_healthcheck(model, min_trainable_params: int = 1, max_trainable_params_p
 
     result = {
         "is_ready": not any(finding["severity"] == "error" for finding in findings),
-        "environment": {
-            "python_version": platform.python_version(),
-            "platform": platform.platform(),
-            "peft_version": __version__,
-            "torch_version": torch.__version__,
-            "transformers_version": transformers.__version__,
-            "accelerate_version": accelerate.__version__,
-            "cuda_version": torch.version.cuda,
-        },
+        "environment": _get_environment(),
         "summary": {
             "model_id": model_id,
             "base_model_type": model_status.base_model_type,
@@ -288,13 +345,25 @@ def format_healthcheck(healthcheck: dict[str, Any], sep=", ", indent="  ") -> st
     active_adapters = adapter_state["active_adapters"]
     if not isinstance(active_adapters, str):
         active_adapters = ", ".join(active_adapters) or "none"
-    merged_adapters = adapter_state["merged_adapters"]
-    if not isinstance(merged_adapters, str):
-        merged_adapters = ", ".join(merged_adapters) or "none"
-    layer_types = []
-    for adapter_name, dct in summary["adapter_layer_types"].items():
-        layer_types.append(f"{indent}{adapter_name}:")
-        layer_types.append(f"{2 * indent}" + sep.join(f"{k}={v}" for k, v in dct.items()))
+    parameter_parts = [
+        f"trainable: {summary['trainable_params']:,}",
+        f"total: {summary['total_params']:,}",
+        f"percent trainable: {summary['trainable_percent']:.4f}%",
+    ]
+    if "num_adapter_layers" in summary:
+        parameter_parts.append(f"adapter layers: {summary['num_adapter_layers']}")
+
+    state_parts = []
+    if "enabled" in adapter_state:
+        state_parts.append(f"adapter is enabled: {adapter_state['enabled']}")
+    state_parts.append(f"active: {active_adapters}")
+    if "merged_adapters" in adapter_state:
+        merged_adapters = adapter_state["merged_adapters"]
+        if not isinstance(merged_adapters, str):
+            merged_adapters = ", ".join(merged_adapters) or "none"
+        state_parts.append(f"merged: {merged_adapters}")
+    else:
+        state_parts.append(f"available: {', '.join(adapter_state['available_adapters']) or 'none'}")
 
     lines = [
         "PEFT healthcheck",
@@ -321,24 +390,16 @@ def format_healthcheck(healthcheck: dict[str, Any], sep=", ", indent="  ") -> st
                 f"gradient checkpointing: {model_runtime['gradient_checkpointing']}",
             )
         ),
-        sep.join(
-            (
-                f"Parameters:\n{indent}trainable: {summary['trainable_params']:,}",
-                f"total: {summary['total_params']:,}",
-                f"percent trainable: {summary['trainable_percent']:.4f}%",
-                f"adapter layers: {summary['num_adapter_layers']}",
-            )
-        ),
-        sep.join(
-            (
-                f"State:\n{indent}adapter is enabled: {adapter_state['enabled']}",
-                f"active: {active_adapters}",
-                f"merged: {merged_adapters}",
-            )
-        ),
-        "Layer types:",
-        *layer_types,
+        f"Parameters:\n{indent}" + sep.join(parameter_parts),
+        f"State:\n{indent}" + sep.join(state_parts),
     ]
+
+    if "adapter_layer_types" in summary:
+        layer_types = []
+        for adapter_name, dct in summary["adapter_layer_types"].items():
+            layer_types.append(f"{indent}{adapter_name}:")
+            layer_types.append(f"{2 * indent}" + sep.join(f"{k}={v}" for k, v in dct.items()))
+        lines.extend(["Layer types:", *layer_types])
 
     findings = healthcheck["findings"]
     if findings:

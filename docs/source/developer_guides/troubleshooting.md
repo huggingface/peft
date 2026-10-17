@@ -296,7 +296,7 @@ healthcheck = peft_model.healthcheck()
 print(healthcheck.get("findings", "all good")
 ```
 
-This check only inspects the model and its adapters. It does not validate your training loop, optimizer, or dataset.
+This check only inspects the model and its adapters. It does not validate your training loop, optimizer, or dataset. For prompt learning and adaption prompt, the report shows model information and parameter counts but omits layer status, which these methods do not support.
 
 ### Check layer and model status
 
