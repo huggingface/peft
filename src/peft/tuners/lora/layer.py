@@ -105,6 +105,43 @@ class LoraVariant:
         raise NotImplementedError
 
 
+class _TiedLinear(nn.Module):
+    """Linear projection using a live transpose of an embedding adapter parameter."""
+
+    def __init__(self, source: nn.ParameterDict, adapter_name: str, bias: Optional[nn.Parameter] = None):
+        super().__init__()
+        # Keep the source unregistered so gradients and optimizer state belong to the embedding only.
+        self._source = [source]
+        self.adapter_name = adapter_name
+        self.bias = bias
+
+    @property
+    def weight(self):
+        return self._source[0][self.adapter_name].t()
+
+    @property
+    def in_features(self):
+        return self.weight.shape[1]
+
+    @property
+    def out_features(self):
+        return self.weight.shape[0]
+
+    def forward(self, x):
+        return F.linear(x, self.weight, self.bias)
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super()._save_to_state_dict(destination, prefix, keep_vars)
+        # Preserve the checkpoint layout used by ordinary LoRA linear layers.
+        weight = self.weight
+        destination[prefix + "weight"] = weight if keep_vars else weight.detach()
+
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        # The embedding owns and loads this weight; the head entry is a redundant transpose.
+        state_dict.pop(prefix + "weight", None)
+        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
+
+
 class LoraLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names: tuple[str, ...] = (
@@ -263,16 +300,6 @@ class LoraLayer(BaseTunerLayer):
         self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
         self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=lora_bias)
 
-        # Tying adapters is only implemented for Linear layers
-        # where the source is the embedding layer.
-        # Currently, this is the most prevalent way of tying layers (weight tying)
-        if tied_adapter:
-            lora_A_params = tied_adapter["lora_A"]
-            lora_B_params = tied_adapter["lora_B"]
-
-            self.lora_A[adapter_name].weight = torch.nn.Parameter(lora_A_params)
-            self.lora_B[adapter_name].weight = torch.nn.Parameter(lora_B_params)
-
         self.lora_bias[adapter_name] = lora_bias
 
         if use_rslora:
@@ -315,6 +342,15 @@ class LoraLayer(BaseTunerLayer):
             self.reset_lora_parameters(adapter_name, init_lora_weights)
         # call this before init of the lora variants
         self._move_adapter_to_device_of_base_layer(adapter_name)
+
+        # Tying adapters is only implemented for Linear layers
+        # where the source is the embedding layer.
+        # Currently, this is the most prevalent way of tying layers (weight tying)
+        if tied_adapter:
+            self.lora_A[adapter_name] = _TiedLinear(tied_adapter["lora_A"], adapter_name)
+            self.lora_B[adapter_name] = _TiedLinear(
+                tied_adapter["lora_B"], adapter_name, bias=self.lora_B[adapter_name].bias
+            )
 
         if adapter_name in self.lora_variant:
             self.lora_variant[adapter_name].init(self, adapter_name=adapter_name, config=config, **kwargs)

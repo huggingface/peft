@@ -6921,6 +6921,116 @@ class TestWeightTying:
         assert embed_lora_A.data_ptr() == lm_lora_B.data_ptr()
         assert embed_lora_B.data_ptr() == lm_lora_A.data_ptr()
 
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @pytest.mark.parametrize("autocast_adapter_dtype", [False, True])
+    def test_weight_tying_lora_dtype_conversion(self, dtype, autocast_adapter_dtype):
+        model = self.get_lm_model().to(device="cpu", dtype=dtype)
+        config = LoraConfig(target_modules=["embed_tokens", "lm_head"], ensure_weight_tying=True)
+        model = get_peft_model(model, config, autocast_adapter_dtype=autocast_adapter_dtype)
+        expected_dtype = torch.float32 if autocast_adapter_dtype else dtype
+        for target_dtype in (None, torch.float64):
+            if target_dtype is not None:
+                model.to(target_dtype)
+                expected_dtype = target_dtype
+            emb = model.get_input_embeddings()
+            head = model.base_model.model.lm_head
+            for source, target in (
+                (emb.lora_embedding_A["default"], head.lora_B["default"].weight),
+                (emb.lora_embedding_B["default"], head.lora_A["default"].weight),
+            ):
+                assert source.data_ptr() == target.data_ptr()
+                assert source.dtype == target.dtype == expected_dtype
+                torch.testing.assert_close(source.t(), target)
+
+    def test_weight_tying_lora_combined_gradients(self):
+        model = self.get_lm_model().cpu()
+        config = LoraConfig(r=4, target_modules=["embed_tokens", "lm_head"], ensure_weight_tying=True)
+        model = get_peft_model(model, config)
+        emb = model.get_input_embeddings()
+        head = model.base_model.model.lm_head
+        a, b = emb.lora_embedding_A["default"], emb.lora_embedding_B["default"]
+        with torch.no_grad():
+            a.normal_()
+        ref_a = nn.Parameter(a.detach().clone())
+        ref_b = nn.Parameter(b.detach().clone())
+        opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=0.01)
+        ref_opt = torch.optim.AdamW([ref_a, ref_b], lr=0.01)
+        ids = torch.tensor([1, 2, 1])
+        x = torch.randn(3, 1000)
+        scale = emb.scaling["default"]
+        for _ in range(2):
+            opt.zero_grad()
+            ref_opt.zero_grad()
+            loss = emb(ids).sum() + head(x).sum()
+            ref_loss = scale * (
+                (torch.nn.functional.embedding(ids, ref_a.t()) @ ref_b.t()).sum() + (x @ ref_b @ ref_a).sum()
+            )
+            loss.backward()
+            ref_loss.backward()
+            torch.testing.assert_close(a.grad, ref_a.grad)
+            torch.testing.assert_close(b.grad, ref_b.grad)
+            opt.step()
+            ref_opt.step()
+            torch.testing.assert_close(a, ref_a)
+            torch.testing.assert_close(b, ref_b)
+        assert len(opt.state) == 2
+
+    @pytest.mark.parametrize("low_cpu_mem_usage", [False, True])
+    def test_weight_tying_lora_save_load(self, tmp_path, low_cpu_mem_usage):
+        base = self.get_lm_model().to(device="cpu", dtype=torch.bfloat16)
+        config = LoraConfig(target_modules=["embed_tokens", "lm_head"], ensure_weight_tying=True)
+        model = get_peft_model(deepcopy(base), config)
+        emb = model.get_input_embeddings()
+        with torch.no_grad():
+            a = emb.lora_embedding_A["default"]
+            a.copy_(torch.randn_like(a, dtype=torch.bfloat16))
+        model.save_pretrained(tmp_path, save_embedding_layers=False)
+        saved = load_file(tmp_path / "adapter_model.safetensors")
+        torch.testing.assert_close(
+            saved["base_model.model.lm_head.lora_B.weight"], emb.lora_embedding_A["default"].t()
+        )
+        loaded = PeftModel.from_pretrained(
+            base, tmp_path, adapter_name="reloaded", is_trainable=True, low_cpu_mem_usage=low_cpu_mem_usage
+        )
+        loaded_emb = loaded.get_input_embeddings()
+        head = loaded.base_model.model.lm_head
+        assert loaded_emb.lora_embedding_A["reloaded"].data_ptr() == head.lora_B["reloaded"].weight.data_ptr()
+        ids = torch.tensor([1, 2, 1])
+        x = torch.randn(3, 1000, dtype=torch.bfloat16)
+        torch.testing.assert_close(loaded_emb(ids), emb(ids))
+        torch.testing.assert_close(head(x), model.base_model.model.lm_head(x))
+        result = loaded.load_state_dict(loaded.state_dict(), strict=True)
+        assert not result.missing_keys
+        assert not result.unexpected_keys
+
+    def test_weight_tying_lora_multiple_adapters(self):
+        model = self.get_lm_model().cpu()
+        config = LoraConfig(target_modules=["embed_tokens", "lm_head"], ensure_weight_tying=True)
+        model = get_peft_model(model, config)
+        model.add_adapter("other", deepcopy(config))
+        model.set_adapter("other")
+        emb = model.get_input_embeddings()
+        head = model.base_model.model.lm_head
+        head(torch.randn(3, 1000)).sum().backward()
+        assert emb.lora_embedding_A["other"].grad is not None
+        assert emb.lora_embedding_A["default"].grad is None
+        for adapter in ("default", "other"):
+            assert emb.lora_embedding_A[adapter].data_ptr() == head.lora_B[adapter].weight.data_ptr()
+        model.delete_adapter("default")
+        assert "default" not in emb.lora_embedding_A
+        assert "default" not in head.lora_B
+        assert emb.lora_embedding_A["other"].data_ptr() == head.lora_B["other"].weight.data_ptr()
+
+    def test_weight_tying_lora_deepcopy(self):
+        model = self.get_lm_model().cpu()
+        config = LoraConfig(target_modules=["embed_tokens", "lm_head"], ensure_weight_tying=True)
+        model = get_peft_model(model, config)
+        copied = deepcopy(model)
+        source = copied.get_input_embeddings().lora_embedding_A["default"]
+        target = copied.base_model.model.lm_head.lora_B["default"].weight
+        assert source.data_ptr() == target.data_ptr()
+        assert source.data_ptr() != model.get_input_embeddings().lora_embedding_A["default"].data_ptr()
+
     @pytest.mark.parametrize("target_modules", [".*embed_tokens$", ".*lm_head$", ".*(embed_tokens|lm_head)$"])
     def test_weight_tying_tied_model_target_modules_str_lora(self, target_modules):
         # Same as `test_weight_tying_tied_model_target_modules_lora` but the tied module
