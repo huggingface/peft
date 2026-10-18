@@ -742,14 +742,16 @@ class TestDecoderModels(PeftCommonTester):
             model = get_peft_model(self.transformers_class.from_pretrained(model_id), config)
             assert any(param.requires_grad for param in model.prompt_encoder["default"].parameters())
             model.save_pretrained(tmp_path)
+
+            model.load_adapter(tmp_path, adapter_name="frozen")
+            assert not any(param.requires_grad for param in model.prompt_encoder["frozen"].parameters())
+            assert any(param.requires_grad for param in model.prompt_encoder["default"].parameters())
+
             # Loading the checkpoint freezes this separate model, not model's original default adapter.
             frozen_model = PeftModel.from_pretrained(
                 self.transformers_class.from_pretrained(model_id), tmp_path, adapter_name=adapter_name
             )
             assert not any(param.requires_grad for param in frozen_model.parameters())
-            model.load_adapter(tmp_path, adapter_name="frozen")
-            assert not any(param.requires_grad for param in model.prompt_encoder["frozen"].parameters())
-            assert any(param.requires_grad for param in model.prompt_encoder["default"].parameters())
 
             inputs = {"input_ids": torch.tensor([[1, 2, 3]]), "task_ids": torch.tensor([0])}
             if config_cls != MultitaskPromptTuningConfig:
