@@ -401,6 +401,9 @@ class LoraLayer(BaseTunerLayer):
         scale_factor = self.scaling[adapter_name]
         r = self.r[adapter_name]
         weight_tensor = weight_tensor.to(torch.float32)
+        # For fan_in_fan_out layers (e.g. Conv1D, weight stored as (in, out)), run the QR on the transposed weight so
+        # that lora_A / lora_B get the same shapes as every other init (e.g. pissa_init below). Identity otherwise.
+        weight_tensor = transpose(weight_tensor, self.fan_in_fan_out)
         Q, R = torch.linalg.qr(weight_tensor.data)
 
         Qr, Rr = Q[:, :r], R[:r]
@@ -409,6 +412,8 @@ class LoraLayer(BaseTunerLayer):
         self.lora_B[adapter_name].weight.data = Qr.contiguous()
 
         weight_tensor.data -= scale_factor * self.lora_B[adapter_name].weight @ self.lora_A[adapter_name].weight
+        # Transpose the residual back so the base weight keeps its original layout. Identity otherwise.
+        weight_tensor = transpose(weight_tensor, self.fan_in_fan_out)
         if bnb_param_type == "4bit":
             weight_tensor = orig_weight.__class__(
                 weight_tensor,
