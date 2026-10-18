@@ -494,3 +494,25 @@ def test_lorafa_bart_layerdrop(layerdrop):
     missing = [name for name, p in model.named_parameters() if "lora_B" in name and p.grad is None]
     assert len(missing) == (2 if layerdrop else 0)
     optimizer.step()
+
+
+def test_lorafa_step_with_closure():
+    # Regression for #3958: backward inside the closure must not run under no_grad.
+    torch.manual_seed(42)
+    model = get_peft_model(
+        torch.nn.Sequential(torch.nn.Linear(4, 4, bias=False)),
+        LoraConfig(target_modules=["0"], r=2, lora_alpha=4),
+    )
+    optimizer = create_lorafa_optimizer(model, r=2, lora_alpha=4, lr=0.001)
+    x = torch.ones(2, 4)
+
+    def closure():
+        optimizer.zero_grad()
+        loss = model(x).square().mean()
+        loss.backward()
+        return loss
+
+    optimizer.step(closure)
+    grad = model.get_base_model()[0].lora_B["default"].weight.grad
+    assert grad is not None
+    assert torch.count_nonzero(grad) > 0
