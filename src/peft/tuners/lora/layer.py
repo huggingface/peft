@@ -337,14 +337,13 @@ class LoraLayer(BaseTunerLayer):
                     self.lora_arrow[adapter].on_adapter_change(self.lora_A, self.lora_B)
 
     def nora_init(self, adapter_name):
-        weight = self.get_base_layer().weight
         with torch.no_grad():
             A = self.lora_A[adapter_name].weight
             A.div_(A.norm(dim=0, keepdim=True).clamp_min(1e-6))
 
-        self.lora_B[adapter_name].weight = nn.Parameter(
-            torch.zeros_like(self.lora_B[adapter_name].weight, dtype=weight.dtype)
-        )
+        nn.init.zeros_(self.lora_B[adapter_name].weight) 
+        if self.lora_bias[adapter_name]: 
+            nn.init.zeros_(self.lora_B[adapter_name].bias) 
 
     def reset_lora_parameters(self, adapter_name, init_lora_weights):
         if init_lora_weights is not False:

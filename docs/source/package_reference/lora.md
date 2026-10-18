@@ -95,24 +95,50 @@ config = LoraConfig(init_lora_weights=False, ...)
 
 <hfoptions id="initializations">
 <hfoption id="NoRA">
-[Normalized Low-Rank Adaptation (NoRA)](https://huggingface.co/papers/2608.31036) supports normalizing the down-projection matrices only at initialization. This initialization option normalizes each column of the randomly initialized LoRA A weight across the rank dimension, with the L2 norm clamped to a minimum of `1e-6`, and sets the LoRA B weight to zero. The base weights are left unchanged by initialization. Both A and B remain trainable.
+[Normalized Low-Rank Adaptation (NoRA)](https://huggingface.co/papers/2608.31036) normalizes the LoRA down-projection matrices. PEFT applies this normalization only at initialization through `init_lora_weights="nora"` in [`LoraConfig`]: it normalizes the columns of the randomly initialized LoRA A weight and initializes the LoRA B weight to zero. Both matrices remain trainable, and the base weights are left unchanged.
 
-```py
-from peft import LoraConfig
+For a linear layer, the adapter weight update is $\Delta W = sBA$, where $A$ has shape `(r, in_features)`, $B$ has shape `(out_features, r)`, and $s$ is the LoRA scaling factor. NoRA starts from the random A weight created by the LoRA linear layer and normalizes each column across the rank dimension:
 
-config = LoraConfig(
-    init_lora_weights="nora",
-    r=8,
-    lora_alpha=8,
-    use_rslora=False,
-    target_modules=["q_proj", "v_proj"],
-)
-```
+$$
+A_{:,j} \leftarrow \frac{A_{:,j}}{\max(\lVert A_{:,j} \rVert_2, 10^{-6})}, \qquad B \leftarrow 0.
+$$
+
+Since B is zero, the adapter weight update is zero before training. With `bias="none"` and `lora_bias=False`, the adapter initially preserves the base model output. NoRA does not require a calibration dataset or a weight decomposition.
 
 > [!IMPORTANT]
-> For NoRA, keep `lora_alpha` and `r` at a 1:1 ratio. Set `use_rslora=False` so that `lora_alpha / r` gives a scaling factor of 1.
+> For NoRA, the recommended setting is `lora_alpha` equal to `r` (a 1:1 alpha/rank ratio), for example, `r=8, lora_alpha=8`. With the default `use_rslora=False`, this keeps a scaling factor of 1; enabling rank-stabilized LoRA changes it to `lora_alpha / sqrt(r)`.
 
-Nora currently supports linear layers. See the [Nora documentation](nora) for initialization details and a complete example.
+The following example applies NoRA to two linear layers in a small PyTorch model:
+
+```py
+from torch import nn
+
+from peft import LoraConfig, get_peft_model
+
+model = nn.Sequential(
+    nn.Linear(32, 32),
+    nn.ReLU(),
+    nn.Linear(32, 16),
+)
+
+config = LoraConfig(
+    r=8,
+    lora_alpha=8,
+    target_modules=["0", "2"],
+    init_lora_weights="nora",
+    bias="none",
+    lora_bias=False,
+    use_rslora=False,
+)
+model = get_peft_model(model, config)
+model.print_healthcheck()
+```
+
+For a Transformers model, set `target_modules` to the names of the linear layers you want to adapt, such as `["q_proj", "v_proj"]` when those names are present in the model.
+
+NoRA uses the existing LoRA configuration, training, saving, and loading APIs, so there is no separate `NoraConfig` or `NoraModel` class. For the shared configuration and model APIs, see [`LoraConfig`] and [`LoraModel`].
+
+NoRA supports `torch.nn.Linear` target modules or `nn.Parameter`s passed directly with `target_parameters`. It is not supported for embeddings, conv layers, etc.
 </hfoption>
 
 <hfoption id="PiSSA">

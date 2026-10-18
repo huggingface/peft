@@ -577,9 +577,13 @@ class LoraConfig(PeftConfig):
             href='https://arxiv.org/abs/2604.01694' >Minor Component Adaptation (MiCA)</a>, which initializes B from
             the r left singular vectors of the base weight associated with the smallest singular values, sets A to
             zero, and freezes B during training; only A is updated. Currently supported for linear and embedding
-            layers. Passing `"nora"` normalizes each column of the randomly initialized LoRA A weight to unit L2 norm,
-            with the norm clamped to a minimum of `1e-6`, and sets the LoRA B weight to zero. The base weights are left
-            unchanged. Currently supported for linear layers.
+            layers. Passing `"nora"` results in the initialization of <a
+            href='https://huggingface.co/papers/2608.31036' >Normalized Low-Rank Adaptation (NoRA)</a>, which
+            normalizes each column of the randomly initialized LoRA A weight to unit L2 norm and sets the LoRA B
+            weight to zero. Normalization is applied only at initialization; the base weights are unchanged and both
+            A and B remain trainable. The recommended setting is `lora_alpha` equal to `r` with `use_rslora=False`,
+            which keeps a 1:1 ratio and a scaling factor of 1. Currently supported for linear layers and for
+            `nn.Parameter`s targeted with `target_parameters`.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -785,9 +789,12 @@ class LoraConfig(PeftConfig):
                 "Pass `'mica'` to use MiCA initialization, where B is set to the r left singular vectors of the "
                 "base weight associated with the smallest singular values, A is set to zero, and B is frozen during "
                 "training (only A is updated). "
-                "Pass 'nora' to normalize each column of the randomly initialized LoRA A weight to unit L2 norm, "
-                "with the norm clamped to a minimum of 1e-6, and set the LoRA B weight to zero without changing "
-                "the base weights. Currently supported for linear layers."
+                "Pass 'nora' to use NoRA initialization, which normalizes each column of the randomly initialized "
+                "LoRA A weight to unit L2 norm and sets the LoRA B weight to zero. Normalization is applied only at "
+                "initialization; the base weights are unchanged and both A and B remain trainable. The recommended "
+                "setting is lora_alpha equal to r with use_rslora=False, which keeps a 1:1 ratio and a scaling "
+                "factor of 1. Currently supported for linear layers and for nn.Parameters targeted with "
+                "target_parameters."
             ),
             # lora_variants: lists the string values (or prefixes) of init_lora_weights
             # that activate a LoRA variant (e.g. "mica" activates MiCALinearVariant).
