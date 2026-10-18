@@ -449,3 +449,25 @@ def test_lorafa_respects_layer_specific_scaling_patterns(monkeypatch):
     assert torch.allclose(lin0_state["exp_avg_B"], expected_exp_avg_B(lin0, lin0_grad), rtol=1e-5, atol=1e-6), (
         "lin0 exp_avg_B does not match the expected layer-specific scaling"
     )
+
+
+def test_lorafa_step_with_closure():
+    # Regression for #3958: backward inside the closure must not run under no_grad.
+    torch.manual_seed(42)
+    model = get_peft_model(
+        torch.nn.Sequential(torch.nn.Linear(4, 4, bias=False)),
+        LoraConfig(target_modules=["0"], r=2, lora_alpha=4),
+    )
+    optimizer = create_lorafa_optimizer(model, r=2, lora_alpha=4, lr=0.001)
+    x = torch.ones(2, 4)
+
+    def closure():
+        optimizer.zero_grad()
+        loss = model(x).square().mean()
+        loss.backward()
+        return loss
+
+    optimizer.step(closure)
+    grad = model.get_base_model()[0].lora_B["default"].weight.grad
+    assert grad is not None
+    assert torch.count_nonzero(grad) > 0

@@ -360,6 +360,8 @@ def test_cpt_forward_loss_matches_reference(adapter_name, loss_type):
     cpt_labels[~keep] = -100
 
     vocab_size = output.logits.shape[-1]
+    # Keep one loss per shifted label so decay weights can be applied before averaging. Restore the label tensor's
+    # shape after flattening for cross_entropy, so the token-type mask selects the corresponding positions.
     token_losses = torch.nn.functional.cross_entropy(
         output.logits[:, :-1].reshape(-1, vocab_size).float(),
         cpt_labels[:, 1:].reshape(-1),
@@ -377,9 +379,9 @@ def test_cpt_forward_loss_matches_reference(adapter_name, loss_type):
 @pytest.mark.parametrize("decay_factor", [0.25, 0.5])
 def test_cpt_forward_loss_uses_switched_adapter_config(decay_factor):
     # Each CPT adapter has its own prompt encoder and loss configuration. Compare switching from the unweighted
-    # "default" adapter to the weighted "experiment" adapter with a separate model using only that weighted adapter.
+    # "default" adapter to the exponential-decay "decay" adapter with a reference model using only decay loss.
     # Switching back must restore the default loss; matching logits isolates the loss configuration regression (#3879).
-    config = CPTConfig(
+    unweighted_config = CPTConfig(
         cpt_token_ids=[0, 1, 2, 3, 4, 5, 6, 7],
         cpt_mask=[1] * 8,
         cpt_tokens_type_mask=[1, 2, 2, 2, 3, 3, 4, 4],
@@ -387,32 +389,75 @@ def test_cpt_forward_loss_uses_switched_adapter_config(decay_factor):
         tokenizer_name_or_path=MODEL_NAME,
         task_type=TaskType.CAUSAL_LM,
     )
-    active_config = copy.deepcopy(config)
-    active_config.opt_weighted_loss_type = "decay"
-    active_config.opt_loss_decay_factor = decay_factor
+    decay_config = copy.deepcopy(unweighted_config)
+    decay_config.opt_weighted_loss_type = "decay"
+    decay_config.opt_loss_decay_factor = decay_factor
     base_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
-    reference = get_peft_model(copy.deepcopy(base_model), copy.deepcopy(active_config)).eval()
-    model = get_peft_model(base_model, config)
-    model.add_adapter("experiment", active_config)
-    model.eval()
+    reference_model = get_peft_model(copy.deepcopy(base_model), copy.deepcopy(decay_config)).eval()
+    model_under_test = get_peft_model(base_model, unweighted_config)
+    model_under_test.add_adapter("decay", decay_config)
+    model_under_test.eval()
+
     torch.manual_seed(0)
     input_ids = torch.randint(0, base_model.config.vocab_size, (2, 6))
     inputs = {"input_ids": input_ids, "attention_mask": torch.ones_like(input_ids), "labels": input_ids}
 
     with torch.no_grad():
-        default_output = model(**inputs)
-        model.set_adapter("experiment")
-        switched_output = model(**inputs)
-        weighted_adapter_output = reference(**inputs)
-        model.set_adapter("default")
-        restored_output = model(**inputs)
+        default_output = model_under_test(**inputs)
+        model_under_test.set_adapter("decay")
+        switched_output = model_under_test(**inputs)
+        decay_reference_output = reference_model(**inputs)
+        model_under_test.set_adapter("default")
+        restored_output = model_under_test(**inputs)
 
-    torch.testing.assert_close(switched_output.logits, weighted_adapter_output.logits)
-    torch.testing.assert_close(switched_output.loss, weighted_adapter_output.loss)
-    assert not torch.allclose(default_output.loss, weighted_adapter_output.loss)
+    torch.testing.assert_close(switched_output.logits, decay_reference_output.logits)
+    torch.testing.assert_close(switched_output.loss, decay_reference_output.loss)
+    assert not torch.allclose(default_output.loss, decay_reference_output.loss)
     torch.testing.assert_close(restored_output.loss, default_output.loss)
 
-    model.set_adapter("experiment")
-    model(**inputs).loss.backward()
-    gradient = model.prompt_encoder["experiment"].delta_embedding.weight.grad
+    model_under_test.set_adapter("decay")
+    model_under_test(**inputs).loss.backward()
+    gradient = model_under_test.prompt_encoder["decay"].delta_embedding.weight.grad
     assert gradient is not None and torch.isfinite(gradient).all() and gradient.abs().sum() > 0
+
+
+def test_cpt_forward_does_not_mutate_input_type_mask():
+    """A forward pass must leave the caller-provided input_type_mask unchanged.
+
+    The CPT forward used to shift the mask in place, so every call rewrote the tensor held by the caller (e.g. a batch
+    stored in a dataset and reused across epochs) and the drift compounded on each forward.
+    """
+    config = CPTConfig(
+        cpt_token_ids=[0, 1, 2, 3],
+        cpt_mask=[1, 1, 1, 1],
+        cpt_tokens_type_mask=[1, 2, 3, 4],
+        opt_weighted_loss_type="none",
+        tokenizer_name_or_path=MODEL_NAME,
+        task_type=TaskType.CAUSAL_LM,
+    )
+    base_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
+    model = get_peft_model(base_model, config)
+    model.eval()
+
+    torch.manual_seed(0)
+    input_ids = torch.randint(0, base_model.config.vocab_size, (2, 6))
+    attention_mask = torch.ones_like(input_ids)
+    input_type_mask = torch.full_like(input_ids, 4)
+    input_type_mask_before = input_type_mask.clone()
+
+    with torch.no_grad():
+        model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=input_ids.clone(),
+            input_type_mask=input_type_mask,
+        )
+        # a second forward catches the drift compounding across calls
+        model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=input_ids.clone(),
+            input_type_mask=input_type_mask,
+        )
+
+    assert torch.equal(input_type_mask, input_type_mask_before)

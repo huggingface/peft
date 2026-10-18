@@ -1375,6 +1375,9 @@ TEST_CASES = [
     ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
+ALL_PEFT_CONFIG_CASES = [
+    next(row for row in TEST_CASES if row[2] is config_cls) for config_cls in ALL_PEFT_CONFIG_CLASSES
+]
 
 # For this test matrix, each tuple consists of:
 # - test name
@@ -2879,6 +2882,30 @@ class TestPeftCustomModel(PeftCommonTester):
         assert torch.isfinite(output).all()
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_forward_input_with_more_dims(self, test_name, model_id, config_cls, config_kwargs):
+        # Like nn.Linear, the adapted layers should accept inputs of shape (*, in_features), e.g. the channels-last
+        # (batch, height, width, channels) inputs of ConvNeXt, see https://github.com/huggingface/peft/issues/3968.
+        # These models process each row of the input independently, so adding leading dimensions to the input must
+        # not change the output.
+        if model_id not in ("MLP", "MLP2", "MLP_LayerNorm", "MlpUsingParameters"):
+            pytest.skip("Only the MLP models process each row of the input independently")
+
+        X = self.prepare_inputs_for_testing()["X"]
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model.eval()
+        with torch.no_grad():
+            expected = model(X=X)
+            for shape in [(9, 1, 10), (3, 3, 1, 10), (3, 1, 3, 1, 10)]:
+                output = model(X=X.view(shape))
+                assert torch.allclose(output.view(expected.shape), expected)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_forward_float16(self, test_name, model_id, config_cls, config_kwargs):
         # The user manually sets the dtype of the base model to fp16 precision. This should not cause an error for the
         # different PEFT methods.
@@ -3621,6 +3648,27 @@ class TestPeftCustomModel(PeftCommonTester):
         assert state_dict_after.keys() == state_dict_before.keys()
         for key, value in state_dict_before.items():
             assert torch.equal(state_dict_after[key], value)
+
+    def test_set_adapter_on_merged_model_warns_and_unmerges(self, recwarn):
+        # Switching the active adapter on a model with a merged layer has to unmerge that layer first, a merge
+        # and a newly active adapter can't coexist, and it should warn about doing so, since the caller may not
+        # expect their merge to be undone as a side effect of switching adapters.
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False))
+        model.add_adapter("other", LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False))
+        msg = "Adapter cannot be set when the model is merged. Unmerging the model first."
+
+        # sanity check: nothing is merged yet, so switching the adapter should not warn about a merge
+        model.set_adapter("default")
+        assert not any(msg in str(warning.message) for warning in recwarn.list)
+
+        model.merge_adapter()
+        assert model.base_model.model.lin0.merged
+
+        with pytest.warns(UserWarning, match=msg):
+            model.set_adapter("other")
+
+        assert not model.base_model.model.lin0.merged
+        assert model.active_adapter == "other"
 
     @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
     def test_set_adapter_non_overlapping_modules(self, config_cls):
@@ -4671,6 +4719,46 @@ class TestPeftCustomModel(PeftCommonTester):
                 if max_mse is not None:
                     assert mse < max_mse
 
+    @pytest.mark.parametrize(
+        "conv_layer",
+        [
+            nn.Conv1d(10, 10, 3),
+            nn.Conv2d(10, 10, 3),
+            nn.Conv2d(10, 10, 1),
+            nn.Conv3d(10, 10, 3),
+        ],
+    )
+    def test_add_weighted_adapter_svd_conv_layers(self, conv_layer):
+        # SVD based combination types used to flatten the delta weight only for Conv2d, so Conv1d and Conv3d failed
+        torch.manual_seed(0)
+
+        class ConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = conv_layer
+
+            def forward(self, X):
+                return self.conv(X)
+
+        config = LoraConfig(target_modules=["conv"], r=4, init_lora_weights=False)
+        model = get_peft_model(ConvModel(), config, adapter_name="adapter1")
+        model.add_adapter("adapter2", config)
+        # with r1 + r2 <= svd_rank <= min(out_channels, in_channels * prod(kernel_size)) the SVD is exact and the
+        # merged delta weight must equal the weighted sum
+        model.add_weighted_adapter(
+            adapters=["adapter1", "adapter2"],
+            weights=[0.5, 0.5],
+            adapter_name="merged",
+            combination_type="svd",
+            svd_rank=8,
+        )
+
+        module = model.base_model.model.conv
+        expected = 0.5 * module.get_delta_weight("adapter1") + 0.5 * module.get_delta_weight("adapter2")
+        dw_merged = module.get_delta_weight("merged")
+        assert dw_merged.shape == module.base_layer.weight.shape
+        assert torch.allclose(dw_merged, expected, atol=1e-5, rtol=1e-5)
+
     def test_multiple_adapters_no_needless_copy_modules_to_save(self):
         # See 2206
         # The problem was that we keep a "global" modules_to_save on the model which contains all possible
@@ -5346,6 +5434,20 @@ class TestMultipleActiveAdapters:
             return MLP(bias=False)
         return MLP(bias=True)
 
+    @pytest.mark.parametrize("adapter_name", [["test-adapter"], ("test-adapter",), None])
+    def test_peft_model_multi_adapter_raises(self, adapter_name):
+        # Regression test for https://github.com/huggingface/peft/issues/3723
+        config = LoraConfig(target_modules=["lin0"])
+        model = get_peft_model(MLP(), config, adapter_name="test-adapter")
+        msg = (
+            "PeftModel.set_adapter only supports a single adapter name as a string. "
+            "To activate multiple adapters, use model.base_model.set_adapter(adapter_names) "
+            "if the PEFT method supports it."
+        )
+        with pytest.raises(TypeError, match=re.escape(msg)):
+            model.set_adapter(adapter_name)
+        assert model.active_adapter == "test-adapter"
+
     @pytest.mark.parametrize(
         "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
     )
@@ -5719,6 +5821,8 @@ class TestRequiresGrad:
 
     """
 
+    transformers_class = MockTransformerWrapper
+
     def check_requires_grad(self, model, *params_expected: str):
         # Check that only the given parameters have requires_grad=True, and all others have requires_grad=False.
         # Calling without arguments besides the model means that all parameters should have requires_grad=False.
@@ -5726,6 +5830,19 @@ class TestRequiresGrad:
         diff = set(params_expected).symmetric_difference(set(params_with_requires_grad))
         msg = f"Expected {params_expected} to require gradients, got {params_with_requires_grad}"
         assert len(diff) == 0, msg
+
+    @staticmethod
+    def get_adapter_submodules(model, adapter_name):
+        adapter_submodules = []
+        for tuner_layer in model.modules():
+            if not isinstance(tuner_layer, BaseTunerLayer):
+                continue
+            for name, module_dict in tuner_layer.named_children():
+                if name == "base_layer":
+                    continue
+                if isinstance(module_dict, nn.ModuleDict) and adapter_name in module_dict:
+                    adapter_submodules.extend(module_dict[adapter_name].modules())
+        return adapter_submodules
 
     def test_requires_grad_modules_to_save_default(self):
         config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
@@ -5854,6 +5971,122 @@ class TestRequiresGrad:
         # set config1 as active but in inference mode, should result in no module requiring grad
         peft_model.set_adapter("adapter1", inference_mode=True)
         self.check_requires_grad(peft_model)
+
+    def test_inference_mode_controls_modules_to_save_training_state(self):
+        # This uses LoRA because modules_to_save shares this mechanism across all PEFT methods that support it.
+        # inference_mode must switch the selected modules_to_save copy to eval mode, while leaving the original module
+        # used by the base-model path unchanged. Switching back to training mode should restore the saved copy.
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = get_peft_model(MLP(), config)
+        wrapper = peft_model.base_model.model.lin1
+        saved_module = wrapper.modules_to_save["default"]
+        lora_modules = [
+            peft_model.base_model.model.lin0.lora_A["default"],
+            peft_model.base_model.model.lin0.lora_B["default"],
+        ]
+
+        assert saved_module.training
+        assert all(module.training for module in lora_modules)
+        assert wrapper.original_module.training
+        peft_model.set_adapter("default", inference_mode=True)
+        assert not saved_module.training
+        assert not any(module.training for module in lora_modules)
+        assert wrapper.original_module.training
+        peft_model.set_adapter("default", inference_mode=False)
+        assert saved_module.training
+        assert all(module.training for module in lora_modules)
+        assert wrapper.original_module.training
+
+    def test_add_adapter_inference_mode_preserves_existing_modules_to_save_training_state(self):
+        # This uses LoRA because modules_to_save shares this mechanism across all PEFT methods that support it.
+        # Adding an inference-only adapter must not change the existing adapter's saved-module mode. The new copy should
+        # start in eval mode, and the wrapper's original module must remain in its existing training mode.
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = get_peft_model(MLP(), config)
+        wrapper = peft_model.base_model.model.lin1
+        default_module = wrapper.modules_to_save["default"]
+        default_lora_modules = [
+            peft_model.base_model.model.lin0.lora_A["default"],
+            peft_model.base_model.model.lin0.lora_B["default"],
+        ]
+
+        inference_config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"], inference_mode=True)
+        peft_model.add_adapter("other", inference_config)
+
+        assert default_module.training
+        assert all(module.training for module in default_lora_modules)
+        assert not wrapper.modules_to_save["other"].training
+        assert not peft_model.base_model.model.lin0.lora_A["other"].training
+        assert not peft_model.base_model.model.lin0.lora_B["other"].training
+        assert wrapper.original_module.training
+
+    def test_add_adapter_normalizes_mixed_nested_training_state(self):
+        # PEFT stores the root training state and restores it recursively. If a child was manually put in a different
+        # mode, adding another adapter intentionally normalizes it to the root mode instead of preserving the mismatch.
+        class ModelWithNestedModule(MLP):
+            def __init__(self):
+                super().__init__()
+                self.lin1 = nn.Sequential(nn.Linear(20, 2), nn.Dropout())
+
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = get_peft_model(ModelWithNestedModule(), config)
+        saved_module = peft_model.base_model.model.lin1.modules_to_save["default"]
+        saved_module[1].eval()
+
+        assert saved_module.training
+        assert not saved_module[1].training
+
+        peft_model.add_adapter("other", LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"]))
+
+        assert saved_module.training
+        assert saved_module[1].training
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", ALL_PEFT_CONFIG_CASES)
+    def test_inference_mode_controls_adapter_modules(self, test_name, model_id, config_cls, config_kwargs):
+        # Use one working custom-model case for every PEFT method. Some methods store adapter state only as tensors and
+        # therefore have no module training state to assert, methods with adapter submodules are checked recursively.
+        config = config_cls(**copy.deepcopy(config_kwargs))
+        peft_model = get_peft_model(self.transformers_class.from_pretrained(model_id), config)
+        adapter_submodules = self.get_adapter_submodules(peft_model, "default")
+        base_layers = [module.base_layer for module in peft_model.modules() if isinstance(module, BaseTunerLayer)]
+
+        assert all(submodule.training for submodule in adapter_submodules)
+        # The base layer is not part of the adapter and must keep the model's original training state.
+        assert all(base_layer.training for base_layer in base_layers)
+        peft_model.set_adapter("default", inference_mode=True)
+        # inference_mode must switch the complete adapter sub-tree to eval mode, not only freeze its parameters.
+        assert not any(submodule.training for submodule in adapter_submodules)
+        assert all(base_layer.training for base_layer in base_layers)
+        peft_model.set_adapter("default", inference_mode=False)
+        # Switching back to training mode restores the adapter sub-tree without changing the base layer.
+        assert all(submodule.training for submodule in adapter_submodules)
+        assert all(base_layer.training for base_layer in base_layers)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", ALL_PEFT_CONFIG_CASES)
+    def test_add_adapter_inference_mode_preserves_existing_adapter_modules(
+        self, test_name, model_id, config_cls, config_kwargs
+    ):
+        # Add an inference-mode adapter after a training-mode adapter for every PEFT method. Each adapter sub-tree must
+        # keep its own mode, the parent tuner layer is deliberately not checked because it cannot represent both modes.
+        config_kwargs = copy.deepcopy(config_kwargs)
+        config = config_cls(**config_kwargs)
+        peft_model = get_peft_model(self.transformers_class.from_pretrained(model_id), config)
+        peft_model.set_adapter("default", inference_mode=False)
+        default_submodules = self.get_adapter_submodules(peft_model, "default")
+
+        inference_kwargs = copy.deepcopy(config_kwargs)
+        inference_kwargs["inference_mode"] = True
+        inference_config = config_cls(**inference_kwargs)
+        peft_model.add_adapter("other", inference_config)
+        other_submodules = self.get_adapter_submodules(peft_model, "other")
+
+        # Adding the inference-only adapter must not reconfigure the existing training adapter.
+        assert all(submodule.training for submodule in default_submodules)
+        # The new adapter is initialized from inference_mode=True, including all nested adapter modules.
+        assert not any(submodule.training for submodule in other_submodules)
+        # Neither adapter-specific operation is allowed to change the base layer's mode.
+        base_layers = [module.base_layer for module in peft_model.modules() if isinstance(module, BaseTunerLayer)]
+        assert all(base_layer.training for base_layer in base_layers)
 
     def test_requires_grad_follows_inference_mode_trainable_token_indices(self):
         # check that passing inference_mode to set_adapter has the intended effect with LoRA and trainable tokens
@@ -6866,6 +7099,11 @@ class TestRequiresGrad:
             "base_model.model.layernorm1.ln_tuning_layers.adapter1.bias",
         )
 
+        # adapter1 does not target layernorm0, so forward and merge must fall back to the base layer there
+        peft_model(torch.randn(4, 10))
+        peft_model.merge_adapter()
+        peft_model.unmerge_adapter()
+
     def test_requires_grad_lntuning_same_targets(self):
         config0 = LNTuningConfig(
             target_modules=["layernorm0"],
@@ -6909,6 +7147,9 @@ class TestRequiresGrad:
             "base_model.model.layernorm0.ln_tuning_layers.adapter1.weight",
             "base_model.model.layernorm0.ln_tuning_layers.adapter1.bias",
         )
+
+        # both adapters target the same layer, forward must use the active adapter
+        peft_model(torch.randn(4, 10))
 
     def test_requires_grad_vera_different_targets(self):
         # Test two different VeRA adapters that target different modules. Most notably, ensure that vera_A and vera_B
@@ -8505,6 +8746,29 @@ class TestFsdp2UnshardedParams:
         model.set_adapter("other")
         assert all(param.requires_grad for param in other_params)
         assert not any(param.requires_grad for param in default_params)
+
+    def test_set_adapter_after_merge_keeps_training_new_adapter(self):
+        # Regression test for #3872: set_adapter() reshards before base_model.set_adapter() unmerges a merged
+        # layer, so the reshard is skipped (resharding a merged layer would drop the merge) and the new adapter's
+        # requires_grad=True lands on a transient unsharded copy instead of the FSDP2 shard. The first backward
+        # still trains the new adapter through that unsharded copy, but it also reshards, so a second backward
+        # gathers from the shard, where the new adapter is still frozen, and silently trains nothing.
+        model = self.get_model(adapter_names=("default", "other"))
+        other_params = self.get_lora_params(model, "other")
+        X = self.get_input()
+
+        with torch.no_grad():
+            model(X)
+        model.merge_adapter()
+        model.set_adapter("other")
+
+        for _ in range(3):
+            for param in other_params:
+                param.grad = None
+            loss = model(X).sum()
+            assert loss.requires_grad, "no trainable adapter is active"
+            loss.backward()
+            assert all(param.grad is not None for param in other_params)
 
     @pytest.mark.parametrize("merged_name, other_name", [("lin0", "lin1"), ("lin1", "lin0")])
     def test_set_requires_grad_with_merged_layer_in_other_fsdp_module(self, merged_name, other_name):

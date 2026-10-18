@@ -13,6 +13,9 @@
 # limitations under the License.
 
 import copy
+import importlib.machinery
+import importlib.metadata
+import importlib.util
 import itertools
 import math
 import platform
@@ -40,6 +43,7 @@ from peft import (
     AdaLoraConfig,
     AdamssConfig,
     BeftConfig,
+    BOFTConfig,
     C3AConfig,
     DeloraConfig,
     EvaConfig,
@@ -54,6 +58,7 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     MissConfig,
+    OFTConfig,
     PeanutConfig,
     PeftMixedModel,
     PeftModel,
@@ -69,6 +74,7 @@ from peft import (
     PsoftConfig,
     RoadConfig,
     ShadowConfig,
+    ShiraConfig,
     SupertuningConfig,
     TinyLoraConfig,
     VBLoRAConfig,
@@ -79,6 +85,7 @@ from peft import (
     inject_adapter_in_model,
     set_peft_model_state_dict,
 )
+from peft.import_utils import is_torchao_available
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.tuners.lokr.layer import LoKrLayer
 from peft.tuners.lora.astra import preprocess_astra
@@ -3541,6 +3548,71 @@ class TestCustomModelConfigWarning:
         get_peft_model(custom_module, LoraConfig(target_modules=["lin"], base_model_name_or_path=custom_name))
         msg = f"was renamed from '{custom_name}' to 'foobar'"
         assert any(msg in str(warning.message) for warning in recwarn.list)
+
+
+class TestIncompatibleTorchaoInstalled:
+    # An installed torchao version that PEFT doesn't support should not break PEFT for models that don't use torchao.
+    # See #3964 for context. LoRA checks for torchao in dispatch_torchao, the other methods in
+    # resolve_quantization_backend.
+    config_cases = [
+        (LoraConfig, {}),
+        (BOFTConfig, {"boft_block_size": 2}),
+        (MissConfig, {"r": 2}),
+        (OFTConfig, {"r": 0, "oft_block_size": 2}),
+        (ShiraConfig, {"r": 1}),
+        (VeraConfig, {}),
+    ]
+    config_ids = ["lora", "boft", "miss", "oft", "shira", "vera"]
+
+    @pytest.fixture
+    def custom_module(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(10, 10)
+
+        return MyModule()
+
+    @pytest.fixture
+    def old_torchao_installed(self, monkeypatch):
+        # Simulate an installed torchao 0.10.0 (the version preinstalled on Google Colab), so that the test doesn't
+        # require a real torchao installation.
+        find_spec = importlib.util.find_spec
+        version = importlib.metadata.version
+
+        def fake_find_spec(name, *args, **kwargs):
+            if name == "torchao":
+                return importlib.machinery.ModuleSpec("torchao", None)
+            return find_spec(name, *args, **kwargs)
+
+        def fake_version(name):
+            if name == "torchao":
+                return "0.10.0"
+            return version(name)
+
+        monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+        monkeypatch.setattr(importlib.metadata, "version", fake_version)
+        is_torchao_available.cache_clear()
+        yield
+        is_torchao_available.cache_clear()
+
+    def test_old_torchao_is_not_available(self, old_torchao_installed):
+        with pytest.warns(UserWarning, match="incompatible version of torchao"):
+            assert not is_torchao_available()
+
+    @pytest.mark.parametrize("config_cls, config_kwargs", config_cases, ids=config_ids)
+    def test_old_torchao_does_not_break_injection(
+        self, old_torchao_installed, custom_module, config_cls, config_kwargs
+    ):
+        with pytest.warns(UserWarning, match="incompatible version of torchao"):
+            get_peft_model(custom_module, config_cls(target_modules=["lin"], **config_kwargs))
+
+    @pytest.mark.parametrize("config_cls, config_kwargs", config_cases, ids=config_ids)
+    def test_no_warning_without_old_torchao(self, custom_module, config_cls, config_kwargs, recwarn):
+        # without an incompatible torchao installed, there should be no warning
+        is_torchao_available.cache_clear()
+        get_peft_model(custom_module, config_cls(target_modules=["lin"], **config_kwargs))
+        assert not any("incompatible version of torchao" in str(warning.message) for warning in recwarn.list)
 
 
 class TestLowCpuMemUsage:
