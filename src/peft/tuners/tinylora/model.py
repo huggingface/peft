@@ -289,6 +289,17 @@ class TinyLoraModel(BaseTuner):
         # Remove the adapter's shared v parameters from the model-level ModuleDict
         if adapter_name in self.tinylora_v:
             del self.tinylora_v[adapter_name]
+        # The base class's delete_adapter() switches the active adapter using per-layer logic that never touches the
+        # model-level tinylora_v parameters, so the newly active adapter's shared v parameters would stay frozen.
+        # Unfreeze them here, mirroring _mark_only_adapters_as_trainable.
+        for active_adapter in self.active_adapters:
+            if active_adapter in self.peft_config:
+                inference_mode = getattr(self.peft_config[active_adapter], "inference_mode", False)
+                if inference_mode:
+                    continue
+            if active_adapter in self.tinylora_v:
+                for param in self.tinylora_v[active_adapter].values():
+                    param.requires_grad = True
 
         # Remove the adapter's cached target-key mapping so that re-adding an adapter with the same name (but
         # potentially different target_modules) rebuilds the mapping instead of reusing a stale one.
