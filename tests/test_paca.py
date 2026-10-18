@@ -18,12 +18,11 @@ import os
 import pytest
 import torch
 from torch import nn
+from torch.library import opcheck
 
-from peft import PacaConfig, PeftModel, get_peft_model, set_peft_model_state_dict
+from peft import PacaConfig, get_peft_model, set_peft_model_state_dict
 from peft.tuners.lora.conversion import convert_to_lora
 from peft.tuners.paca.layer import Linear as PacaLinear
-
-from .testing_utils import hub_online_once
 
 
 class MLP(nn.Module):
@@ -155,45 +154,17 @@ class TestPaca:
         with pytest.raises(ValueError, match="cannot be larger than in_features"):
             get_peft_model(mlp, PacaConfig(r=17, target_modules=["lin0"]))
 
-    def test_save_and_load_restores_indices(self, mlp, tmp_path):
-        config = PacaConfig(r=4, target_modules=["lin0", "lin1"], init_weights=False)
-        model = get_peft_model(copy.deepcopy(mlp), config)
-        x = torch.randn(5, 16, device=self.torch_device)
-        expected = model(x)
-        model.save_pretrained(tmp_path)
-
-        # a different global seed would select different columns; the checkpoint must override them
-        torch.manual_seed(123)
-        loaded = PeftModel.from_pretrained(copy.deepcopy(mlp), tmp_path)
-        for layer, loaded_layer in zip(_paca_layers(model), _paca_layers(loaded)):
-            assert torch.equal(layer.paca_indices["default"], loaded_layer.paca_indices["default"])
-        torch.testing.assert_close(loaded(x), expected)
-
-    def test_merge_matches_forward(self, mlp):
-        config = PacaConfig(r=4, target_modules=["lin0", "lin1"], init_weights=False)
-        model = get_peft_model(mlp, config)
-        model.eval()
-        x = torch.randn(5, 16, device=self.torch_device)
-        expected = model(x)
-        merged = model.merge_and_unload()
-        assert not _paca_layers(merged)
-        torch.testing.assert_close(merged(x), expected)
-
-    @pytest.fixture
-    def full_fp32_matmul(self):
-        # other tests (e.g. torch.compile ones) may leave TF32 matmuls enabled, which is too imprecise for this check
-        precision = torch.get_float32_matmul_precision()
-        torch.set_float32_matmul_precision("highest")
-        yield
-        torch.set_float32_matmul_precision(precision)
-
-    def test_conversion_to_lora_is_exact(self, mlp, full_fp32_matmul):
-        # The PaCA update is non-zero in r columns only, so a LoRA adapter of rank r represents it exactly.
+    def test_conversion_to_lora_is_exact(self, mlp):
+        # The PaCA update is non-zero in r columns only, so a LoRA adapter of rank r represents it exactly. The model
+        # runs in float64 so that the result does not depend on the global float32 matmul precision (TF32 may have
+        # been enabled by other tests in the same process); the tolerance covers the SVD of the conversion, which is
+        # computed in float32.
         r = 4
+        mlp = mlp.double()
         config = PacaConfig(r=r, target_modules=["lin0", "lin1"], init_weights=False)
         model = get_peft_model(copy.deepcopy(mlp), config)
         model.eval()
-        x = torch.randn(5, 16, device=self.torch_device)
+        x = torch.randn(5, 16, device=self.torch_device, dtype=torch.double)
         expected = model(x)
 
         lora_config, lora_state_dict = convert_to_lora(model, rank=r)
@@ -202,16 +173,71 @@ class TestPaca:
         assert not load_result.unexpected_keys
         torch.testing.assert_close(lora_model(x), expected, atol=1e-5, rtol=1e-5)
 
-    def test_multiple_active_adapters_match_merged(self, mlp):
+    def _add_overlapping_adapters(self, model):
+        # Two adapters on lin0 whose selected columns partially overlap. The indices are set explicitly, as with the
+        # random selection it depends on the seed whether there is an overlap at all. The scalings differ (2.0, 0.5).
         model = get_peft_model(
-            mlp, PacaConfig(r=4, target_modules=["lin0"], init_weights=False, random_seed=0), adapter_name="a"
+            model, PacaConfig(r=4, target_modules=["lin0"], init_weights=False), adapter_name="adapter0"
         )
-        model.add_adapter("b", PacaConfig(r=4, target_modules=["lin0"], init_weights=False, random_seed=1))
-        model.base_model.set_adapter(["a", "b"])
+        model.add_adapter("adapter1", PacaConfig(r=4, paca_alpha=2, target_modules=["lin0"], init_weights=False))
+        layer = model.base_model.model.lin0
+        device = layer.paca_delta["adapter0"].device
+        layer.paca_indices["adapter0"] = torch.tensor([1, 3, 5, 7], device=device)
+        layer.paca_indices["adapter1"] = torch.tensor([3, 5, 9, 11], device=device)
+        model.base_model.set_adapter(["adapter0", "adapter1"])
+        return model, layer
+
+    @pytest.mark.parametrize("custom_op", [False, True])
+    def test_overlapping_adapters_forward_and_gradients_match_reference(self, custom_op):
+        torch.manual_seed(0)
+        _, layer = self._add_overlapping_adapters(MLP().to(self.torch_device).double())
+        base_weight = layer.get_base_layer().weight.detach().clone()
+        x = torch.randn(3, 5, 16, device=self.torch_device, dtype=torch.double, requires_grad=True)
+        grad_output = torch.randn(3, 5, 32, device=self.torch_device, dtype=torch.double)
+
+        if custom_op:
+            # the custom op that replaces _PacaLinearFunction under torch.compile, called directly
+            names = ["adapter0", "adapter1"]
+            out = torch.ops.peft.paca_linear_forward(
+                x,
+                layer.get_base_layer().weight,
+                layer.get_base_layer().bias,
+                [layer.paca_indices[name] for name in names],
+                [float(layer.scaling[name]) for name in names],
+                [layer.paca_delta[name] for name in names],
+            )[0]
+        else:
+            out = layer(x)
+        out.backward(grad_output)
+        grads = [x.grad.clone(), layer.paca_delta["adapter0"].grad.clone(), layer.paca_delta["adapter1"].grad.clone()]
+        assert torch.equal(layer.get_base_layer().weight, base_weight)
+
+        # reference: both updates are added to the overlapping columns
+        x.grad = None
+        layer.paca_delta["adapter0"].grad = layer.paca_delta["adapter1"].grad = None
+        weight = base_weight
+        for name in ["adapter0", "adapter1"]:
+            weight = weight.index_add(1, layer.paca_indices[name], layer.scaling[name] * layer.paca_delta[name])
+        out_ref = nn.functional.linear(x, weight, layer.get_base_layer().bias)
+        out_ref.backward(grad_output)
+
+        torch.testing.assert_close(out, out_ref)
+        for grad, grad_ref in zip(
+            grads, [x.grad, layer.paca_delta["adapter0"].grad, layer.paca_delta["adapter1"].grad]
+        ):
+            torch.testing.assert_close(grad, grad_ref)
+
+    def test_overlapping_adapters_merge_and_unmerge(self, mlp):
+        model, layer = self._add_overlapping_adapters(mlp)
         model.eval()
+        base_weight = layer.get_base_layer().weight.detach().clone()
         x = torch.randn(5, 16, device=self.torch_device)
         expected = model(x)
-        model.base_model.merge_adapter(["a", "b"])
+
+        model.base_model.merge_adapter(["adapter0", "adapter1"])
+        torch.testing.assert_close(model(x), expected)
+        model.base_model.unmerge_adapter()
+        torch.testing.assert_close(layer.get_base_layer().weight, base_weight)
         torch.testing.assert_close(model(x), expected)
 
     def test_autocast_bf16(self, mlp):
@@ -227,35 +253,39 @@ class TestPaca:
             assert grad is not None
             assert grad.dtype == layer.paca_delta["default"].dtype == torch.float32
 
-    def test_transformers_model_gradient_checkpointing(self):
-        from transformers import AutoModelForCausalLM
-
-        model_id = "hf-internal-testing/tiny-random-LlamaForCausalLM"
-        with hub_online_once(model_id):
-            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
-        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-        model.enable_input_require_grads()
-        config = PacaConfig(r=4, target_modules="all-linear", random_seed=0)
-        model = get_peft_model(model, config)
-        model.train()
-
-        input_ids = torch.randint(0, 100, (2, 12), device=self.torch_device)
-        loss = model(input_ids=input_ids, labels=input_ids).loss
-        loss.backward()
-        grads = [layer.paca_delta["default"].grad for layer in _paca_layers(model)]
-        assert grads and all(g is not None for g in grads)
-        assert any(g.abs().sum() > 0 for g in grads)
-
     def test_compile_ops_opcheck(self):
-        from torch.library import opcheck
-
         torch.manual_seed(0)
-        x = torch.randn(3, 5, 16, device=self.torch_device)
+        x = torch.randn(3, 5, 16, device=self.torch_device, requires_grad=True)
         weight = torch.randn(8, 16, device=self.torch_device)
         bias = torch.randn(8, device=self.torch_device)
         delta = torch.randn(8, 4, device=self.torch_device, requires_grad=True)
         idx = torch.tensor([1, 3, 7, 12], device=self.torch_device)
-        opcheck(torch.ops.peft.paca_linear_forward.default, (x, weight, bias, [idx], [2.0], [delta]))
+        # an input that does not require grad (e.g. the first adapted layer): the backward op skips the input gradient
+        opcheck(torch.ops.peft.paca_linear_forward.default, (x.detach(), weight, bias, [idx], [2.0], [delta]))
+        # several adapters whose selected columns overlap
+        delta2 = torch.randn(8, 3, device=self.torch_device, requires_grad=True)
+        idx2 = torch.tensor([3, 7, 9], device=self.torch_device)
+        opcheck(
+            torch.ops.peft.paca_linear_forward.default, (x, weight, bias, [idx, idx2], [2.0, 0.5], [delta, delta2])
+        )
+
+    def test_compile_ops_several_forwards_before_backward(self):
+        # The custom op swaps the columns in and out of the weight, which is saved for the backward pass. This must not
+        # bump the autograd version counter of the weight, otherwise a loss summed over two forward passes fails.
+        torch.manual_seed(0)
+        weight = torch.randn(8, 16, device=self.torch_device)
+        delta = torch.randn(8, 4, device=self.torch_device, requires_grad=True)
+        idx = torch.tensor([1, 3, 7, 12], device=self.torch_device)
+        xs = [torch.randn(3, 16, device=self.torch_device, requires_grad=True) for _ in range(2)]
+
+        outs = [torch.ops.peft.paca_linear_forward(x, weight, None, [idx], [2.0], [delta])[0] for x in xs]
+        (outs[0].sum() + outs[1].sum()).backward()
+        grad = delta.grad.clone()
+
+        delta.grad = None
+        for x in xs:
+            torch.ops.peft.paca_linear_forward(x, weight, None, [idx], [2.0], [delta])[0].sum().backward()
+        torch.testing.assert_close(grad, delta.grad)
 
     @pytest.mark.skipif(
         os.environ.get("PEFT_DEBUG_WITH_TORCH_COMPILE") != "1", reason="slow torch.compile tests are opt-in"

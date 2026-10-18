@@ -17,13 +17,16 @@ from typing import Any, Optional
 
 import torch
 import torch.nn.functional as F
+from packaging import version
 from torch import nn
 
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
 from peft.utils import quantization_extra_repr, resolve_quantization_backend
 
-from . import _ops  # noqa: F401  # registers the custom ops used under torch.compile
+
+# torch.library.custom_op, used for the torch.compile path (see _ops.py), was added in PyTorch 2.4
+_torch_supports_custom_ops = version.parse(torch.__version__) >= version.parse("2.4.0")
 
 
 # use a LRU_cache so that the warning is only ever called once and not repeated for every layer/step/epoch
@@ -48,7 +51,11 @@ def _warn_once_about_module_hooks(paca_layer):
 
 
 def _swap_in_columns(weight, indices, scalings, deltas) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
-    """Write the adapted columns into `weight` in place and return the original and the adapted columns."""
+    """Write the adapted columns into `weight` in place and return the original and the adapted columns.
+
+    When several adapters select the same column, each adapter reads the value written by the previous one, so the
+    column ends up with the sum of all their updates, like after merging them.
+    """
     originals, adapted = [], []
     for idx, scaling, delta in zip(indices, scalings, deltas):
         original = weight.index_select(1, idx)
@@ -60,6 +67,15 @@ def _swap_in_columns(weight, indices, scalings, deltas) -> tuple[list[torch.Tens
         originals.append(original)
         adapted.append(columns)
     return originals, adapted
+
+
+def _write_columns(weight, indices, columns, reverse=False) -> None:
+    pairs = list(zip(indices, columns))
+    if reverse:
+        # restore in reverse order so that overlapping columns of several adapters end up with the original values
+        pairs = pairs[::-1]
+    for idx, cols in pairs:
+        weight.index_copy_(1, idx, cols)
 
 
 _MM_OUT_DTYPE_SUPPORTED: dict[str, bool] = {}
@@ -78,17 +94,9 @@ def _mm_to_dtype(a: torch.Tensor, b: torch.Tensor, dtype: torch.dtype) -> torch.
             try:
                 return torch.mm(a, b, out_dtype=dtype)
             except (TypeError, RuntimeError):
+                # `out_dtype` was added in PyTorch 2.8 and is not supported on all devices
                 _MM_OUT_DTYPE_SUPPORTED[device_type] = False
     return torch.mm(a, b).to(dtype)
-
-
-def _write_columns(weight, indices, columns, reverse=False) -> None:
-    pairs = list(zip(indices, columns))
-    if reverse:
-        # restore in reverse order so that overlapping columns of several adapters end up with the original values
-        pairs = pairs[::-1]
-    for idx, cols in pairs:
-        weight.index_copy_(1, idx, cols)
 
 
 class _PacaLinearFunction(torch.autograd.Function):
@@ -112,6 +120,9 @@ class _PacaLinearFunction(torch.autograd.Function):
         try:
             result = F.linear(x, weight, bias)
         finally:
+            # The adapted columns were written into the frozen base weight itself. If the matmul raises (e.g. a CUDA
+            # out-of-memory error that the caller catches to retry with a smaller batch), they would otherwise stay
+            # there and silently change the base model, also with the adapter disabled.
             _write_columns(weight, indices, originals, reverse=True)
 
         # Only the selected input channels are needed to compute the gradient of the adapted columns. Store them in
@@ -139,6 +150,7 @@ class _PacaLinearFunction(torch.autograd.Function):
             try:
                 grad_x = grad_output.matmul(weight.to(grad_output.dtype))
             finally:
+                # see forward
                 _write_columns(weight, ctx.indices, originals, reverse=True)
             grad_x = grad_x.to(ctx.x_dtype)
 
@@ -211,7 +223,7 @@ class PacaLayer(BaseTunerLayer):
         indices = torch.randperm(self.in_features, generator=generator)[:r]
         # Sorting does not change which connections are trained, but gives a more regular memory access pattern.
         self.paca_indices[adapter_name] = torch.sort(indices).values
-        self.paca_delta[adapter_name] = nn.Parameter(torch.zeros(self.out_features, r))
+        self.paca_delta[adapter_name] = nn.Parameter(torch.empty(self.out_features, r))
         self.reset_paca_parameters(adapter_name, init_weights)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
@@ -373,7 +385,7 @@ class Linear(nn.Module, PacaLayer):
         scalings = tuple(self.scaling[a] for a in active_adapters)
         deltas = [self.paca_delta[a] for a in active_adapters]
         bias = self.get_base_layer().bias
-        if self.quantization_backend is None and torch.compiler.is_compiling():
+        if self.quantization_backend is None and _torch_supports_custom_ops and torch.compiler.is_compiling():
             # Under torch.compile, use opaque custom ops so that the in-place column swap is not functionalized into a
             # copy of the full weight (see _ops.py).
             if torch.is_autocast_enabled(x.device.type):
