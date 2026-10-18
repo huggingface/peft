@@ -4259,6 +4259,43 @@ class TestPeftCustomModel(PeftCommonTester):
         assert model.active_adapters == ["default"]
         assert model.base_model.model.lin1.modules_to_save["default"].weight.requires_grad
 
+    def test_delete_adapter_tinylora_fallback_becomes_trainable(self):
+        # Bug-fix for #3999: deleting the active TinyLoRA adapter must make the fallback adapter's
+        # model-level tinylora_v parameters trainable (they were frozen while inactive).
+        model = MLP()
+
+        config_first = TinyLoraConfig(target_modules=["lin0", "lin1"], r=4, u=2)
+        config_second = TinyLoraConfig(target_modules=["lin0"], r=4, u=2)
+        model = get_peft_model(model, config_first, adapter_name="first").to(self.torch_device)
+        assert all(p.requires_grad for p in model.base_model.tinylora_v["first"].values())
+
+        model.add_adapter("second", config_second)
+        assert not any(p.requires_grad for p in model.base_model.tinylora_v["second"].values())
+
+        model.delete_adapter("first")
+        assert model.active_adapters == ["second"]
+        assert all(p.requires_grad for p in model.base_model.tinylora_v["second"].values())
+        trainable_names = [n for n, p in model.named_parameters() if p.requires_grad]
+        assert any(".tinylora_v.second." in n for n in trainable_names)
+
+        # Inactive adapter deletion should not alter active adapter trainability
+        config_third = TinyLoraConfig(target_modules=["lin0"], r=4, u=2)
+        model.add_adapter("third", config_third)
+        assert not any(p.requires_grad for p in model.base_model.tinylora_v["third"].values())
+        model.delete_adapter("third")
+        assert model.active_adapters == ["second"]
+        assert all(p.requires_grad for p in model.base_model.tinylora_v["second"].values())
+
+        # Fallback adapter with inference_mode=True should remain frozen
+        model_inf = MLP()
+        config_inf = TinyLoraConfig(target_modules=["lin0"], r=4, u=2, inference_mode=True)
+        model_inf = get_peft_model(model_inf, config_first, adapter_name="first").to(self.torch_device)
+        model_inf.add_adapter("second", config_inf)
+        model_inf.delete_adapter("first")
+        assert model_inf.active_adapters == ["second"]
+        assert not any(p.requires_grad for p in model_inf.base_model.tinylora_v["second"].values())
+        assert not any(p.requires_grad for p in model_inf.parameters())
+
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_get_base_model_state_dict(self, test_name, model_id, config_cls, config_kwargs):
         if config_kwargs.get("kasa_config", None) is not None:

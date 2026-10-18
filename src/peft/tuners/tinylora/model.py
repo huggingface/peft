@@ -296,6 +296,15 @@ class TinyLoraModel(BaseTuner):
         if adapter_name in self._target_key_to_idx:
             del self._target_key_to_idx[adapter_name]
 
+        for active_adapter in self.active_adapters:
+            if active_adapter in self.peft_config:
+                inference_mode = getattr(self.peft_config[active_adapter], "inference_mode", False)
+                if inference_mode:
+                    continue
+            if active_adapter in self.tinylora_v:
+                for param in self.tinylora_v[active_adapter].values():
+                    param.requires_grad = True
+
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         """
         Mark only the adapter layers as trainable.
