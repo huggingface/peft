@@ -6997,7 +6997,43 @@ def _test_save_unsharded_weights(rank, world_size, port, tmp_dir_reference, tmp_
             )
 
 
-def _test_multiple_adapters(rank, world_size, port):
+def _test_save_gathers_only_adapter_weights(rank, world_size):
+    """
+    Test that get_peft_model_state_dict only gathers the adapter weights of a TP model, gathering the whole state dict
+    would materialize the full base model on every rank.
+    """
+    from torch.distributed.tensor import DTensor
+    from transformers.integrations import tensor_parallel
+
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+
+    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, **_get_tp_kwargs(tp_plan=TP_PLAN))
+    model.to(device)
+    # embed_tokens is not targeted, otherwise the base embedding weights would be saved (and gathered) as well
+    lora_config = LoraConfig(r=4, target_modules=["q_proj", "o_proj"], init_lora_weights=False)
+    model = get_peft_model(model, lora_config)
+
+    gathered_keys = []
+    gather_state_dict_for_save = tensor_parallel.gather_state_dict_for_save
+
+    def spy_gather_state_dict_for_save(state_dict, *args):
+        gathered_keys.extend(state_dict)
+        return gather_state_dict_for_save(state_dict, *args)
+
+    tensor_parallel.gather_state_dict_for_save = spy_gather_state_dict_for_save
+    try:
+        peft_state_dict = get_peft_model_state_dict(model)
+    finally:
+        tensor_parallel.gather_state_dict_for_save = gather_state_dict_for_save
+
+    assert gathered_keys
+    non_adapter_keys = [key for key in gathered_keys if "lora_" not in key]
+    assert not non_adapter_keys, f"Non-adapter weights were gathered: {non_adapter_keys}"
+    assert not any(isinstance(value, DTensor) for value in peft_state_dict.values())
+
+
+def _test_multiple_adapters(rank, world_size):
     """Two LoRA adapters coexist on a TP model and can be switched between."""
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
@@ -7136,35 +7172,39 @@ is_transformers_ge_v5_6_0 = packaging.version.parse(transformers.__version__) >=
 )
 @pytest.mark.multi_gpu_tests
 class TestLoraTensorParallel:
-    def _spawn(self, fn, *extra_args, port_offset=0):
-        port = _BASE_PORT + port_offset
-        wrapped_fn = partial(_test_function_wrapper, fn)
-        mp.spawn(wrapped_fn, args=(WORLD_SIZE, port) + extra_args, nprocs=WORLD_SIZE, join=True)
+    def _spawn(self, fn, *extra_args):
+        with tempfile.TemporaryDirectory(prefix="peft-tp-") as rendezvous_dir:
+            init_method = (Path(rendezvous_dir) / "rendezvous").as_uri()
+            wrapped_fn = partial(_test_function_wrapper, fn)
+            mp.spawn(wrapped_fn, args=(WORLD_SIZE, init_method) + extra_args, nprocs=WORLD_SIZE, join=True)
 
     def test_lora_weight_synchronization(self):
-        self._spawn(_test_lora_weight_synchronization, port_offset=0)
+        self._spawn(_test_lora_weight_synchronization)
 
     def test_lora_gradient_synchronization(self):
-        self._spawn(_test_lora_gradient_synchronization, port_offset=2)
+        self._spawn(_test_lora_gradient_synchronization)
 
     def test_from_checkpoint(self, tmp_path):
-        self._spawn(_test_load_from_checkpoint, tmp_path, port_offset=1)
+        self._spawn(_test_load_from_checkpoint, tmp_path)
 
     def test_save_unsharded_weights(self, tmp_path):
         tmp_dir_reference = tmp_path / "reference"
         tmp_dir_tp = tmp_path / "tp"
-        self._spawn(_test_save_unsharded_weights, tmp_dir_reference, tmp_dir_tp, port_offset=3)
+        self._spawn(_test_save_unsharded_weights, tmp_dir_reference, tmp_dir_tp)
+
+    def test_save_gathers_only_adapter_weights(self):
+        self._spawn(_test_save_gathers_only_adapter_weights)
 
     def test_multiple_adapters(self):
-        self._spawn(_test_multiple_adapters, port_offset=4)
+        self._spawn(_test_multiple_adapters)
 
     def test_load_adapter_forward(self, tmp_path):
-        self._spawn(_test_load_adapter_forward, tmp_path, port_offset=5)
+        self._spawn(_test_load_adapter_forward, tmp_path)
 
     def test_load_adapter_save(self, tmp_path):
         tmp_dir_reference = tmp_path / "reference"
         tmp_dir_tp = tmp_path / "tp"
-        self._spawn(_test_load_adapter_save, tmp_dir_reference, tmp_dir_tp, port_offset=6)
+        self._spawn(_test_load_adapter_save, tmp_dir_reference, tmp_dir_tp)
 
 
 @pytest.mark.single_gpu_tests
