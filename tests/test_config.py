@@ -696,6 +696,28 @@ class TestPeftConfig:
         assert "_peft_version_missing" not in config_dict
         assert config_dict["peft_version"] == peft_config.peft_version
 
+    def test_save_pretrained_sorts_keys_except_pattern_keys(self, tmp_path):
+        # The config is written with sorted keys, nested dicts included, but the order of rank_pattern and
+        # alpha_pattern is kept, see #3818. Testing LoRA is enough: all configs are saved by the same
+        # PeftConfigMixin.save_pretrained, and the methods that support these arguments use the same names.
+        config = LoraConfig(
+            rank_pattern={"module.foo": 16, "foo": 4},
+            alpha_pattern={"module.foo": 2, "foo": 8},
+            init_lora_weights="loftq",
+            loftq_config={"loftq_iter": 2, "loftq_bits": 4},
+        )
+        config.save_pretrained(tmp_path)
+        config_dict = json.loads((tmp_path / "adapter_config.json").read_text())
+
+        assert list(config_dict["rank_pattern"]) == ["module.foo", "foo"]
+        assert list(config_dict["alpha_pattern"]) == ["module.foo", "foo"]
+        assert list(config_dict["loftq_config"]) == ["loftq_bits", "loftq_iter"]
+
+        # apart from the order of the pattern keys, the file is the same as when sorting all keys
+        for key in ("rank_pattern", "alpha_pattern"):
+            config_dict[key] = dict(sorted(config_dict[key].items()))
+        assert json.dumps(config_dict, indent=2) == json.dumps(config_dict, indent=2, sort_keys=True)
+
 
 class TestLoraNestedConfigRoundTrip:
     # Regression tests for https://github.com/huggingface/peft/issues/3583:

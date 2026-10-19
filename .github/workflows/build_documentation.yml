@@ -20,6 +20,7 @@ jobs:
       commit_sha: ${{ github.sha }}
       package: peft
       notebook_folder: peft_docs
+      python_version: "3.14"
     secrets:
       token: ${{ secrets.HUGGINGFACE_PUSH }}
       hf_token: ${{ secrets.HF_DOC_BUILD_PUSH }}

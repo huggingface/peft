@@ -277,9 +277,6 @@ def format_healthcheck(healthcheck: dict[str, Any], sep=", ", indent="  ") -> st
         Result (`str`)
             The formatted string in human-readable format.
     """
-    sep = ", "
-    indent = "  "
-
     summary = healthcheck["summary"]
     adapter_state = healthcheck["adapter_state"]
     environment = healthcheck["environment"]
@@ -294,10 +291,10 @@ def format_healthcheck(healthcheck: dict[str, Any], sep=", ", indent="  ") -> st
     merged_adapters = adapter_state["merged_adapters"]
     if not isinstance(merged_adapters, str):
         merged_adapters = ", ".join(merged_adapters) or "none"
-    layer_types = ""
+    layer_types = []
     for adapter_name, dct in summary["adapter_layer_types"].items():
-        layer_types += f"{indent}{adapter_name}:\n"
-        layer_types += f"{2 * indent}" + sep.join(f"{k}={v}" for k, v in dct.items())
+        layer_types.append(f"{indent}{adapter_name}:")
+        layer_types.append(f"{2 * indent}" + sep.join(f"{k}={v}" for k, v in dct.items()))
 
     lines = [
         "PEFT healthcheck",
@@ -339,13 +336,14 @@ def format_healthcheck(healthcheck: dict[str, Any], sep=", ", indent="  ") -> st
                 f"merged: {merged_adapters}",
             )
         ),
-        f"Layer types:\n{layer_types}",
+        "Layer types:",
+        *layer_types,
     ]
 
     findings = healthcheck["findings"]
     if findings:
         lines.append("Findings:")
-        lines.extend(f"  {finding['severity'].upper()}: {finding['message']}" for finding in findings)
+        lines.extend(f"{indent}{finding['severity'].upper()}: {finding['message']}" for finding in findings)
 
     result = "\n".join(lines)
     return result

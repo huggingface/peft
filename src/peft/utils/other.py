@@ -531,6 +531,25 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         """
         raise NotImplementedError
 
+    def set_training(self, adapter_names: str | Sequence[str], training: bool = True) -> None:
+        """
+        Enable or disable training mode on the given adapter modules.
+
+        Args:
+            adapter_names (`str` or `Sequence[str]`):
+                The name of the adapter(s) whose training mode should be updated.
+            training (`bool`, *optional*) :
+                Whether to enable (`True`, default) or disable (`False`) training mode.
+        """
+        if isinstance(adapter_names, str):
+            adapter_names = [adapter_names]
+
+        for adapter_name in adapter_names:
+            for name in self.adapter_layer_names + self.other_param_names:
+                module_dict = attrgetter(name)(self)
+                if isinstance(module_dict, torch.nn.ModuleDict) and adapter_name in module_dict:
+                    module_dict[adapter_name].train(training)
+
     def set_adapter(self, adapter_names: Union[str, list[str]], inference_mode: bool = False) -> None:
         """Set the active adapter
 
@@ -545,6 +564,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         """
         if isinstance(adapter_names, str):
             self._active_adapter = adapter_names
+            self.set_training(adapter_names, self.training and not inference_mode)
         else:
             self._active_adapter = []
             for adapter_name in adapter_names:
@@ -552,6 +572,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
                     raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
 
                 self._active_adapter.append(adapter_name)
+                self.set_training(adapter_name, self.training and not inference_mode)
 
     def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
         """Delete an adapter from the layer, set a new active adapter if necessary"""
@@ -742,6 +763,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
 
         _set_layer_requires_grad(self.modules_to_save[adapter_name], not inference_mode)
+        self.set_training(adapter_name, self.training and not inference_mode)
         self._active_adapter = adapter_name
 
     def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
@@ -833,13 +855,20 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
     ) -> torch.nn.Module:
-        """Unloading in case of `ModulesToSave` means to simply return the wrapped module.
+        """Return the module that replaces this wrapper when unloading the PEFT model.
 
-        However, if the wrapped module is itself a tuner, we'll call merge on it before.
+        When merging, this is the modules_to_save copy of the active adapter, so that the trained weights are kept. If
+        that copy is itself a tuner layer, it is merged first. Without merging, or if no adapter is active on this
+        wrapper, the original module is returned, i.e. the base model is restored.
         """
         if not self.active_adapters:
             # none of the modules_to_save adapters of this module are active, e.g. because the model's active adapter
             # does not use modules_to_save on this module; like in forward, the original module is used in this case
+            return self.original_module
+
+        if not merge:
+            # without merging, unloading should give back the base model, so the original module is returned instead
+            # of the trained modules_to_save copy
             return self.original_module
 
         new_module = self.modules_to_save[self.active_adapter]
@@ -847,9 +876,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         # TODO: not sure if this is still a sensible thing to do. We would basically have to
         # do the same checks as `_unload_and_optionally_merge` to support MHA, for example.
         if hasattr(new_module, "base_layer"):
-            # check if the module is itself a tuner layer
-            if merge:
-                new_module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+            new_module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
             new_module = new_module.get_base_layer()
 
         return new_module
@@ -937,11 +964,16 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         super().update(active_adapter)
 
     def adapter_state_dict_load_map(self, adapter_name):
+        if adapter_name not in self._adapters:
+            return {}
         if self.token_adapter.tied_adapter:
             return {}
         return {"token_adapter.trainable_tokens_delta": f"token_adapter.trainable_tokens_delta.{adapter_name}"}
 
     def adapter_state_dict(self, adapter_name, state_dict):
+        if adapter_name not in self._adapters:
+            return {}
+
         if self.token_adapter.tied_adapter:
             # storing of weight-tied layers is not up to us and will be handled by
             # transformers. we're just here to keep those layers in sync during training.
@@ -1152,11 +1184,14 @@ def _set_trainable(
             if isinstance(grandparent, wrapper_cls):
                 grandparent.update(adapter_name, **wrapper_kwargs)
                 grandparent.set_adapter(grandparent.active_adapter, inference_mode=inference_mode)
+                grandparent.set_training(adapter_name, grandparent.training and not inference_mode)
             elif isinstance(target, wrapper_cls):
                 target.update(adapter_name, **wrapper_kwargs)
                 target.set_adapter(target.active_adapter, inference_mode=inference_mode)
+                target.set_training(adapter_name, target.training and not inference_mode)
             else:
                 new_module = wrapper_cls(target, adapter_name, **wrapper_kwargs)
+                new_module.train(target.training)
                 if activate_adapter:
                     new_module.set_adapter(adapter_name, inference_mode=inference_mode)
                 else:
