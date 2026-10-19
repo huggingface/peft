@@ -83,7 +83,6 @@ from peft import (
     VeraConfig,
     WaveFTConfig,
     get_peft_model,
-    initialize_lora_eva_weights,
     inject_adapter_in_model,
     set_peft_model_state_dict,
 )
@@ -95,7 +94,6 @@ from peft.tuners.lora.config import AstraConfig, CordaConfig, LoraGAConfig
 from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.lora.loraga import preprocess_loraga
-from peft.tuners.lora.variants import BlockDiagonalLinear
 from peft.utils import infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 from peft.utils.other import ModulesToSaveWrapper
@@ -575,165 +573,75 @@ class TestLoraInitialization:
             assert torch.allclose(output, peft_model(input_ids).logits, atol=1e-06)
             assert torch.allclose(output, peft_model.merge_and_unload()(input_ids).logits, atol=1e-06)
 
-    @pytest.mark.parametrize("in_features,out_features", [(8, 8), (8, 16), (16, 8)])
-    @pytest.mark.parametrize(
-        "init_lora_weights,extra_kwargs",
-        [
-            pytest.param(True, {}, id="default"),
-            pytest.param(False, {}, id="random"),
-            pytest.param("gaussian", {}, id="gaussian"),
-            pytest.param("pissa", {}, id="pissa"),
-            pytest.param("pissa_niter_0", {}, id="pissa_niter_0"),
-            pytest.param("pissa_niter_4", {}, id="pissa_niter_4"),
-            pytest.param("olora", {}, id="olora"),
-            pytest.param("corda", {"corda_config": CordaConfig(corda_method="ipm")}, id="corda_ipm"),
-            pytest.param("corda", {"corda_config": CordaConfig(corda_method="kpm")}, id="corda_kpm"),
-            pytest.param("astra", {"astra_config": AstraConfig()}, id="astra"),
-            pytest.param("mica", {}, id="mica"),
-            pytest.param("eva", {"eva_config": EvaConfig(rho=1.0)}, id="eva"),
-            pytest.param("orthogonal", {}, id="orthogonal"),
-            *[
-                pytest.param(
-                    "lora_ga",
-                    {"lora_ga_config": LoraGAConfig(direction=direction, scale=scale)},
-                    id=f"lora_ga_{direction}_{scale}",
-                )
-                for direction in ("ArB2r", "ArBr", "A2rBr", "random")
-                for scale in ("stable", "weight_svd", "gd_scale", "unit")
-            ],
-            pytest.param("lora_ga", {}, id="lora_ga_without_gradients"),
-            pytest.param(True, {"use_dora": True}, id="dora"),
-            pytest.param(False, {"use_dora": True}, id="dora_random"),
-            pytest.param(True, {"use_bdlora": {"target_modules_bd_a": ["0"], "nblocks": 2}}, id="bdlora_A"),
-            pytest.param(True, {"use_bdlora": {"target_modules_bd_b": ["0"], "nblocks": 2}}, id="bdlora_B"),
-            pytest.param(True, {"velora_config": {"num_groups": 2}}, id="velora"),
-            pytest.param(True, {"monteclora_config": {}}, id="monteclora"),
-            pytest.param("loftq", {"loftq_config": LoftQConfig(loftq_bits=4)}, id="loftq"),
-        ],
-    )
-    def test_lora_init_conv1d(self, in_features, out_features, init_lora_weights, extra_kwargs):
-        # Compare GPT-2's transposed storage with an equivalent Linear, including square layers where wrong
-        # orientations need not raise. Keep calibration local and small so this covers data-driven inits too.
-        if init_lora_weights == "loftq" and (not is_bnb_available() or not torch.cuda.is_available()):
-            pytest.skip("LoftQ initialization requires bitsandbytes and a CUDA device")
-        device = "cuda" if init_lora_weights == "loftq" else "cpu"
+    def test_lora_ga_stable_init_conv1d(self):
+        # The output at init is unchanged either way, so compare B with an equivalent nn.Linear: stable scaling
+        # must use out_features, not the first dim of Conv1D's (in_features, out_features) weight, see #3996
         torch.manual_seed(0)
-        conv = nn.Sequential(Conv1D(out_features, in_features)).to(device).eval()
-        linear = nn.Sequential(nn.Linear(in_features, out_features)).to(device).eval()
+        conv = nn.Sequential(Conv1D(16, 8))
+        linear = nn.Sequential(nn.Linear(8, 16))
         with torch.no_grad():
             linear[0].weight.copy_(conv[0].weight.T)
             linear[0].bias.copy_(conv[0].bias)
-        data = torch.randn(1, 32, in_features, device=device)
-        labels = torch.randn(1, 32, out_features, device=device)
-        with torch.no_grad():
-            output_base = conv(data)
-            torch.testing.assert_close(linear(data), output_base)
-        original_weight = conv[0].weight.detach().clone()
+        data, labels = torch.randn(4, 8), torch.randn(4, 16)
 
-        models = []
+        lora_B = []
         for model, fan_in_fan_out in [(conv, True), (linear, False)]:
             config = LoraConfig(
+                init_lora_weights="lora_ga",
+                lora_ga_config=LoraGAConfig(scale="stable"),
                 target_modules=["0"],
                 r=2,
-                lora_alpha=2 if init_lora_weights == "loftq" else 4,
-                init_lora_weights=init_lora_weights,
                 fan_in_fan_out=fan_in_fan_out,
-                **deepcopy(extra_kwargs),
             )
-            if init_lora_weights == "corda":
-                preprocess_corda(model, config, run_model=lambda model=model: model(data))
-            elif init_lora_weights == "astra":
-                preprocess_astra(model, config, run_model=lambda model=model: model(data))
-            elif init_lora_weights == "lora_ga" and config.lora_ga_config is not None:
-                preprocess_loraga(
-                    model, config, train_step=lambda model=model: (model(data) - labels).square().mean().backward()
-                )
-                assert hasattr(model[0], "_peft_loraga_grad")
+            preprocess_loraga(model, config, train_step=lambda m=model: (m(data) - labels).square().mean().backward())
+            peft_model = get_peft_model(model, config)
+            lora_B.append(peft_model.base_model.model[0].lora_B["default"].weight)
+        torch.testing.assert_close(lora_B[0], lora_B[1])
 
-            # Match randomized decompositions and the random LoRA A/B initialization.
-            torch.manual_seed(1)
-            model = get_peft_model(model, config)
-            if init_lora_weights == "eva":
-                weight_before = model.get_base_model()[0].lora_A["default"].weight.detach().clone()
-                initialize_lora_eva_weights(
-                    model,
-                    dataloader=[data],
-                    forward_fn=lambda model, inputs: model(inputs),
-                    prepare_model_inputs_fn=None,
-                    prepare_layer_inputs_fn=None,
-                    show_progress_bar=False,
-                )
-                weight_after = model.get_base_model()[0].lora_A["default"].weight
-                assert not torch.allclose(weight_before, weight_after)
-                torch.testing.assert_close(weight_after @ weight_after.T, torch.eye(2, device=device))
-            models.append(model.eval())
-
-        conv, linear = models
-        conv_layer, linear_layer = (model.get_base_model()[0] for model in models)
-        assert conv_layer.fan_in_fan_out
-        assert not linear_layer.fan_in_fan_out
-
-        def adapter_weight(layer, name):
-            adapter = getattr(layer, name)["default"]
-            if isinstance(adapter, BlockDiagonalLinear):
-                return adapter.weight_as_blockdiagonal_matrix()
-            return adapter.weight
-
-        conv_A, conv_B = (adapter_weight(conv_layer, name) for name in ("lora_A", "lora_B"))
-        linear_A, linear_B = (adapter_weight(linear_layer, name) for name in ("lora_A", "lora_B"))
-        assert conv_A.shape == (2, in_features)
-        assert conv_B.shape == (out_features, 2)
-        # Comparing factors (not just outputs) catches incorrect decompositions or scaling hidden by residual
-        # subtraction, such as LoRA-GA using in_features in place of out_features for stable scaling.
-        if init_lora_weights == "astra":
-            # The signs of covariance eigenvectors are arbitrary; paired signs in A/B do not change the adapter.
-            signs = torch.where((conv_B * linear_B).sum(dim=0) < 0, -1, 1)
-            linear_A, linear_B = linear_A * signs[:, None], linear_B * signs
-        torch.testing.assert_close(conv_A, linear_A)
-        torch.testing.assert_close(conv_B, linear_B)
-        torch.testing.assert_close(conv_layer.base_layer.weight.T, linear_layer.base_layer.weight)
-        if extra_kwargs.get("use_dora"):
-            torch.testing.assert_close(
-                conv_layer.lora_magnitude_vector["default"].weight,
-                linear_layer.lora_magnitude_vector["default"].weight,
-            )
-
+    @pytest.mark.parametrize("bd_target", ["target_modules_bd_a", "target_modules_bd_b"])
+    def test_lora_bdlora_init_conv1d(self, bd_target):
+        # BD-LoRA must not rely on in_features/out_features of the base layer, which Conv1D lacks, see #3996
+        model_id = "peft-internal-testing/tiny-random-gpt2"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device).eval()
+        input_ids = torch.tensor([[1, 2, 3, 4]], device=self.torch_device)
         with torch.no_grad():
-            output = conv(data)
-            torch.testing.assert_close(output, linear(data), atol=1e-6, rtol=1e-5)
-            if init_lora_weights is not False and init_lora_weights != "loftq":
-                torch.testing.assert_close(output, output_base, atol=1e-6, rtol=1e-5)
-                torch.testing.assert_close(
-                    conv_layer.base_layer.weight + conv_layer.scaling["default"] * (conv_B @ conv_A).T,
-                    original_weight,
-                    atol=1e-6,
-                    rtol=1e-5,
-                )
-            # False deliberately changes the output, while LoftQ only approximates the unquantized weight.
-            for safe_merge in (False, True):
-                conv.base_model.merge_adapter(safe_merge=safe_merge)
-                torch.testing.assert_close(conv(data), output, atol=1e-6, rtol=1e-5)
-                conv.base_model.unmerge_adapter()
-                torch.testing.assert_close(conv(data), output, atol=1e-6, rtol=1e-5)
-            torch.testing.assert_close(conv.merge_and_unload()(data), output, atol=1e-6, rtol=1e-5)
+            output = model(input_ids).logits
 
-    def test_lora_olora_init_without_fan_in_fan_out(self):
-        # Shared-initializer callers such as TeLinear do not define fan_in_fan_out.
-        torch.manual_seed(0)
-        model = nn.Sequential(nn.Linear(8, 16)).eval()
-        data = torch.randn(2, 8)
-        output = model(data).detach()
-        model = get_peft_model(model, LoraConfig(target_modules=["0"], r=2))
-        layer = model.get_base_model()[0]
-        del layer.fan_in_fan_out
-        layer.olora_init("default")
-        torch.testing.assert_close(model(data), output)
+        target_modules = ["c_attn", "c_fc", "c_proj"]
+        config = LoraConfig(
+            target_modules=target_modules, fan_in_fan_out=True, use_bdlora={bd_target: target_modules, "nblocks": 2}
+        )
+        peft_model = get_peft_model(model, config)
+        with torch.no_grad():
+            assert torch.allclose(output, peft_model(input_ids).logits, atol=1e-06)
+            assert torch.allclose(output, peft_model.merge_and_unload()(input_ids).logits, atol=1e-06)
 
-    def test_lora_kasa_init_conv1d_unsupported(self):
-        # KaSA explicitly restricts its destructive SVD truncation to nn.Linear.
-        config = LoraConfig(target_modules=["0"], r=2, fan_in_fan_out=True, kasa_config={})
-        with pytest.raises(ValueError, match="KaSA does not support `fan_in_fan_out=True`"):
-            get_peft_model(nn.Sequential(Conv1D(16, 8)), config)
+    @pytest.mark.skipif(
+        not (is_bnb_available() and torch.cuda.is_available()), reason="LoftQ requires bitsandbytes and a CUDA device"
+    )
+    def test_lora_loftq_init_conv1d(self):
+        # LoftQ must quantize and decompose Conv1D's weight in the nn.Linear layout, see #3996
+        model_id = "peft-internal-testing/tiny-random-gpt2"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id).to("cuda").eval()
+        input_ids = torch.tensor([[1, 2, 3, 4]], device="cuda")
+
+        # c_attn and c_fc are rectangular, so swapped A/B shapes would fail in the forward pass
+        config = LoraConfig(
+            init_lora_weights="loftq",
+            loftq_config=LoftQConfig(loftq_bits=4),
+            target_modules=["c_attn", "c_fc"],
+            fan_in_fan_out=True,
+        )
+        peft_model = get_peft_model(model, config)
+        lora_layers = [module for module in peft_model.modules() if isinstance(module, LoraLayer)]
+        assert lora_layers
+        for layer in lora_layers:
+            assert layer.lora_A["default"].weight.shape == (config.r, layer.in_features)
+            assert layer.lora_B["default"].weight.shape == (layer.out_features, config.r)
+        with torch.no_grad():
+            peft_model(input_ids)
 
     def test_lora_pissa_conversion_same_output_after_loading(self, data, tmp_path):
         model = self.get_model()

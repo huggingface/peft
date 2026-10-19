@@ -50,6 +50,7 @@ if is_eetq_available():
 
             super().__init__()
             LoraLayer.__init__(self, base_layer)
+            self.fan_in_fan_out = False
 
             # self.base_layer and self.quant_linear_module are the same; we need the former for consistency and the latter
             # for backwards compatibility
