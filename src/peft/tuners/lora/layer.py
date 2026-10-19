@@ -400,8 +400,9 @@ class LoraLayer(BaseTunerLayer):
 
         scale_factor = self.scaling[adapter_name]
         r = self.r[adapter_name]
+        fan_in_fan_out = getattr(self, "fan_in_fan_out", False)
         # Factorize in the Linear layout even when the base layer stores (fan_in, fan_out), as in GPT-2.
-        weight_tensor = transpose(weight_tensor.to(torch.float32), self.fan_in_fan_out)
+        weight_tensor = transpose(weight_tensor.to(torch.float32), fan_in_fan_out)
         Q, R = torch.linalg.qr(weight_tensor.data)
 
         Qr, Rr = Q[:, :r], R[:r]
@@ -410,7 +411,7 @@ class LoraLayer(BaseTunerLayer):
         self.lora_B[adapter_name].weight.data = Qr.contiguous()
 
         weight_tensor.data -= scale_factor * self.lora_B[adapter_name].weight @ self.lora_A[adapter_name].weight
-        weight_tensor = transpose(weight_tensor, self.fan_in_fan_out)
+        weight_tensor = transpose(weight_tensor, fan_in_fan_out)
         if bnb_param_type == "4bit":
             weight_tensor = orig_weight.__class__(
                 weight_tensor,
@@ -655,7 +656,8 @@ class LoraLayer(BaseTunerLayer):
         del linear.eigens
 
     def loftq_init(self, adapter_name, config: LoraConfig):
-        weight = self.get_base_layer().weight
+        fan_in_fan_out = getattr(self, "fan_in_fan_out", False)
+        weight = transpose(self.get_base_layer().weight, fan_in_fan_out)
         kwargs = {
             "num_bits": config.loftq_config["loftq_bits"],
             "reduced_rank": self.r[adapter_name],
@@ -671,7 +673,7 @@ class LoraLayer(BaseTunerLayer):
             # initialize a the same way as the default for nn.linear and b to zero
             self.lora_embedding_A[adapter_name].weight.data = lora_A
             self.lora_embedding_B[adapter_name].weight.data = lora_B
-        self.get_base_layer().weight.data = qweight
+        self.get_base_layer().weight.data = transpose(qweight, fan_in_fan_out)
 
     @torch.no_grad()
     def orthogonal_init(self, adapter_name):
@@ -771,7 +773,7 @@ class LoraLayer(BaseTunerLayer):
             lora_B_weight = U[:, indices] @ torch.diag(S_B)  # Shape: (out_features, r)
 
         scaling_factor = self.scaling[adapter_name]
-        out_features = weight.shape[0]
+        out_features = self.out_features
 
         if scale == "stable":
             scale_factor = (out_features**0.25) / (stable_gamma**0.5)
