@@ -339,6 +339,13 @@ class Linear(nn.Module, AdamssLayer):
         self._active_adapter = adapter_name
         self.dtype = base_layer.weight.dtype
 
+    def _apply(self, fn, recurse=True):
+        result = super()._apply(fn, recurse=recurse)
+        weight = getattr(self.get_base_layer(), "weight", None)
+        if weight is not None:
+            self.dtype = weight.dtype
+        return result
+
     def _load_from_state_dict(
         self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
     ):
@@ -392,16 +399,20 @@ class Linear(nn.Module, AdamssLayer):
             # so just call base_layer directly (no adapter delta needed).
             result = self.base_layer(x, *args, **kwargs)
         else:
+            # model.to(dtype) updates the parameter, not this attribute. Read
+            # the weight that will actually run the matmul.
+            layer_dtype = self.get_base_layer().weight.dtype
+
             # Cast input to layer dtype
-            x = x.to(self.dtype)
+            x = x.to(layer_dtype)
 
             # Add bias column only when the base layer has a bias
             # (update_layer concatenates bias into newB only when bias is not None)
             if self.get_base_layer().bias is not None:
                 if x.dim() == 2:
-                    ones = torch.ones(x.shape[0], 1, device=x.device, dtype=self.dtype)
+                    ones = torch.ones(x.shape[0], 1, device=x.device, dtype=layer_dtype)
                 else:  # x.dim() == 3 or more
-                    ones = torch.ones(*x.shape[:-1], 1, device=x.device, dtype=self.dtype)
+                    ones = torch.ones(*x.shape[:-1], 1, device=x.device, dtype=layer_dtype)
                 newx = torch.cat((x, ones), dim=-1)
             else:
                 newx = x
@@ -415,7 +426,7 @@ class Linear(nn.Module, AdamssLayer):
                     continue
 
                 # Project input into low-rank space
-                projected = F.linear(newx, self.adamss_newB[active_adapter].to(self.dtype))  # (..., r)
+                projected = F.linear(newx, self.adamss_newB[active_adapter].to(layer_dtype))  # (..., r)
 
                 # Apply A and B transformations per subspace
                 # TODO: if all subspaces have equal output dimensions, this loop could
@@ -423,8 +434,8 @@ class Linear(nn.Module, AdamssLayer):
                 # Currently B_i shapes vary per subspace (clustering-dependent), so we loop.
                 subspace_chunks = []
                 for i in range(self.num_subspaces[active_adapter]):
-                    A_i = self.adamss_A[active_adapter][i].to(self.dtype)  # (ri, r)
-                    B_i = self.adamss_B[active_adapter][i].to(self.dtype)  # (seg_len_i, ri)
+                    A_i = self.adamss_A[active_adapter][i].to(layer_dtype)  # (ri, r)
+                    B_i = self.adamss_B[active_adapter][i].to(layer_dtype)  # (seg_len_i, ri)
                     subspace_out = F.linear(projected, A_i)  # (..., ri)
                     subspace_out = F.linear(subspace_out, B_i)  # (..., seg_len_i)
                     subspace_chunks.append(subspace_out)
