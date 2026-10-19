@@ -12,7 +12,7 @@
   "peft_type": "TINYLORA",
   "peft_version": "0.21.1.dev0@UNKNOWN",
   "projection_seed": 42,
-  "r": 16,
+  "r": 64,
   "revision": null,
   "save_projection": true,
   "target_modules": [
