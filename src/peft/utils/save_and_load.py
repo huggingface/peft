@@ -49,7 +49,7 @@ def _validate_lora_adapter_state_dict(
     state_dict: dict[str, torch.Tensor],
     adapter_name: str = "default",
 ) -> None:
-    """Refuse to save a LoRA adapter state dict whose ``lora_A`` / ``lora_B`` tensors look unsharded.
+    """Warn during saving a LoRA adapter state dict whose ``lora_A`` / ``lora_B`` tensors look unsharded.
 
     A correctly-saved LoRA adapter has ``lora_A`` of shape ``(rank, in_dim)`` and ``lora_B`` of shape ``(out_dim,
     rank)`` - both 2-D and non-empty. If any such tensor is 1-D or has a zero-sized dimension, it typically indicates a
