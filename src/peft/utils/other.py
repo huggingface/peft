@@ -853,13 +853,20 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
     ) -> torch.nn.Module:
-        """Unloading in case of `ModulesToSave` means to simply return the wrapped module.
+        """Return the module that replaces this wrapper when unloading the PEFT model.
 
-        However, if the wrapped module is itself a tuner, we'll call merge on it before.
+        When merging, this is the modules_to_save copy of the active adapter, so that the trained weights are kept. If
+        that copy is itself a tuner layer, it is merged first. Without merging, or if no adapter is active on this
+        wrapper, the original module is returned, i.e. the base model is restored.
         """
         if not self.active_adapters:
             # none of the modules_to_save adapters of this module are active, e.g. because the model's active adapter
             # does not use modules_to_save on this module; like in forward, the original module is used in this case
+            return self.original_module
+
+        if not merge:
+            # without merging, unloading should give back the base model, so the original module is returned instead
+            # of the trained modules_to_save copy
             return self.original_module
 
         new_module = self.modules_to_save[self.active_adapter]
@@ -867,9 +874,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         # TODO: not sure if this is still a sensible thing to do. We would basically have to
         # do the same checks as `_unload_and_optionally_merge` to support MHA, for example.
         if hasattr(new_module, "base_layer"):
-            # check if the module is itself a tuner layer
-            if merge:
-                new_module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+            new_module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
             new_module = new_module.get_base_layer()
 
         return new_module
