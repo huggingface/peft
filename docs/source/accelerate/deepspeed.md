@@ -399,7 +399,7 @@ That is all! The rest of the script handles the training loop, evaluation, and e
 Run the following command to launch the training script. Earlier, you saved the configuration file to `ds_zero3_cpu.yaml`, so you'll need to pass the path to the launcher with the `--config_file` argument like this:
 
 ```bash
-accelerate launch --config_file ds_zero3_cpu.yaml examples/peft_lora_seq2seq_accelerate_ds_zero3_offload.py
+accelerate launch --config_file ds_zero3_cpu.yaml examples/conditional_generation/peft_lora_seq2seq_accelerate_ds_zero3_offload.py
 ```
 
 You'll see some output logs that track memory usage during training, and once it's completed, the script returns the accuracy and compares the predictions to the labels:

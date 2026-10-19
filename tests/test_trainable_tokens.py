@@ -80,6 +80,16 @@ class ModelEmbedInNoGet(torch.nn.Module):
         return self.lin0(self.embed_in(x))
 
 
+class ModelWithOutputHeadBias(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.query = torch.nn.Linear(4, 4)
+        self.lm_head = torch.nn.Linear(4, 7)
+
+    def forward(self, x):
+        return self.lm_head(self.query(x))
+
+
 class TestTrainableTokens:
     @pytest.fixture
     def model_id(self):
@@ -122,6 +132,32 @@ class TestTrainableTokens:
         trainable_tokens_layer.trainable_tokens_delta[adapter_name].data = torch.rand_like(
             trainable_tokens_layer.trainable_tokens_delta[adapter_name].data
         )
+
+    @pytest.mark.parametrize("standalone", [True, False])
+    def test_linear_output_preserves_bias(self, standalone):
+        base_model = ModelWithOutputHeadBias().eval()
+        with torch.no_grad():
+            base_model.lm_head.bias.copy_(torch.arange(7))
+
+        inputs = torch.randn(3, 4)
+        expected = base_model(inputs)
+
+        if standalone:
+            config = TrainableTokensConfig(target_modules=["lm_head"], token_indices=[1, 4])
+        else:
+            config = LoraConfig(
+                target_modules=["query"],
+                trainable_token_indices={"lm_head": [1, 4]},
+            )
+
+        peft_model = get_peft_model(copy.deepcopy(base_model), config).eval()
+        torch.testing.assert_close(peft_model(inputs), expected)
+
+        with peft_model.disable_adapter():
+            torch.testing.assert_close(peft_model(inputs), expected)
+
+        merged_model = peft_model.merge_and_unload()
+        torch.testing.assert_close(merged_model(inputs), expected)
 
     def test_stand_alone_usage(self, model, tokenizer, tmp_path):
         original_model = copy.deepcopy(model)
@@ -450,6 +486,58 @@ class TestTrainableTokens:
     @pytest.mark.parametrize(
         "peft_config_factory",
         [
+            lambda token_indices: LoraConfig(
+                target_modules="all-linear",
+                trainable_token_indices={"embed_tokens": token_indices},
+            ),
+        ],
+    )
+    def test_multiple_adapters_overlapping_token_indices_merging_sequentially(self, model, peft_config_factory):
+        # merging one adapter at a time must reject the same overlap that a single combined call rejects, since the
+        # second merge would otherwise overwrite the first adapter's values for the shared indices with no way to
+        # restore them on unmerge
+        token_indices_1 = [0, 1, 2]
+        token_indices_2 = [2, 3, 4]
+
+        peft_config_1 = peft_config_factory(token_indices_1)
+        peft_config_2 = peft_config_factory(token_indices_2)
+
+        model = get_peft_model(model, peft_config_1, adapter_name="adapter_1")
+        model.add_adapter("adapter_2", peft_config_2)
+
+        model.merge_adapter(adapter_names=["adapter_1"])
+        with pytest.raises(ValueError) as e:
+            model.merge_adapter(adapter_names=["adapter_2"])
+        assert "adapter_2" in str(e.value)
+        assert "are already defined and would result in undefined merging behavior" in str(e.value)
+
+    @pytest.mark.parametrize(
+        "peft_config_factory",
+        [
+            lambda token_indices: LoraConfig(
+                target_modules="all-linear",
+                trainable_token_indices={"embed_tokens": token_indices},
+            ),
+        ],
+    )
+    def test_multiple_adapters_disjunct_token_indices_merging_sequentially(self, model, peft_config_factory):
+        # control for the test above: disjunct indices must still merge one at a time
+        peft_config_1 = peft_config_factory([0, 1, 2])
+        peft_config_2 = peft_config_factory([3, 4, 5])
+
+        model = get_peft_model(model, peft_config_1, adapter_name="adapter_1")
+        model.add_adapter("adapter_2", peft_config_2)
+
+        model.merge_adapter(adapter_names=["adapter_1"])
+        model.merge_adapter(adapter_names=["adapter_2"])
+
+        for module in model.modules():
+            if isinstance(module, TrainableTokensLayer):
+                assert module.merged_adapters == ["adapter_1", "adapter_2"]
+
+    @pytest.mark.parametrize(
+        "peft_config_factory",
+        [
             lambda targets, token_indices: LoraConfig(
                 target_modules=targets,
                 trainable_token_indices={"embed_tokens": token_indices},
@@ -512,6 +600,40 @@ class TestTrainableTokens:
         assert not torch.allclose(adapter_2_output[:, idcs_to_modify], original_output_2[:, idcs_to_modify])
         assert torch.allclose(adapter_2_output[:, idcs_to_keep], original_output_2[:, idcs_to_keep])
 
+    def test_multiple_adapters_only_one_with_trainable_tokens_save_load(self, tmp_path):
+        # Only the first adapter uses trainable tokens, the second one is a plain LoRA adapter. Saving and loading
+        # must not expect the trainable tokens wrapper to hold the second adapter, see #3919.
+        torch.manual_seed(0)
+        base_model = ModelEmb()
+        x = torch.arange(10).view(2, 5)
+
+        config_tt = LoraConfig(
+            target_modules=["lin0"], trainable_token_indices={"emb": [1, 2]}, init_lora_weights=False
+        )
+        config_plain = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+        model = get_peft_model(copy.deepcopy(base_model), config_tt)
+        model.add_adapter("other", config_plain)
+        self.simulate_training(model.base_model.model.emb.token_adapter)
+        model.eval()
+
+        output_default = model(x)
+        model.set_adapter("other")
+        output_other = model(x)
+        assert not torch.allclose(output_default, output_other)
+
+        model.save_pretrained(tmp_path)
+        assert (tmp_path / "adapter_model.safetensors").exists()
+        assert (tmp_path / "other" / "adapter_model.safetensors").exists()
+
+        loaded = PeftModel.from_pretrained(copy.deepcopy(base_model), tmp_path)
+        load_result = loaded.load_adapter(tmp_path / "other", adapter_name="other")
+        assert load_result.missing_keys == []
+        loaded.eval()
+
+        assert torch.allclose(loaded(x), output_default)
+        loaded.set_adapter("other")
+        assert torch.allclose(loaded(x), output_other)
+
     def test_stand_alone_raises_target_layer_not_found(self, model):
         config = TrainableTokensConfig(target_modules=["doesnt_exist"], token_indices=[0, 1, 3])
         with pytest.raises(ValueError) as e:
@@ -551,6 +673,54 @@ class TestTrainableTokens:
         assert torch.allclose(emb_text_orig[:, [2]], emb_text_peft[:, [2]])
         assert not torch.allclose(emb_image_orig[:, [0, 1]], emb_image_peft[:, [0, 1]])
         assert torch.allclose(emb_image_orig[:, [2]], emb_image_peft[:, [2]])
+
+    @pytest.fixture(params=[["default"], ["other"], ["default", "other"]])
+    def disjoint_adapters(self, model_multi_embedding, request):
+        active_adapters = request.param
+        original_model = copy.deepcopy(model_multi_embedding)
+        config = TrainableTokensConfig(target_modules=["emb_text"], token_indices=[0, 1])
+        model = get_peft_model(model_multi_embedding, config)
+        model.add_adapter("other", TrainableTokensConfig(target_modules=["emb_image"], token_indices=[0, 1]))
+        self.simulate_training(model.model.emb_text)
+        self.simulate_training(model.model.emb_image, "other")
+        model.base_model.set_adapter(active_adapters)
+
+        inputs = {"x_text": torch.tensor([[0, 1, 2]]), "x_image": torch.tensor([[0, 1, 2]])}
+        return model, original_model, inputs
+
+    def test_disjoint_adapters_forward(self, disjoint_adapters):
+        model, original_model, inputs = disjoint_adapters
+        _, (original_text, original_image) = original_model(**inputs)
+        _, (adapted_text, adapted_image) = model(**inputs)
+        assert torch.allclose(adapted_text[:, :2], original_text[:, :2]) == ("default" not in model.active_adapters)
+        assert torch.allclose(adapted_image[:, :2], original_image[:, :2]) == ("other" not in model.active_adapters)
+        torch.testing.assert_close(adapted_text[:, 2:], original_text[:, 2:])
+        torch.testing.assert_close(adapted_image[:, 2:], original_image[:, 2:])
+
+    def test_disjoint_adapters_disable(self, disjoint_adapters):
+        model, original_model, inputs = disjoint_adapters
+        with model.disable_adapter():
+            torch.testing.assert_close(model(**inputs), original_model(**inputs))
+
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    def test_disjoint_adapters_merge_unmerge(self, disjoint_adapters, safe_merge):
+        model, original_model, inputs = disjoint_adapters
+        expected = model(**inputs)
+        model.merge_adapter(safe_merge=safe_merge, adapter_names=model.active_adapters)
+        assert model.model.emb_text.merged_adapters == (["default"] if "default" in model.active_adapters else [])
+        assert model.model.emb_image.merged_adapters == (["other"] if "other" in model.active_adapters else [])
+        torch.testing.assert_close(model(**inputs), expected)
+        model.unmerge_adapter()
+        torch.testing.assert_close(model(**inputs), expected)
+        torch.testing.assert_close(model.model.emb_text.get_base_layer().weight, original_model.emb_text.weight)
+        torch.testing.assert_close(model.model.emb_image.get_base_layer().weight, original_model.emb_image.weight)
+
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    def test_disjoint_adapters_merge_and_unload(self, disjoint_adapters, safe_merge):
+        model, _, inputs = disjoint_adapters
+        expected = model(**inputs)
+        merged_model = model.merge_and_unload(safe_merge=safe_merge, adapter_names=model.active_adapters)
+        torch.testing.assert_close(merged_model(**inputs), expected)
 
     @pytest.mark.parametrize(
         "peft_config",
@@ -1320,6 +1490,7 @@ class TestTrainableTokens:
         assert hasattr(peft_model.m1.encoder.embed_tokens, "token_adapter")
         assert peft_model.m1.encoder.embed_tokens.token_adapter.token_indices["default"] == [1, 2, 3]
 
+    @pytest.mark.parametrize("model_weight_tied", ["list", "mapping"], indirect=["model_weight_tied"])
     def test_targeting_both_embedding_and_tied_layer_explicitly(self, model_weight_tied):
         """Test that explicitly targeting both embedding and tied layers works correctly.
 
@@ -1346,22 +1517,30 @@ class TestTrainableTokens:
         assert embed_layer.token_indices["default"] == [1, 2, 3]
         assert lm_head_layer.token_indices["default"] == [1, 2, 3]
 
-    def test_multiple_trainable_token_adapters_same_model(self, model_weight_tied):
+        # Regression for #3814: tied metadata must not cause nested token wrappers.
+        assert isinstance(lm_head_layer.base_layer, torch.nn.Linear)
+        peft_model(input_ids=torch.tensor([[1, 2, 3]], device=peft_model.device))
+
+    @pytest.mark.parametrize("model_weight_tied", ["list", "mapping"], indirect=["model_weight_tied"])
+    @pytest.mark.parametrize(
+        "target_modules", [["model.decoder.embed_tokens"], ["model.decoder.embed_tokens", "lm_head"]]
+    )
+    def test_multiple_trainable_token_adapters_same_model(self, model_weight_tied, target_modules):
         """Test adding multiple trainable token adapters to the same model with tied layers.
 
         This verifies that adding multiple adapters to the same tied layers (embed_tokens and lm_head) works correctly,
         with each adapter maintaining its own token indices while preserving weight tying.
         """
-        # Add first adapter with both embed_tokens and lm_head targeted
+        # Add first adapter with an implicitly or explicitly tied lm_head.
         peft_config1 = TrainableTokensConfig(
-            target_modules=["model.decoder.embed_tokens", "lm_head"],
+            target_modules=target_modules,
             token_indices=[1, 2, 3],
         )
         peft_model = get_peft_model(model_weight_tied, peft_config1)
 
         # Add second adapter to the same layers
         peft_config2 = TrainableTokensConfig(
-            target_modules=["model.decoder.embed_tokens", "lm_head"],
+            target_modules=target_modules,
             token_indices=[4, 5, 6],
         )
         peft_model.add_adapter("adapter2", peft_config2)
@@ -1387,3 +1566,9 @@ class TestTrainableTokens:
 
         # Second adapter should also maintain tying
         assert embed_layer.trainable_tokens_delta["adapter2"] is lm_head_layer.trainable_tokens_delta["adapter2"]
+
+        assert isinstance(lm_head_layer.base_layer, torch.nn.Linear)
+        # Nested token wrappers can survive injection and parameter checks but fail during the forward pass.
+        for adapter_name in ("default", "adapter2"):
+            peft_model.set_adapter(adapter_name)
+            peft_model(input_ids=torch.tensor([[1, 2, 3, 4, 5, 6]], device=peft_model.device))

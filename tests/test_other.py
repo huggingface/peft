@@ -24,12 +24,14 @@ from accelerate import infer_auto_device_map
 from torch import nn
 from transformers import (
     AutoModelForCausalLM,
+    AutoModelForQuestionAnswering,
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
+    AutoModelForTokenClassification,
     LlavaForConditionalGeneration,
 )
 
-from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model
+from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model, get_peft_model_state_dict
 from peft.import_utils import is_transformers_ge_v5_1_0, is_transformers_ge_v5_6_0
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils.other import (
@@ -335,6 +337,61 @@ class TestModulesToSaveKwargsOnlyForward:
         assert out.shape == (2, 8)
 
 
+class TestModulesToSaveUnloadNoActiveAdapter:
+    """Regression test for unloading when a ModulesToSaveWrapper has no active adapter.
+
+    When the model's active adapter does not use modules_to_save on a given module (e.g. adapter "other" below), the
+    wrapper's list of active adapters is empty. Unloading used to crash with `TypeError: unhashable type: 'list'`
+    because the empty list was used to index the ModuleDict of saved modules. Instead, unloading should restore the
+    original module, which is also what forward uses when no adapter is active on the wrapper.
+    """
+
+    @pytest.fixture
+    def mlp(self):
+        class MLP(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(8, 8)
+                self.lin1 = nn.Linear(8, 8)
+
+            def forward(self, x):
+                return self.lin1(self.lin0(x))
+
+        torch.manual_seed(0)
+        return MLP()
+
+    @pytest.mark.parametrize("unload_method", ["unload", "merge_and_unload"])
+    def test_unload_with_inactive_modules_to_save(self, mlp, unload_method):
+        x = torch.randn(4, 8)
+        out_base = mlp(x)
+        lin1_weight_before = mlp.lin1.weight.data.clone()
+
+        # adapter "default" uses modules_to_save for lin1 but adapter "other", which is active, does not
+        config_default = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        model = get_peft_model(mlp, config_default)
+        config_other = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+        model.add_adapter("other", config_other)
+        model.set_adapter("other")
+
+        # modify the modules_to_save copy of adapter "default" to ensure that unloading does not use it
+        model.base_model.model.lin1.modules_to_save["default"].weight.data.fill_(42.0)
+        out_peft = model(x)
+
+        unloaded = getattr(model, unload_method)()
+
+        assert isinstance(unloaded.lin1, nn.Linear)
+        # the original module is restored, not the modules_to_save copy of the inactive adapter "default"
+        assert torch.equal(unloaded.lin1.weight.data, lin1_weight_before)
+
+        out_unloaded = unloaded(x)
+        if unload_method == "merge_and_unload":
+            # merging must reproduce the output of the model with adapter "other" active
+            assert torch.allclose(out_unloaded, out_peft, atol=1e-6, rtol=1e-6)
+        else:
+            # unloading without merging must restore the base model output
+            assert torch.allclose(out_unloaded, out_base, atol=1e-6, rtol=1e-6)
+
+
 class TestModulesToSaveNameSubstringBug:
     """Test a bug that could occur with multiple modules to save where one adapter's name is a substring of another
     adapter's name.
@@ -430,6 +487,131 @@ class TestModulesToSaveNameSubstringBug:
             param_merged = sd_merged[key]
             param_unmerged = sd_unmerged[key]
             assert torch.allclose(param_merged, param_unmerged)
+
+
+class TestAuxiliaryTrainingWrapperParamsOnlyStateDict:
+    """Saving with a state_dict that only contains parameters, e.g. one built from gathered FSDP2 DTensors via
+    named_parameters().
+
+    ModulesToSaveWrapper used to raise a bare KeyError when the modules_to_save module has a persistent buffer, since
+    the buffer is part of the module's state_dict but not of the passed dict. The buffer is not sharded, so it is taken
+    from the module itself. A missing parameter cannot be recovered that way and should raise an informative error.
+
+    This bug was reported in #3805.
+    """
+
+    def get_model(self):
+        class Router(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(4, 8))
+                # persistent buffer, like the score correction bias of an MoE router
+                self.register_buffer("e_score_correction_bias", torch.zeros(4))
+
+            def forward(self, x):
+                return x @ self.weight.T + self.e_score_correction_bias
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = nn.Embedding(10, 8)
+                self.proj = nn.Linear(8, 8)
+                self.router = Router()
+
+            def forward(self, x):
+                return self.router(self.proj(self.emb(x)))
+
+        torch.manual_seed(0)
+        return MyModule()
+
+    def get_peft_model(self):
+        config = LoraConfig(
+            target_modules=["proj"],
+            modules_to_save=["router"],
+            trainable_token_indices={"emb": [0]},
+            init_lora_weights=False,
+        )
+        model = get_peft_model(self.get_model(), config)
+        # use a non-default buffer value to check that the actual value is saved and loaded
+        model.base_model.model.router.modules_to_save["default"].e_score_correction_bias.fill_(3.0)
+        return model
+
+    def test_params_only_state_dict_includes_buffer(self):
+        model = self.get_peft_model()
+        sd_full = get_peft_model_state_dict(model)
+        sd_params_only = get_peft_model_state_dict(model, state_dict=dict(model.named_parameters()))
+
+        buffer_key = "base_model.model.router.e_score_correction_bias"
+        assert buffer_key in sd_params_only
+        assert sd_full.keys() == sd_params_only.keys()
+        for key in sd_full:
+            assert torch.equal(sd_full[key], sd_params_only[key])
+
+    def test_params_only_save_and_load_restores_buffer(self, tmp_path):
+        model = self.get_peft_model()
+        x = torch.arange(4).unsqueeze(0)
+        output_before = model(x)
+        model.save_pretrained(tmp_path, state_dict=dict(model.named_parameters()))
+
+        loaded = PeftModel.from_pretrained(self.get_model(), tmp_path)
+        buffer = loaded.base_model.model.router.modules_to_save["default"].e_score_correction_bias
+        assert torch.equal(buffer, torch.full((4,), 3.0))
+        assert torch.allclose(loaded(x), output_before)
+
+    def test_modules_to_save_missing_parameter_raises(self):
+        model = self.get_peft_model()
+        state_dict = dict(model.named_parameters())
+        del state_dict["base_model.model.router.modules_to_save.default.weight"]
+
+        msg = "Expected key 'modules_to_save.default.weight' of modules_to_save adapter 'default'"
+        with pytest.raises(KeyError, match=msg):
+            get_peft_model_state_dict(model, state_dict=state_dict)
+
+    def test_trainable_tokens_missing_parameter_raises(self):
+        model = self.get_peft_model()
+        state_dict = dict(model.named_parameters())
+        del state_dict["base_model.model.emb.token_adapter.trainable_tokens_delta.default"]
+
+        msg = "Expected key 'token_adapter.trainable_tokens_delta.default' of trainable tokens adapter 'default'"
+        with pytest.raises(KeyError, match=msg):
+            get_peft_model_state_dict(model, state_dict=state_dict)
+
+    def test_params_only_state_dict_includes_buffer_registered_under_two_names(self):
+        # See PR #3816 review: a buffer that is the same tensor registered under two submodule paths (aliased)
+        # must be recognized under both, module.named_buffers() de-duplicates by tensor identity by default and
+        # would silently drop the second path, wrongly leaving it out of buffer_names.
+        class AliasedRouter(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(4, 8))
+                self.head_a = nn.Module()
+                self.head_b = nn.Module()
+                bias = torch.zeros(4)
+                self.head_a.register_buffer("bias", bias)
+                self.head_b.register_buffer("bias", bias)  # same tensor, second registration path
+
+            def forward(self, x):
+                return x @ self.weight.T + self.head_a.bias
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj = nn.Linear(8, 8)
+                self.router = AliasedRouter()
+
+            def forward(self, x):
+                return self.router(self.proj(x))
+
+        torch.manual_seed(0)
+        model = get_peft_model(
+            MyModule(), LoraConfig(target_modules=["proj"], modules_to_save=["router"], init_lora_weights=False)
+        )
+        sd_full = get_peft_model_state_dict(model)
+        sd_params_only = get_peft_model_state_dict(model, state_dict=dict(model.named_parameters()))
+
+        assert "base_model.model.router.head_a.bias" in sd_params_only
+        assert "base_model.model.router.head_b.bias" in sd_params_only
+        assert sd_full.keys() == sd_params_only.keys()
 
 
 class TestTargetingAuxiliaryTrainingWrapper:
@@ -771,6 +953,45 @@ class TestPrepareModelForKbitTraining:
         ):
             prepare_model_for_kbit_training(fp16_model, use_gradient_checkpointing=False, auto_clear_cache=False)
         mock_empty_cache.assert_not_called()
+
+
+# The task-type subclasses that add their head to modules_to_save. One tiny BERT checkpoint covers all three, since the
+# auto classes build the matching head from the same config.
+TASK_TYPE_CASES = [
+    ("SEQ_CLS", AutoModelForSequenceClassification, ["classifier", "score", "pre_classifier"]),
+    ("TOKEN_CLS", AutoModelForTokenClassification, ["classifier", "score", "pre_classifier"]),
+    ("QUESTION_ANS", AutoModelForQuestionAnswering, ["qa_outputs"]),
+]
+TASK_TYPE_MODEL_ID = "peft-internal-testing/tiny-random-BertForSequenceClassification"
+
+
+class TestTaskTypeModulesToSave:
+    """Reusing one config must not mutate the caller's list or accumulate the head names in modules_to_save."""
+
+    def get_model(self, auto_cls):
+        with hub_online_once(TASK_TYPE_MODEL_ID):
+            return auto_cls.from_pretrained(TASK_TYPE_MODEL_ID)
+
+    @pytest.mark.parametrize("task_type, auto_cls, head_names", TASK_TYPE_CASES)
+    def test_reusing_config_across_models(self, task_type, auto_cls, head_names):
+        # e.g. the same config in every fold of a cross-validation loop
+        user_list = ["my_head"]
+        config = LoraConfig(task_type=task_type, target_modules=["query", "value"], modules_to_save=user_list)
+        models = [get_peft_model(self.get_model(auto_cls), config) for _ in range(3)]
+
+        assert user_list == ["my_head"]
+        for model in models:
+            assert model.peft_config["default"].modules_to_save == ["my_head"] + head_names
+
+    @pytest.mark.parametrize("task_type, auto_cls, head_names", TASK_TYPE_CASES)
+    def test_reusing_config_in_add_adapter(self, task_type, auto_cls, head_names):
+        user_list = ["my_head"]
+        config = LoraConfig(task_type=task_type, target_modules=["query", "value"], modules_to_save=user_list)
+        model = get_peft_model(self.get_model(auto_cls), config)
+        model.add_adapter("other", config)
+
+        assert user_list == ["my_head"]
+        assert model.peft_config["other"].modules_to_save == ["my_head"] + head_names
 
 
 class TestDetachedCopy:

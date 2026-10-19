@@ -24,6 +24,7 @@ from transformers import AutoModelForCausalLM
 from peft import (
     C3AConfig,
     IA3Config,
+    KasaConfig,
     LoKrConfig,
     LoraConfig,
     MissConfig,
@@ -492,6 +493,72 @@ class TestLoraConversion:
         # here we expect an actual loss of 0, since only the modules_to_save affect the result, and those are identical
         assert mse_converted == 0.0
 
+    @pytest.mark.parametrize("auxiliary_type", ["modules_to_save", "trainable_tokens"])
+    def test_convert_model_with_auxiliary_training_wrappers(self, auxiliary_type):
+        class ModelWithAuxiliaryModules(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = nn.Embedding(8, 4)
+                self.linear = nn.Linear(4, 4)
+                self.head = nn.BatchNorm1d(4)
+
+            def forward(self, input_ids):
+                hidden_states = self.embedding(input_ids).mean(dim=1)
+                return self.head(self.linear(hidden_states))
+
+        torch.manual_seed(0)
+        base_model = ModelWithAuxiliaryModules().eval()
+        if auxiliary_type == "modules_to_save":
+            # LoKr exercises a full saved module, including its persistent buffers.
+            peft_config = LoKrConfig(target_modules=["linear"], modules_to_save=["head"])
+        else:
+            # LoRA exercises a second auxiliary wrapper around selected embedding rows.
+            peft_config = LoraConfig(
+                target_modules=["linear"],
+                trainable_token_indices={"embedding": [1, 3]},
+                init_lora_weights=False,
+            )
+        source_model = get_peft_model(copy.deepcopy(base_model), peft_config).eval()
+
+        if auxiliary_type == "modules_to_save":
+            # modify the saved BatchNorm buffers so we can verify they are preserved
+            source_head = source_model.base_model.model.head.modules_to_save.default
+            source_head.running_mean.copy_(torch.tensor([1.0, -2.0, 3.0, -4.0]))
+            source_head.running_var.copy_(torch.tensor([0.25, 0.5, 2.0, 4.0]))
+            source_head.num_batches_tracked.fill_(17)
+            expected_keys = {
+                "base_model.model.head.running_mean",
+                "base_model.model.head.running_var",
+                "base_model.model.head.num_batches_tracked",
+            }
+        else:
+            # modify the trainable token delta so we can verify it is preserved
+            source_tokens = source_model.base_model.model.embedding.token_adapter
+            with torch.no_grad():
+                source_tokens.trainable_tokens_delta["default"].add_(0.5)
+            expected_keys = {"base_model.model.embedding.token_adapter.trainable_tokens_delta"}
+
+        lora_config, state_dict = convert_to_lora(source_model, rank=4)
+
+        # The converted checkpoint must contain the state selected by either wrapper type.
+        assert expected_keys <= state_dict.keys()
+        if auxiliary_type == "trainable_tokens":
+            assert lora_config.trainable_token_indices == peft_config.trainable_token_indices
+
+        # Loading into a fresh LoRA model should recreate and preserve the auxiliary wrapper state.
+        target_model = get_peft_model(copy.deepcopy(base_model), lora_config).eval()
+        set_peft_model_state_dict(target_model, state_dict)
+
+        if auxiliary_type == "modules_to_save":
+            target_head = target_model.base_model.model.head.modules_to_save.default
+            assert torch.equal(target_head.running_mean, source_head.running_mean)
+            assert torch.equal(target_head.running_var, source_head.running_var)
+            assert torch.equal(target_head.num_batches_tracked, source_head.num_batches_tracked)
+
+        # inference outputs must match after conversion and reload
+        inputs = torch.tensor([[0, 1, 2], [3, 4, 5]])
+        assert torch.allclose(target_model(inputs), source_model(inputs))
+
     @pytest.mark.parametrize("bias", ["c3a_only", "all"])
     def test_convert_model_with_trainable_bias_raises(self, bias):
         # If the original adapter includes trainable bias terms, we raise. LoKr doesn't support this, so taking C3A
@@ -691,3 +758,26 @@ class TestMissLoraConversion:
             output_after = loaded_model(inputs).logits
 
         assert torch.allclose(output_before, output_after, atol=atol, rtol=rtol)
+
+
+class TestKasaLoraConversion:
+    """KaSA cannot be converted to vanilla LoRA: the update depends on lora_diag and on the destructive truncation of
+    the base weight, neither of which is representable as scaling * B @ A on the unmodified base."""
+
+    class MLP(nn.Module):
+        def __init__(self, bias=False):
+            super().__init__()
+            self.lin0 = nn.Linear(16, 12, bias=bias)
+            self.lin1 = nn.Linear(12, 10, bias=bias)
+
+        def forward(self, x):
+            return self.lin1(torch.relu(self.lin0(x)))
+
+    def test_kasa_does_not_support_lora_conversion(self):
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=4, kasa_config=KasaConfig())
+        model = get_peft_model(self.MLP(), config)
+        assert model.supports_lora_conversion() is False
+
+        # Vanilla LoRA is unaffected by the variant-aware check.
+        vanilla = get_peft_model(self.MLP(), LoraConfig(target_modules=["lin0"], r=4))
+        assert vanilla.supports_lora_conversion() is True

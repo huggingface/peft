@@ -41,19 +41,24 @@ SHELL ["/bin/bash", "-c"]
 
 RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum
 
+# TODO check if still needed
 # Note: we are hard-coding CUDA_ARCH_LIST here since `gptqmodel` requires either nvidia-smi
 # or CUDA_ARCH_LIST for compute capability information. Since the docker build is unlikely
 # to have compute hardware available we use the information from the CI runner (which hosts
 # a NVIDIA L4). So we fix the compute capability to 8.9. In the future we might extend this
 # to a list of compute capabilities (separated by ;).
 # TODO pcre, which is used by gptqmodel, is resulting in a core dump, remove once it's resolved
+# When uncommenting this to include gptqmodel, ensure that it doesn't downgrade tokenizers, as this would break Transformers
 # RUN CUDA_ARCH_LIST=8.9 conda run -n peft pip install "gptqmodel>=7.0.0"
 
-RUN \
+# TODO: EETQ uses `-std=c++17` but starting with PyTorch 2.14, the min C++ version is 20. Therefore, don't install
+# EETQ and let its tests skip. In the future, either EETQ gets updated and we can start testing it again, or
+# remove EETQ support from PEFT completely if it's abandoned.
+# RUN \
     # Add eetq for quantization testing; needs to run without build isolation since the setup
     # script directly imports torch from the environment which would fail with isolation.
     # Ninja should speed up build time.
-    conda run -n peft pip install ninja && conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
+    # conda run -n peft pip install ninja && conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
 
 # TODO: Importing TE results in: undefined symbol: cublasLtGroupedMatrixLayoutInit_internal, version libcublasLt.so.13
 # Reinstate TE when the issue is resolved (probably this one: https://github.com/NVIDIA/TransformerEngine/issues/2504)
@@ -76,7 +81,7 @@ RUN conda run -n peft pip install -U --no-cache-dir \
         # Add HQQ for quantization testing
         hqq \
         deepspeed \
-        "kernels<0.16"
+        "kernels>=0.16"
 
 RUN conda run -n peft pip freeze | grep transformers
 

@@ -43,16 +43,15 @@ class BeftModel(BaseTuner):
 
         ```py
         >>> from transformers import AutoModelForSeq2SeqLM
-        >>> from peft import BeftModel, BeftConfig
+        >>> from peft import BeftConfig, get_peft_model
 
         >>> config = BeftConfig(
-        ...     peft_type="Beft",
         ...     task_type="SEQ_2_SEQ_LM",
         ...     target_modules=["v"],
         ... )
 
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        >>> beft_model = BeftModel(model, config, adapter_name="default")
+        >>> beft_model = get_peft_model(model, config)
         ```
 
     **Attributes**:

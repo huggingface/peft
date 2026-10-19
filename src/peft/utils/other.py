@@ -36,7 +36,12 @@ from packaging import version
 from safetensors.torch import storage_ptr, storage_size
 from transformers import PreTrainedModel
 
-from ..import_utils import is_gptqmodel_available, is_torch_tpu_available, is_transformers_ge_v5_1_0
+from ..import_utils import (
+    is_gptqmodel_available,
+    is_torch_tpu_available,
+    is_transformers_ge_v5,
+    is_transformers_ge_v5_1_0,
+)
 from .constants import (
     CONFIG_NAME,
     EMBEDDING_LAYER_NAMES,
@@ -71,6 +76,7 @@ from .constants import (
     TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_SUPERTUNING_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_TINYLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_UNILORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
@@ -122,6 +128,7 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_SUPERTUNING_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_TINYLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_UNILORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
@@ -350,7 +357,11 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         if isinstance(self.original_module, BaseTunerLayer):
             # e.g. applying a training wrapper to a lora layer makes no sense
             cls_name = self.original_module.__class__
-            raise TypeError(f"{self._error_message_name()} cannot be applied to modules of type {cls_name}")
+            raise TypeError(
+                f"{self._error_message_name()} cannot be applied to modules of type {cls_name}, as this module is "
+                "already targeted by the PEFT method. Please remove it from either the target modules or from "
+                f"{self._error_message_name()}."
+            )
 
     @property
     def disable_adapters(self) -> bool:
@@ -740,6 +751,14 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         layers.
         """
         if adapter_name not in self.modules_to_save:
+            # The deleted adapter never managed this module, but the fallback adapter might: sync it to
+            # active, mirroring the path below. Otherwise the fallback's copy stays frozen while active.
+            if new_active_adapters:
+                new_active_adapter = new_active_adapters[0]
+                if new_active_adapter in self.modules_to_save and (
+                    not self.active_adapters or new_active_adapter != self.active_adapters[0]
+                ):
+                    self.set_adapter(new_active_adapter)
             return
 
         # set new active adapter, if necessary
@@ -785,10 +804,29 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             # ModulesToSaveWrapper will be queried but not every wrapper is obliged to serve the same adapters.
             return {}
 
-        return {
-            k: state_dict[f"modules_to_save.{adapter_name}.{k}"]
-            for k in self.modules_to_save[adapter_name].state_dict()
-        }
+        module = self.modules_to_save[adapter_name]
+        # remove_duplicate=False: a buffer registered under two names (aliased to the same tensor) should still
+        # be recognized under both, not just whichever one named_buffers() happens to report by default.
+        buffer_names = {name for name, _ in module.named_buffers(remove_duplicate=False)}
+        adapter_state_dict = {}
+        for k in module.state_dict():
+            key = f"modules_to_save.{adapter_name}.{k}"
+            if key in state_dict:
+                adapter_state_dict[k] = state_dict[key]
+            elif k in buffer_names:
+                # See #3805: the passed state_dict may contain only parameters, e.g. when it was built from
+                # gathered FSDP2 DTensors via named_parameters(). Buffers are not sharded by FSDP or DeepSpeed,
+                # so the local copy already holds the full value, and falling back to it here is correct.
+                # Skipping the buffer instead would leave the key out of the checkpoint, which
+                # set_peft_model_state_dict requires to be present for every key of the load map, so loading
+                # would fail later with a less clear error.
+                adapter_state_dict[k] = module.get_buffer(k)
+            else:
+                raise KeyError(
+                    f"Expected key '{key}' of modules_to_save adapter '{adapter_name}' in the passed state_dict, but "
+                    "it is missing. The state_dict must contain all parameters of the modules_to_save module."
+                )
+        return adapter_state_dict
 
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
@@ -797,6 +835,11 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
         However, if the wrapped module is itself a tuner, we'll call merge on it before.
         """
+        if not self.active_adapters:
+            # none of the modules_to_save adapters of this module are active, e.g. because the model's active adapter
+            # does not use modules_to_save on this module; like in forward, the original module is used in this case
+            return self.original_module
+
         new_module = self.modules_to_save[self.active_adapter]
 
         # TODO: not sure if this is still a sensible thing to do. We would basically have to
@@ -892,20 +935,33 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         super().update(active_adapter)
 
     def adapter_state_dict_load_map(self, adapter_name):
+        if adapter_name not in self._adapters:
+            return {}
         if self.token_adapter.tied_adapter:
             return {}
         return {"token_adapter.trainable_tokens_delta": f"token_adapter.trainable_tokens_delta.{adapter_name}"}
 
     def adapter_state_dict(self, adapter_name, state_dict):
+        if adapter_name not in self._adapters:
+            return {}
+
         if self.token_adapter.tied_adapter:
             # storing of weight-tied layers is not up to us and will be handled by
             # transformers. we're just here to keep those layers in sync during training.
             # therefore we return an empty state dict.
             return {}
 
-        return {
-            f"token_adapter.{k}": state_dict[f"token_adapter.{k}.{adapter_name}"] for k in ["trainable_tokens_delta"]
-        }
+        key = f"token_adapter.trainable_tokens_delta.{adapter_name}"
+        if key not in state_dict:
+            # See #3805, which added the equivalent fallback for ModulesToSaveWrapper's buffers above. There is
+            # no equivalent fallback here on purpose: trainable_tokens_delta is a parameter, not a buffer, and
+            # parameters (unlike buffers) can be sharded, e.g. with DeepSpeed ZeRO-3, so the local copy on this
+            # rank is not guaranteed to hold the full value the way a buffer's local copy is.
+            raise KeyError(
+                f"Expected key '{key}' of trainable tokens adapter '{adapter_name}' in the passed state_dict, but it "
+                "is missing. The state_dict must contain the full (gathered) trainable tokens parameters."
+            )
+        return {"token_adapter.trainable_tokens_delta": state_dict[key]}
 
     def enable_adapters(self, enabled: bool):
         """Enables/disables the underlying `TrainableTokens` adapter.
@@ -1073,7 +1129,7 @@ def _set_trainable(
     key_list = [key for key, _ in model.named_modules(remove_duplicate=False)]
 
     for key in key_list:
-        target_module_found = any(key.endswith(target_key) for target_key in module_names)
+        target_module_found = any(_is_valid_match(key, target_key) for target_key in module_names)
         if target_module_found:
             parent, grandparent, target, target_name = _get_submodules_with_grandparent(model, key)
             if isinstance(grandparent, BaseTunerLayer):
@@ -1800,6 +1856,9 @@ def create_attention_mask(
     # the 4D causal mask exists, it should be present in the base model (XXXModel class) or in its decoder.
     base_model = getattr(model, model.base_model_prefix, model)
     decoder = base_model.get_decoder() if hasattr(base_model, "get_decoder") else None
+    # TODO: remove check for _prepare_4d_causal_attention_mask_with_cache_position once Transformers <= v5.2 is
+    # dropped. Note that for <= v5.2, the function may or may not exist, so the fallback in the
+    # `causal_mask_creation_function is None` case is still needed.
     causal_mask_creation_function = getattr(base_model, "_prepare_4d_causal_attention_mask_with_cache_position", None)
     if causal_mask_creation_function is None and decoder is not None:  # it may be in the decoder
         causal_mask_creation_function = getattr(decoder, "_prepare_4d_causal_attention_mask_with_cache_position", None)
@@ -1809,16 +1868,29 @@ def create_attention_mask(
         token_type_ids = getattr(model_input, "token_type_ids", None)
         # Some models may overwrite the general one
         causal_mask_creation_function = getattr(model, "create_masks_for_generate", create_masks_for_generate)
-        attention_mask = causal_mask_creation_function(
-            config=model.config,
-            # we only need batch size, seq_length and dtype here - we don't care about the values of the embeddings
-            input_embeds=torch.empty((batch_size, sequence_length), dtype=model.dtype),
-            attention_mask=attention_mask,
-            cache_position=cache_position,
-            past_key_values=past_key_values,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-        )
+        # Transforrmers only uses batch size, seq_length, and dtype of inputs_embeds to create the mask, so it's safe to
+        # create a dummy tensor here.
+        dummy_embeds = torch.empty((batch_size, sequence_length), dtype=model.dtype)
+        if is_transformers_ge_v5:
+            # transformers v5 renamed the input_embeds argument to inputs_embeds and removed cache_position
+            attention_mask = causal_mask_creation_function(
+                config=model.config,
+                inputs_embeds=dummy_embeds,
+                attention_mask=attention_mask,
+                past_key_values=past_key_values,
+                token_type_ids=token_type_ids,
+                position_ids=position_ids,
+            )
+        else:
+            attention_mask = causal_mask_creation_function(
+                config=model.config,
+                input_embeds=dummy_embeds,
+                attention_mask=attention_mask,
+                cache_position=cache_position,
+                past_key_values=past_key_values,
+                token_type_ids=token_type_ids,
+                position_ids=position_ids,
+            )
     else:
         attention_mask = causal_mask_creation_function(
             attention_mask,

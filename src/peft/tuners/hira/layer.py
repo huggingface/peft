@@ -486,13 +486,9 @@ class _ConvNd(nn.Module, HiraLayer):
             hira_dropout_layer = nn.Identity()
 
         self.hira_dropout[adapter_name] = hira_dropout_layer
-        conv_cls = type(base)
         in_channels = base.in_channels
         out_channels = base.out_channels
         kernel_size = base.kernel_size
-        stride = base.stride
-        padding = base.padding
-        dilation = getattr(base, "dilation", (1,) * (base.weight.dim() - 2))
         # Spatial dims for B: 1 in each spatial dimension
         spatial_ones = (1,) * (base.weight.dim() - 2)
 
@@ -562,7 +558,7 @@ class _ConvNd(nn.Module, HiraLayer):
             weight_A = weight_A.float()
             weight_B = weight_B.float()
 
-        if self.get_base_layer().weight.size()[2:4] == (1, 1):
+        if self.get_base_layer().weight.shape[2:] == (1, 1):
             # conv2d 1x1
             output_tensor = (weight_B.squeeze(3).squeeze(2) @ weight_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(3)
         else:

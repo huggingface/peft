@@ -19,7 +19,7 @@ import json
 import os
 import warnings
 from dataclasses import asdict, dataclass, field
-from typing import Optional, Union
+from typing import Optional, Self, Union
 
 import packaging.version
 from huggingface_hub import hf_hub_download
@@ -32,6 +32,12 @@ from .utils import CONFIG_NAME, PeftType, TaskType
 
 # we expect at least these keys to be present in a PEFT adapter_config.json
 MIN_EXPECTED_CONFIG_KEYS = {"peft_type"}
+
+# The adapter_config.json is written with sorted keys, except for the dicts stored under these keys, whose order has to
+# survive a save/load round trip. For rank_pattern and alpha_pattern, the order matters because when more than one key
+# matches a module, the first one wins. If another config argument needs its order preserved, add it here and extend
+# this comment.
+CONFIG_KEYS_WITH_PRESERVED_ORDER = {"rank_pattern", "alpha_pattern"}
 
 
 def _check_and_remove_unused_kwargs(cls, kwargs):
@@ -47,6 +53,20 @@ def _check_and_remove_unused_kwargs(cls, kwargs):
     for key in unexpected_kwargs:
         del kwargs[key]
     return kwargs, unexpected_kwargs
+
+
+def _sort_keys(obj):
+    """Sort the keys of all dicts in obj, like `json.dumps(..., sort_keys=True)`, except for the dicts stored under
+    `CONFIG_KEYS_WITH_PRESERVED_ORDER`.
+    """
+    if isinstance(obj, dict):
+        return {
+            key: value if key in CONFIG_KEYS_WITH_PRESERVED_ORDER else _sort_keys(value)
+            for key, value in sorted(obj.items())
+        }
+    if isinstance(obj, (list, tuple)):
+        return [_sort_keys(item) for item in obj]
+    return obj
 
 
 def _is_dev_version(version: str) -> bool:
@@ -160,10 +180,10 @@ class PeftConfigMixin(PushToHubMixin):
 
         # save it
         with open(output_path, "w") as writer:
-            writer.write(json.dumps(output_dict, indent=2, sort_keys=True))
+            writer.write(json.dumps(_sort_keys(output_dict), indent=2))
 
     @classmethod
-    def from_peft_type(cls, **kwargs):
+    def from_peft_type(cls, **kwargs) -> Self:
         r"""
         This method loads the configuration of your adapter model from a set of kwargs.
 
@@ -228,15 +248,19 @@ class PeftConfigMixin(PushToHubMixin):
         return config
 
     @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path: str, subfolder: Optional[str] = None, **kwargs):
+    def from_pretrained(cls, pretrained_model_name_or_path: str, subfolder: Optional[str] = None, **kwargs) -> Self:
         r"""
         This method loads the configuration of your adapter model from a directory.
 
         Args:
             pretrained_model_name_or_path (`str`):
                 The directory or the Hub repository id where the configuration is saved.
+            subfolder (`str`, *optional*):
+                An optional subfolder under `pretrained_model_name_or_path`.
             kwargs (additional keyword arguments, *optional*):
-                Additional keyword arguments passed along to the child class initialization.
+                Keyword arguments forwarded to [`huggingface_hub.hf_hub_download`] (for example `token`, `revision`,
+                `cache_dir`). PEFT config-specific arguments, such as `task_type` or `r`, cannot be passed as
+                overrides. To change attributes, set them on the returned config after loading.
         """
         path = (
             os.path.join(pretrained_model_name_or_path, subfolder)
@@ -261,7 +285,12 @@ class PeftConfigMixin(PushToHubMixin):
         loaded_attributes = cls.from_json_file(config_file)
         kwargs = {**class_kwargs, **loaded_attributes}
         kwargs = cls.check_kwargs(**kwargs)
-        return cls.from_peft_type(**kwargs)
+        config = cls.from_peft_type(**kwargs)
+        # peft_version is stored in the config since PEFT 0.18.0. When it is missing, it is still set to the current
+        # version, so this private attribute records that it was missing at load time, which means that the config is
+        # from before PEFT 0.18.0. It is not saved with the config.
+        config._peft_version_missing = "peft_version" not in loaded_attributes
+        return config
 
     @classmethod
     def from_json_file(cls, path_json_file: str, **kwargs):

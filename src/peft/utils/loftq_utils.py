@@ -179,7 +179,7 @@ class _SafetensorLoader:
         with safe_open(file_path, framework="pt", device="cpu") as f:
             try:
                 tensor = f.get_tensor(name)
-            except SafetensorError as exc:
+            except SafetensorError:
                 # no matching key found, we probably need to remove the base model prefix
                 if self.base_model_prefix:
                     # remove 1 extra character for "."

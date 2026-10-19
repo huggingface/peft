@@ -34,8 +34,7 @@ hira_config = HiraConfig(
 )
 peft_model = get_peft_model(base_model, hira_config)
 
-peft_model.print_trainable_parameters()
-# trainable params: 4,718,592 || all params: 129,957,888 || trainable%: 3.6309
+peft_model.print_healthcheck()
 ```
 
 ## Benchmark overview
@@ -67,6 +66,10 @@ url={https://openreview.net/forum?id=TwJrTz9cRS}
 
 [[autodoc]] tuners.hira.config.HiraConfig
 
+## HiraModel
+
+[[autodoc]] tuners.hira.model.HiraModel
+
 ## Core Layers
 
 ### HiraLayer
@@ -84,6 +87,5 @@ url={https://openreview.net/forum?id=TwJrTz9cRS}
 ### Convolutional Adapters
 
 [[autodoc]] tuners.hira.layer.Conv1d [[autodoc]] tuners.hira.layer.Conv2d [[autodoc]] tuners.hira.layer.ConvNd
-
 
 

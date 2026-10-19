@@ -53,11 +53,12 @@ class OSFConfig(PeftConfig):
 
     # Additional optional fields for compatibility with generic test harnesses
     init_weights: Optional[bool] = field(
-        default=None,
+        default=True,
         metadata={
             "help": (
-                "If provided, toggles custom weight initialization behavior for certain methods. OSF ignores this "
-                "flag but accepts it for config compatibility."
+                "If True (default), the trainable low-rank SVD components are initialized from the base weight "
+                "decomposition, making the adapter an identity at init. If False, they are randomly initialized "
+                "so the adapter is not an identity (used by tests)."
             )
         },
     )

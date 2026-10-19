@@ -226,6 +226,7 @@ def get_pipeline(
     peft_config: Optional[PeftConfig],
     autocast_adapter_dtype: bool,
     use_gc: bool,
+    device_type: str,
 ):
     torch_dtype = get_torch_dtype(dtype)
     pipeline = Flux2KleinPipeline.from_pretrained(model_id, torch_dtype=torch_dtype)
@@ -236,7 +237,9 @@ def get_pipeline(
     pipeline.vae.requires_grad_(False)
     pipeline.text_encoder.requires_grad_(False)
 
-    transformer = pipeline.transformer
+    # temporarily move the transformer to the accelerator early, since there could be expensive operations during
+    # get_peft_model (e.g. SVD calls)
+    transformer = pipeline.transformer.to(device_type)
     if peft_config is None:
         transformer.requires_grad_(True)
     else:
@@ -245,6 +248,11 @@ def get_pipeline(
 
     if compile:
         pipeline.transformer = torch.compile(pipeline.transformer, dynamic=True)
+
+    # move back to CPU for now to prevent memory peaks
+    pipeline.transformer.to("cpu")
+    torch_accelerator_module = getattr(torch, device_type, torch.cuda)
+    torch_accelerator_module.empty_cache()
 
     pipeline.transformer.train()
     pipeline.vae.eval()
@@ -413,6 +421,15 @@ def get_peft_branch() -> str:
     )
 
 
+def get_peft_worktree_is_dirty() -> bool:
+    """Check if the PEFT git worktree has uncommitted changes."""
+    peft_dir = os.path.dirname(peft.__file__)
+    # Exit code 0 means clean, non-zero means dirty (or error, which we treat as dirty)
+    result = subprocess.run(["git", "diff", "--quiet"], cwd=peft_dir)
+    result_cached = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=peft_dir)
+    return result.returncode != 0 or result_cached.returncode != 0
+
+
 class TrainStatus(enum.Enum):
     FAILED = "failed"
     SUCCESS = "success"
@@ -569,6 +586,7 @@ def log_results(
             "total_time": time_total,
             "experiment_name": experiment_name,
             "peft_branch": peft_branch,
+            "peft_worktree_is_dirty": get_peft_worktree_is_dirty(),
             "train_config": asdict(train_config),
             "peft_config": peft_config_dict,
             "error_msg": train_result.error_msg,

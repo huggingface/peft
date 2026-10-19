@@ -26,14 +26,23 @@ from transformers import (
     AutoModelForSequenceClassification,
     CLIPTextModel,
     CLIPTextModelWithProjection,
+    LlamaConfig,
 )
 
 from peft import (
     AdaLoraConfig,
+    FrodConfig,
     IA3Config,
     LoKrConfig,
     LoraConfig,
+    PeftModel,
+    PeftWarning,
+    PveraConfig,
     RandLoraConfig,
+    TinyLoraConfig,
+    UniLoraConfig,
+    VBLoRAConfig,
+    VeraConfig,
     get_base_model_state_dict,
     get_peft_model,
     get_peft_model_state_dict,
@@ -86,6 +95,27 @@ class TestLowLevelFunctional:
             if name == "linear":
                 assert hasattr(module, "lora_A")
                 assert hasattr(module, "lora_B")
+
+    @pytest.mark.parametrize(
+        "config_cls, config_kwargs",
+        [
+            pytest.param(TinyLoraConfig, {"r": 2, "u": 4}, id="TinyLoRA"),
+            pytest.param(UniLoraConfig, {"r": 2, "theta_d_length": 16}, id="UniLoRA"),
+            pytest.param(VeraConfig, {"r": 2}, id="VeRA"),
+            pytest.param(PveraConfig, {"r": 2}, id="PVeRA"),
+            pytest.param(VBLoRAConfig, {"r": 2, "num_vectors": 8, "vector_length": 2}, id="VBLoRA"),
+            pytest.param(FrodConfig, {"progressbar": False}, id="FRoD"),
+        ],
+    )
+    def test_inject_adapter_in_model_rejects_shared_state_tuners(self, config_cls, config_kwargs):
+        config = config_cls(target_modules=["linear"], **config_kwargs)
+        model = DummyModel()
+        original_module_names = [name for name, _ in model.named_modules()]
+
+        with pytest.raises(ValueError, match="shared state.*get_peft_model"):
+            inject_adapter_in_model(config, model)
+
+        assert [name for name, _ in model.named_modules()] == original_module_names
 
     def test_get_peft_model_state_dict(self, model):
         peft_state_dict = get_peft_model_state_dict(model)
@@ -332,6 +362,76 @@ class TestInjectAdapterFromStateDict:
             model = inject_adapter_in_model(config, model, state_dict=sd_before, low_cpu_mem_usage=True)
             # all PEFT parameters should be on meta device
             assert {p.device.type for p in get_peft_model_state_dict(model).values()} == {"meta"}
+
+    _DTYPE_PAIRS = ((torch.float32, torch.bfloat16), (torch.bfloat16, torch.float32))
+
+    @pytest.mark.parametrize("save_dtype, load_dtype", _DTYPE_PAIRS)
+    def test_load_low_cpu_mem_usage_keeps_modules_to_save_dtype(self, save_dtype, load_dtype, tmp_path):
+        # Make sure that in-place loading of weights doesn't change the dtype of the weights
+        # to the dtype from the checkpoint.
+        #
+        # See #3509: `low_cpu_mem_usage` uses `load_state_dict(..., assign=True)` under the
+        # hood which swaps the checkpoint tensor object into the module, so the loaded
+        # weight takes the checkpoint's dtype rather than the model's. That is what makes
+        # the fast path fast for freshly injected adapter weights, which sit on meta until
+        # they are replaced, but e.g. `modules_to_save` weights already exist as real tensors on
+        # the model.
+        config = LoraConfig(r=4, target_modules=["linear"], modules_to_save=["lm_head"])
+        inputs = torch.randint(0, 9, (2, 4))
+        tmp_dir = tmp_path / f"{save_dtype}_{load_dtype}"
+
+        model = get_peft_model(DummyModel().to(save_dtype), config)
+        model.save_pretrained(tmp_dir)
+        del model
+
+        loaded = PeftModel.from_pretrained(
+            DummyModel().to(load_dtype), tmp_dir, low_cpu_mem_usage=True, torch_device="cpu"
+        )
+        dtypes = {p.dtype for name, p in loaded.named_parameters() if "modules_to_save" in name}
+        assert dtypes == {load_dtype}
+
+        # and it runs, which is what the dtype mismatch used to break
+        loaded.eval()
+        with torch.no_grad():
+            loaded(inputs)
+
+    @pytest.mark.parametrize("save_dtype, load_dtype", _DTYPE_PAIRS)
+    def test_load_low_cpu_mem_usage_keeps_base_embedding_dtype(self, save_dtype, load_dtype, tmp_path):
+        # When the adapter targets an embedding,
+        # save_embedding_layers writes the BASE embedding weight into the checkpoint, so
+        # `assign=True` replaced the base model's own embedding with the checkpoint tensor.
+        # In the checkpoint-lower-precision direction there is no error at all, and the
+        # whole embedding table quietly changes dtype.
+        #
+        # This test cannot use DummyModel: save_embedding_layers auto-detection bails out on
+        # a plain nn.Module ("Could not identify embedding layer(s) because the model is not
+        # a transformers model"), so no base embedding reaches the checkpoint and the test
+        # would assert nothing. It is built in process rather than pulled from the hub so the
+        # test needs no network.
+        config = LlamaConfig(
+            vocab_size=64,
+            hidden_size=16,
+            intermediate_size=32,
+            num_hidden_layers=2,
+            num_attention_heads=4,
+            num_key_value_heads=4,
+            max_position_embeddings=64,
+        )
+
+        def build(dtype):
+            torch.manual_seed(0)
+            return AutoModelForCausalLM.from_config(config).to(dtype)
+
+        lora_config = LoraConfig(r=4, target_modules=["embed_tokens"])
+        tmp_dir = tmp_path / f"{save_dtype}_{load_dtype}"
+
+        model = get_peft_model(build(save_dtype), lora_config)
+        model.save_pretrained(tmp_dir)
+        del model
+
+        loaded = PeftModel.from_pretrained(build(load_dtype), tmp_dir, low_cpu_mem_usage=True, torch_device="cpu")
+        dtypes = {p.dtype for name, p in loaded.named_parameters() if name.endswith("embed_tokens.base_layer.weight")}
+        assert dtypes == {load_dtype}
 
     def test_inject_from_state_dict_missing_keys_warning(self):
         # check that if the PEFT config specifies **more** target modules than the state_dict, we get a warning for that
@@ -731,6 +831,80 @@ class TestPeftStateDict:
         )
         self.check_peft_model_weights_loaded_correctly(MyModel, config, nested=nested, adapter_name="foo")
 
+    @pytest.mark.parametrize("config_cls", [LoraConfig, LoKrConfig])
+    def test_base_model_module_named_like_peft_prefix(self, config_cls):
+        # Here the base model contains a module whose name contains the PEFT prefix of the method (e.g. "lora_"). Such
+        # a module must be treated like any other base model module: it must not be included in the PEFT state_dict
+        # (it would needlessly blow up the checkpoint size) and it must not be trainable.
+        prefix = {LoraConfig: "lora_", LoKrConfig: "lokr_"}[config_cls]
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(5, 5)
+                # module whose name contains the PEFT prefix, e.g. "lora_foobar"
+                setattr(self, f"{prefix}foobar", nn.Linear(5, 5))
+
+            def forward(self, x):
+                return getattr(self, f"{prefix}foobar")(self.lin0(x))
+
+        torch.manual_seed(0)
+        model = get_peft_model(MyModel(), config_cls(target_modules=["lin0"]))
+        imposter = getattr(model.base_model.model, f"{prefix}foobar")
+        assert not imposter.weight.requires_grad
+        assert not imposter.bias.requires_grad
+
+        sd = get_peft_model_state_dict(model)
+        assert len(sd) > 0  # sanity check
+        assert not any(f"{prefix}foobar" in key for key in sd)
+        # sanity check: the keys of the actual adapter are present
+        assert any("lin0" in key for key in sd)
+
+    def test_trained_modules_to_save_module_named_like_peft_prefix_round_trip(self):
+        # Similar to test_base_model_module_named_like_peft_prefix but with modules_to_save: the colliding module is
+        # trained via modules_to_save and must survive a save/load round trip.
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(5, 5)
+                self.lora_head = nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.lora_head(self.lin0(x))
+
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lora_head"])
+        torch.manual_seed(0)
+        source = get_peft_model(MyModel(), config)
+        with torch.no_grad():
+            source.base_model.model.lora_head.modules_to_save["default"].weight.fill_(123.0)
+
+        state_dict = get_peft_model_state_dict(source)
+
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lora_head"])
+        torch.manual_seed(0)
+        target = get_peft_model(MyModel(), config)
+        result = set_peft_model_state_dict(target, state_dict)
+
+        assert not [key for key in result.unexpected_keys if "lora_head" in key]
+        weight = target.base_model.model.lora_head.modules_to_save["default"].weight
+        assert torch.allclose(weight, torch.full_like(weight, 123.0))
+
+    def test_set_peft_model_state_dict_preserves_input(self):
+        def create_model():
+            config = LoraConfig(target_modules=["linear"], modules_to_save=["linear2"])
+            return get_peft_model(DummyModel(), config)
+
+        # Regression test for #3592: loading must not consume caller-owned checkpoints.
+        state_dict = get_peft_model_state_dict(create_model())
+        keys_before = tuple(state_dict)
+        values_before = state_dict.copy()
+
+        for _ in range(2):
+            set_peft_model_state_dict(create_model(), state_dict)
+
+        assert tuple(state_dict) == keys_before
+        assert all(state_dict[key] is value for key, value in values_before.items())
+
 
 class TestGetBaseModelStateDict:
     # Tests for get_base_model_state_dict / set_base_model_state_dict. The per-method and per-model coverage lives in
@@ -784,3 +958,23 @@ class TestGetBaseModelStateDict:
         peft_model.add_adapter("adapter2", LoraConfig(r=8, lora_alpha=4, target_modules=["k_proj", "out_proj"]))
 
         assert set(get_base_model_state_dict(peft_model).keys()) == base_model_keys
+
+
+class TestStateDictFsdpShapeValidation:
+    # Mitigation for a potential error in DeepSpeed ZeRO-3 / FSDP settings where the
+    # gather context was forgot when retrieving the state dict. See #3251
+    # for details.
+
+    def test_save_pretrained_warns_for_unsharded_state_dict(self, tmp_path):
+        peft_model = get_peft_model(DummyModel(), LoraConfig(target_modules=["linear"], r=4))
+        # Emulate the ungathered ZeRO-3 / FSDP shard: lora_A is left as a flat (1-D) tensor instead of (r, in_dim).
+        peft_model.base_model.model.linear.lora_A["default"].weight.data = torch.zeros(32)
+        with pytest.warns(PeftWarning, match=r"DeepSpeed ZeRO-3 / FSDP shards"):
+            peft_model.save_pretrained(tmp_path / "broken-adapter")
+        # Warning must not block the write — existing callers may intentionally skip gathering.
+        assert (tmp_path / "broken-adapter" / "adapter_config.json").exists()
+
+    def test_save_pretrained_succeeds_for_normal_lora(self, tmp_path):
+        peft_model = get_peft_model(DummyModel(), LoraConfig(target_modules=["linear"], r=4))
+        peft_model.save_pretrained(tmp_path / "ok-adapter")
+        assert (tmp_path / "ok-adapter" / "adapter_config.json").exists()

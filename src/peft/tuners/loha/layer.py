@@ -180,7 +180,7 @@ class LoHaLayer(nn.Module, LycorisLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
-    def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
+    def get_delta_weight(self, adapter_name: str, *, apply_rank_dropout: bool = False) -> torch.Tensor:
         # https://github.com/KohakuBlueleaf/LyCORIS/blob/eb460098187f752a5d66406d3affade6f0a07ece/lycoris/modules/loha.py#L178
         if adapter_name in self.hada_t1.keys():
             weight = make_weight_cp(
@@ -206,9 +206,8 @@ class LoHaLayer(nn.Module, LycorisLayer):
         # Reshape to match base layer shape
         weight = weight.reshape(base_layer.weight.shape)
 
-        # Perform rank dropout during training - drop rows of addition weights
         rank_dropout = self.rank_dropout[adapter_name]
-        if self.training and rank_dropout:
+        if apply_rank_dropout:
             drop = (torch.rand(weight.size(0)) > rank_dropout).to(weight.dtype)
             drop = drop.view(-1, *[1] * len(weight.shape[1:])).to(weight.device)
             # TODO: Investigate if there should be a scaler like in normal dropout during training
@@ -267,7 +266,8 @@ class Linear(LoHaLayer):
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
-        delta_weight = self.get_delta_weight(adapter_name)
+        apply_rank_dropout = self.training and bool(self.rank_dropout[adapter_name])
+        delta_weight = self.get_delta_weight(adapter_name, apply_rank_dropout=apply_rank_dropout)
         input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         return F.linear(input, delta_weight)
@@ -301,7 +301,8 @@ class Conv2d(LoHaLayer):
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
-        delta_weight = self.get_delta_weight(adapter_name)
+        apply_rank_dropout = self.training and bool(self.rank_dropout[adapter_name])
+        delta_weight = self.get_delta_weight(adapter_name, apply_rank_dropout=apply_rank_dropout)
         input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()
@@ -340,7 +341,8 @@ class Conv1d(LoHaLayer):
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
-        delta_weight = self.get_delta_weight(adapter_name)
+        apply_rank_dropout = self.training and bool(self.rank_dropout[adapter_name])
+        delta_weight = self.get_delta_weight(adapter_name, apply_rank_dropout=apply_rank_dropout)
         input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()
@@ -396,32 +398,35 @@ class HadaWeightCP(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_out):
-        (t1, w1a, w1b, t2, w2a, w2b, scale) = ctx.saved_tensors
+        # The gradient of w1a (w2a) uses the intermediate tensor of its own factor, temp1 (temp2), as in the updated
+        # LyCORIS implementation:
+        # https://github.com/KohakuBlueleaf/LyCORIS/blob/4a6a333819356795d22170fe661a84f16b299b6b/lycoris/functional/loha.py#L45-L79
+        t1, w1a, w1b, t2, w2a, w2b, scale = ctx.saved_tensors
         grad_out = grad_out * scale
 
-        temp = torch.einsum("i j k l, j r -> i r k l", t2, w2b)
-        rebuild = torch.einsum("i j k l, i r -> r j k l", temp, w2a)
+        temp1 = torch.einsum("i j k l, j r -> i r k l", t1, w1b)
+        temp2 = torch.einsum("i j k l, j r -> i r k l", t2, w2b)
+        rebuild = torch.einsum("i j k l, i r -> r j k l", temp2, w2a)
 
         grad_w = rebuild * grad_out
         del rebuild
 
-        grad_w1a = torch.einsum("r j k l, i j k l -> r i", temp, grad_w)
+        grad_w1a = torch.einsum("r j k l, i j k l -> r i", temp1, grad_w)
         grad_temp = torch.einsum("i j k l, i r -> r j k l", grad_w, w1a.T)
-        del grad_w, temp
+        del grad_w
 
         grad_w1b = torch.einsum("i r k l, i j k l -> r j", t1, grad_temp)
         grad_t1 = torch.einsum("i j k l, j r -> i r k l", grad_temp, w1b.T)
         del grad_temp
 
-        temp = torch.einsum("i j k l, j r -> i r k l", t1, w1b)
-        rebuild = torch.einsum("i j k l, i r -> r j k l", temp, w1a)
+        rebuild = torch.einsum("i j k l, i r -> r j k l", temp1, w1a)
 
         grad_w = rebuild * grad_out
-        del rebuild
+        del rebuild, temp1
 
-        grad_w2a = torch.einsum("r j k l, i j k l -> r i", temp, grad_w)
+        grad_w2a = torch.einsum("r j k l, i j k l -> r i", temp2, grad_w)
         grad_temp = torch.einsum("i j k l, i r -> r j k l", grad_w, w2a.T)
-        del grad_w, temp
+        del grad_w, temp2
 
         grad_w2b = torch.einsum("i r k l, i j k l -> r j", t2, grad_temp)
         grad_t2 = torch.einsum("i j k l, j r -> i r k l", grad_temp, w2b.T)
