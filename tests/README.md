@@ -47,6 +47,7 @@ A few directories exist for specific purposes and are run separately from the ma
 3. Does it concern a library feature (configs, saving, injection, ...)? Extend the corresponding cross-cutting file.
 4. Does it need a GPU or a quantization backend? It goes to `test_gpu_examples.py` / `test_common_gpu.py` / `test_quantization.py` with the appropriate marker or decorator.
 5. Does the test extend an existing test class? Put the test next to similar test methods (e.g. a new merging test should follow existing merging tests); if there are no similar test methods, put it at the end of the test class.
+6. Can an existing test be slightly modified to cover this case, e.g. by adding a parametrization? Prefer extending the test over writing a completely new one.
 
 Do not add standalone test scripts or new files that duplicate what the matrix already covers. If in doubt, search for a similar existing test (e.g. an older, comparable bug fix) and put the new test next to it.
 
