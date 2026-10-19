@@ -6994,6 +6994,42 @@ def _test_save_unsharded_weights(rank, world_size, tmp_dir_reference, tmp_dir_tp
             )
 
 
+def _test_save_gathers_only_adapter_weights(rank, world_size):
+    """
+    Test that get_peft_model_state_dict only gathers the adapter weights of a TP model, gathering the whole state dict
+    would materialize the full base model on every rank.
+    """
+    from torch.distributed.tensor import DTensor
+    from transformers.integrations import tensor_parallel
+
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+
+    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, **_get_tp_kwargs(tp_plan=TP_PLAN))
+    model.to(device)
+    # embed_tokens is not targeted, otherwise the base embedding weights would be saved (and gathered) as well
+    lora_config = LoraConfig(r=4, target_modules=["q_proj", "o_proj"], init_lora_weights=False)
+    model = get_peft_model(model, lora_config)
+
+    gathered_keys = []
+    gather_state_dict_for_save = tensor_parallel.gather_state_dict_for_save
+
+    def spy_gather_state_dict_for_save(state_dict, *args):
+        gathered_keys.extend(state_dict)
+        return gather_state_dict_for_save(state_dict, *args)
+
+    tensor_parallel.gather_state_dict_for_save = spy_gather_state_dict_for_save
+    try:
+        peft_state_dict = get_peft_model_state_dict(model)
+    finally:
+        tensor_parallel.gather_state_dict_for_save = gather_state_dict_for_save
+
+    assert gathered_keys
+    non_adapter_keys = [key for key in gathered_keys if "lora_" not in key]
+    assert not non_adapter_keys, f"Non-adapter weights were gathered: {non_adapter_keys}"
+    assert not any(isinstance(value, DTensor) for value in peft_state_dict.values())
+
+
 def _test_multiple_adapters(rank, world_size):
     """Two LoRA adapters coexist on a TP model and can be switched between."""
     torch.cuda.set_device(rank)
@@ -7152,6 +7188,9 @@ class TestLoraTensorParallel:
         tmp_dir_reference = tmp_path / "reference"
         tmp_dir_tp = tmp_path / "tp"
         self._spawn(_test_save_unsharded_weights, tmp_dir_reference, tmp_dir_tp)
+
+    def test_save_gathers_only_adapter_weights(self):
+        self._spawn(_test_save_gathers_only_adapter_weights)
 
     def test_multiple_adapters(self):
         self._spawn(_test_multiple_adapters)
