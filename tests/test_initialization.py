@@ -531,6 +531,76 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match="MiCA requires `r` <= min"):
             get_peft_model(SimpleModel(), config)
 
+    def test_lora_nora_linear_init_default(self, data):
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output = model(data)[0]
+
+        config = LoraConfig(
+            init_lora_weights="nora",
+            target_modules=["linear"],
+            r=8,
+            lora_alpha=8,
+            use_rslora=False,
+        )
+        peft_model = get_peft_model(deepcopy(model), config)
+
+        weight_A = peft_model.base_model.linear.lora_A["default"].weight
+        weight_B = peft_model.base_model.linear.lora_B["default"].weight
+
+        # A columns have unit L2 norm and B is zero, so the adapter output is zero at init
+        assert torch.allclose(weight_A.norm(dim=0), weight_A.new_ones(weight_A.shape[1]), atol=1e-5)
+        assert torch.all(weight_B == 0)
+        assert torch.allclose(output, peft_model(data)[0], atol=1e-6)
+
+        # the base weights are unchanged and both A and B remain trainable
+        assert torch.equal(model.linear.weight, peft_model.base_model.linear.base_layer.weight)
+        assert weight_A.requires_grad
+        assert weight_B.requires_grad
+
+        # the recommended 1:1 alpha/rank ratio gives a scaling factor of 1
+        assert peft_model.base_model.linear.scaling["default"] == 1.0
+
+    def test_lora_nora_target_parameters(self):
+        class LayerUsingParameter(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(10, 10))
+
+            def forward(self, x):
+                return x @ self.weight.t()
+
+        class ModelUsingParameter(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer = LayerUsingParameter()
+
+            def forward(self, x):
+                return self.layer(x)
+
+        torch.manual_seed(0)
+        model = ModelUsingParameter()
+        data = torch.rand(5, 10)
+        output = model(data)
+
+        config = LoraConfig(
+            init_lora_weights="nora",
+            target_parameters=["layer.weight"],
+            r=8,
+            lora_alpha=8,
+        )
+        peft_model = get_peft_model(model, config)
+
+        wrapper = peft_model.base_model.model.layer
+        weight_A = wrapper.lora_A["default"].weight
+        weight_B = wrapper.lora_B["default"].weight
+
+        # A columns have unit L2 norm and B is zero, so the adapter output is zero at init
+        assert torch.allclose(weight_A.norm(dim=0), weight_A.new_ones(weight_A.shape[1]), atol=1e-5)
+        assert torch.all(weight_B == 0)
+        assert torch.allclose(output, peft_model(data), atol=1e-6)
+
     def test_lora_olora_linear_init_default(self, data):
         model = self.get_model()
         output = model(data)[0]
