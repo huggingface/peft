@@ -1227,8 +1227,10 @@ def _prepare_prompt_learning_config(peft_config, model_config):
     if hasattr(model_config, "to_dict"):
         model_config = model_config.to_dict()
     # In case of VLM we focus on the language model portion of the model.
-    if "text_config" in model_config:
+    if isinstance(model_config, dict) and "text_config" in model_config:
         model_config = model_config["text_config"]
+    elif hasattr(model_config, "text_config"):
+        model_config = model_config.text_config
 
     if peft_config.num_layers is None:
         if hasattr(orig_model_config, "num_hidden_layers"):

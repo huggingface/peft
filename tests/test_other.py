@@ -34,6 +34,7 @@ from peft import (
     LoHaConfig,
     LoraConfig,
     PeftModel,
+    PromptTuningConfig,
     TrainableTokensConfig,
     VeraConfig,
     get_peft_model,
@@ -1099,3 +1100,39 @@ class TestTaskTypeModulesToSave:
 
         assert user_list == ["my_head"]
         assert model.peft_config["other"].modules_to_save == ["my_head"] + head_names
+
+
+def test_prompt_encoder_config_without_get_text_config():
+    class DummyConfig:
+        vocab_size = 100
+        num_hidden_layers = 2
+        hidden_size = 16
+        num_attention_heads = 4
+
+        def to_dict(self):
+            return {
+                "vocab_size": self.vocab_size,
+                "num_hidden_layers": self.num_hidden_layers,
+                "hidden_size": self.hidden_size,
+                "num_attention_heads": self.num_attention_heads,
+            }
+
+    class DummyModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.device = torch.device("cpu")
+            self.config = DummyConfig()
+            self.wte = nn.Embedding(100, 16)
+            self.fc = nn.Linear(16, 16)
+
+        def get_input_embeddings(self):
+            return self.wte
+
+        def prepare_inputs_for_generation(self, *args, **kwargs):
+            pass
+
+    model = DummyModel()
+    peft_config = PromptTuningConfig(task_type="CAUSAL_LM", num_virtual_tokens=4)
+    peft_model = get_peft_model(model, peft_config)
+    assert peft_model.word_embeddings is model.wte
+

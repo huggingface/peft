@@ -707,7 +707,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 if hasattr(self.base_model.config, "get_text_config"):
                     vocab_size = self.base_model.config.get_text_config().vocab_size
                 # below: for older transformers versions before get_text_config was added
-                elif "text_config" in self.base_model.config:
+                elif hasattr(self.base_model.config, "text_config"):
                     vocab_size = self.base_model.config.text_config.vocab_size
                 else:
                     vocab_size = self.base_model.config.vocab_size
