@@ -968,6 +968,7 @@ TEST_CASES = [
     ################################
     ("Vanilla MLP 1 OSF", "MLP", OSFConfig, {}),
     ("Vanilla MLP 2 OSF", "MLP", OSFConfig, {"target_svd_config": {"lin0.weight": 5, "lin1.weight": 1}}),
+    ("Vanilla MLP 3 OSF", "MLP", OSFConfig, {"target_modules": ["lin0", "lin1"]}),
     ############
     # RandLora #
     ############
@@ -2514,6 +2515,30 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_adapter_name(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adapter_name(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_targeting_unknown_layer_type_raises(self, test_name, model_id, config_cls, config_kwargs):
+        # See #3986
+        if (model_id.lower() != "mlp") or ("target_modules" not in config_kwargs):
+            pytest.skip("This test is only for PEFT methods targeting MLP.")
+
+        class UnknownModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.zeros(10, 10))
+
+        class MLPWithUnknownModules(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = UnknownModule()
+                self.lin1 = UnknownModule()
+
+        config = config_cls(**config_kwargs)
+        # Some methods check all target modules before they create the first layer, so they report that no target
+        # module is compatible.
+        msg = r"Target module .* not supported|No layers? types compatible with"
+        with pytest.raises((TypeError, ValueError), match=msg):
+            get_peft_model(MLPWithUnknownModules(), config)
 
     # Note: skipping _test_prepare_for_training: test does not work with custom models because it assumes that there is
     # always a method get_input_embeddings that returns a layer which does not need updates. Instead, a new test is
