@@ -925,7 +925,7 @@ class TestMixedAdapterLoading:
         ids=["lora", "loha", "lokr", "adalora", "shira", "modules_to_save"],
     )
     def test_from_pretrained_trainability(self, tmp_path, config, is_trainable):
-        # Regression for #3823: mixed loading must honor the same trainability contract as PeftModel.
+        # Regression for #3823: PeftMixedModel must preserve requires_grad just as PeftModel does.
         base_model = SimpleNet()
         saved_model = get_peft_model(copy.deepcopy(base_model), config)
         saved_model.save_pretrained(tmp_path)
@@ -941,37 +941,41 @@ class TestMixedAdapterLoading:
         inputs = torch.ones(2, 10)
         torch.testing.assert_close(mixed_model(inputs), regular_model(inputs))
 
-    @pytest.mark.parametrize("active_trainable", [False, True])
-    @pytest.mark.parametrize("incoming_trainable", [False, True])
+    @pytest.mark.parametrize("first_trainable", [False, True])
+    @pytest.mark.parametrize("second_trainable", [False, True])
     @pytest.mark.parametrize("modules_to_save", [None, ["lin1"]])
-    @pytest.mark.parametrize("incoming_config_class", [LoHaConfig, OFTConfig])
+    @pytest.mark.parametrize("second_config_class", [LoHaConfig, OFTConfig])
     def test_load_adapter_preserves_trainability(
-        self, tmp_path, active_trainable, incoming_trainable, modules_to_save, incoming_config_class
+        self, tmp_path, first_trainable, second_trainable, modules_to_save, second_config_class
     ):
-        # Loading an inactive adapter must preserve existing frozen parameters, including auxiliary modules.
+        # first_trainable=True leaves the first adapter trainable except for lora_A, frozen below; False freezes it all.
+        # second_trainable sets requires_grad for the second adapter, which stays inactive in both cases.
+        # Vary modules_to_save and the second adapter type for coverage.
         base_model = SimpleNet()
-        config = LoraConfig(target_modules=["lin0"], modules_to_save=modules_to_save, init_lora_weights=False)
-        saved_model = get_peft_model(copy.deepcopy(base_model), config)
-        saved_model.save_pretrained(tmp_path / "first")
-        incoming_config = incoming_config_class(
+
+        first_config = LoraConfig(target_modules=["lin0"], modules_to_save=modules_to_save, init_lora_weights=False)
+        first_model = get_peft_model(copy.deepcopy(base_model), first_config)
+        first_model.save_pretrained(tmp_path / "first")
+
+        second_config = second_config_class(
             target_modules=["lin0"], modules_to_save=modules_to_save, init_weights=False
         )
-        incoming_model = get_peft_model(copy.deepcopy(base_model), incoming_config)
-        incoming_model.save_pretrained(tmp_path / "second")
+        second_model = get_peft_model(copy.deepcopy(base_model), second_config)
+        second_model.save_pretrained(tmp_path / "second")
 
         model = PeftMixedModel.from_pretrained(copy.deepcopy(base_model), tmp_path / "first")
-        model.set_adapter("default", inference_mode=not active_trainable)
-        # Keep a partially frozen adapter trainable instead of deriving its state from inference_mode.
+        model.set_adapter("default", inference_mode=not first_trainable)
+        # Loading must also preserve a caller's freeze on one parameter of an otherwise trainable adapter.
         model.base_model.model.lin0.lora_A["default"].weight.requires_grad_(False)
         existing = [(param, param.requires_grad) for param in model.parameters()]
         inputs = torch.ones(2, 10)
         expected_output = model(inputs)
 
-        model.load_adapter(tmp_path / "second", "second", is_trainable=incoming_trainable)
+        model.load_adapter(tmp_path / "second", "second", is_trainable=second_trainable)
 
         assert all(param.requires_grad == requires_grad for param, requires_grad in existing)
-        incoming = [param for name, param in model.named_parameters() if "second" in name.split(".")]
-        assert incoming
-        assert all(param.requires_grad == incoming_trainable for param in incoming)
+        second_parameters = [param for name, param in model.named_parameters() if "second" in name.split(".")]
+        assert second_parameters
+        assert all(param.requires_grad == second_trainable for param in second_parameters)
         assert model.active_adapters == ["default"]
         torch.testing.assert_close(model(inputs), expected_output)

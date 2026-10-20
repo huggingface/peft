@@ -379,10 +379,13 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         # the low_cpu_mem_usage option is handled through kwargs
         requires_grad = {param: param.requires_grad for param in self.parameters()}
         output = PeftModel.load_adapter(self, model_id, adapter_name, *args, **kwargs)
+        # Add new parameters without replacing the flags saved before loading for existing parameters.
         for param in self.parameters():
-            requires_grad.setdefault(param, param.requires_grad)
-        # Synchronize activation without changing existing freezes or the newly loaded adapter's trainability.
+            if param not in requires_grad:
+                requires_grad[param] = param.requires_grad
+        # TODO: not quite clear why this is necessary but tests fail without it
         self.set_adapter(self.active_adapters)
+        # set_adapter also changes requires_grad, so restore each parameter's saved value.
         for param, is_trainable in requires_grad.items():
             param.requires_grad_(is_trainable)
         return output
