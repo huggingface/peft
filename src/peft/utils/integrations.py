@@ -76,6 +76,20 @@ def gather_params_ctx(
     return
 
 
+def get_fsdp_modules(model: nn.Module) -> list[nn.Module]:
+    """Return the FSDP2 modules in `model`, including `model` itself."""
+    if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
+        return []
+
+    try:
+        from torch.distributed.fsdp import FSDPModule
+    except ImportError:
+        # FSDP2 is public from torch 2.6 on
+        return []
+
+    return [module for module in model.modules() if isinstance(module, FSDPModule)]
+
+
 def dequantize_module_weight(module: torch.nn.Module) -> torch.nn.Parameter:
     """
     Helper function to dequantize a quantized weight.

@@ -63,7 +63,7 @@ from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .inc import dispatch_inc
-from .layer import Conv2d, LoraLayer, ParamWrapper, dispatch_default
+from .layer import Embedding, LoraLayer, MultiheadAttention, ParamWrapper, _ConvNd, dispatch_default
 from .te import dispatch_transformer_engine
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
@@ -720,6 +720,26 @@ class LoraModel(BaseTuner):
                 raise ValueError(
                     f"add_weighted_adapter does not support targeting nn.Parameter (problematic adapter '{adapter}')"
                 )
+            if self.peft_config[adapter].use_dora:
+                raise ValueError(f"add_weighted_adapter does not support DoRA (problematic adapter '{adapter}')")
+            if self.peft_config[adapter].kasa_config is not None:
+                raise ValueError(f"add_weighted_adapter does not support KaSA (problematic adapter '{adapter}')")
+
+        # the combined adapter needs lora_bias as soon as one source has it, but an embedding rejects it outright
+        bias_adapters = [adapter for adapter in adapters if self.peft_config[adapter].lora_bias]
+        if bias_adapters:
+            embedding_modules = [module for module in self.modules() if isinstance(module, Embedding)]
+            embedding_adapters = [
+                adapter
+                for adapter in adapters
+                if any(adapter in module.lora_embedding_A for module in embedding_modules)
+            ]
+            if embedding_adapters:
+                raise ValueError(
+                    f"add_weighted_adapter does not support lora_bias combined with nn.Embedding targeting: adapters "
+                    f"{bias_adapters} use lora_bias=True while adapters {embedding_adapters} target an nn.Embedding, "
+                    f"which does not support a bias. Leave either group out of the call."
+                )
 
         # If more than one of the adapters targets the same module with modules_to_save, raise an error, as these
         # modules cannot be merged. First, find the ModulesToSaveWrapper instances in the model, then check if they
@@ -868,6 +888,7 @@ class LoraModel(BaseTuner):
             r=new_rank,
             lora_alpha=new_rank,
             use_rslora=False,
+            lora_bias=any(self.peft_config[adapter].lora_bias for adapter in adapters),
             target_modules=new_target_modules,
             alpha_pattern={},
             rank_pattern={},
@@ -938,6 +959,14 @@ class LoraModel(BaseTuner):
                         combination_type, adapters, weights, target, density, majority_sign_method
                     )
 
+                if target.lora_bias[adapter_name]:
+                    # the bias adds to the output independently of the lora_A/lora_B factorization
+                    new_bias = torch.zeros_like(target.lora_B[adapter_name].bias)
+                    for adapter, weight in zip(adapters, weights):
+                        if adapter in target.lora_B and target.lora_bias[adapter]:
+                            new_bias += weight * target.scaling[adapter] * target.lora_B[adapter].bias.data
+                    target.lora_B[adapter_name].bias.data = new_bias
+
     def _svd_generalized_task_arithmetic_weighted_adapter(
         self,
         combination_type,
@@ -980,13 +1009,10 @@ class LoraModel(BaseTuner):
         else:
             raise ValueError(f"Invalid value passed to combination type: {combination_type}")
 
-        conv2d = isinstance(target, Conv2d)
-        if conv2d:
-            conv2d_1x1 = target.weight.size()[2:4] == (1, 1)
-            if not conv2d_1x1:
-                delta_weight = delta_weight.flatten(start_dim=1)
-            else:
-                delta_weight = delta_weight.squeeze()
+        is_conv = isinstance(target, _ConvNd)
+        if is_conv:
+            # (out, in, *kernel) -> (out, in * prod(kernel)), works for Conv1d, Conv2d (incl. 1x1) and Conv3d
+            delta_weight = delta_weight.flatten(start_dim=1)
         if (hasattr(target, "fan_in_fan_out") and target.fan_in_fan_out) or is_embedding:
             delta_weight = delta_weight.T
 
@@ -1002,7 +1028,7 @@ class LoraModel(BaseTuner):
             low_val = -hi_val
             U = U.clamp(low_val, hi_val)
             Vh = Vh.clamp(low_val, hi_val)
-        if conv2d:
+        if is_conv:
             U = U.reshape(target_lora_B.data.shape)
             Vh = Vh.reshape(target_lora_A.data.shape)
         return Vh, U
@@ -1140,6 +1166,35 @@ class LoraModel(BaseTuner):
         state_dict = {renamed_dora_weights(k): v for k, v in state_dict.items()}
         peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
 
+        # Before PEFT 0.22.0, the out_proj delta weight of MultiheadAttention was applied twice (#3774). To keep the
+        # outputs of these adapters unchanged, lora_B is doubled and the version is updated so this happens only once.
+        # Dev versions after 0.21.0 are not adjusted, since main stays on 0.21.x dev versions after the fix; otherwise,
+        # adapters saved from main would be doubled each time they are loaded. A config without peft_version is from
+        # before PEFT 0.18.0 and is adjusted too.
+        suffix = f".base_layer.out_proj.lora_B.{adapter_name}.weight"
+        out_proj_keys = [
+            key
+            for key in peft_model_state_dict
+            if key.endswith(suffix) and isinstance(model.get_submodule(key.removesuffix(suffix)), MultiheadAttention)
+        ]
+        if out_proj_keys:
+            peft_version = packaging.version.Version(config.peft_version.partition("@")[0])
+            release = packaging.version.Version(peft_version.base_version)
+            needs_doubling = (
+                getattr(config, "_peft_version_missing", False)
+                or release < packaging.version.Version("0.21.1")
+                or (not peft_version.is_devrelease and release < packaging.version.Version("0.22.0"))
+            )
+            if needs_doubling:
+                for key in out_proj_keys:
+                    peft_model_state_dict[key] = 2 * peft_model_state_dict[key]
+                config.peft_version = config._get_peft_version()
+                config._peft_version_missing = False
+                warnings.warn(
+                    f"Adapter '{adapter_name}' was saved with PEFT < 0.22.0, which applied the out_proj LoRA weights "
+                    "of MultiheadAttention twice. They were doubled to keep the outputs of the adapter unchanged."
+                )
+
         if not is_transformers_dtensor_tp and torch.distributed.is_available() and torch.distributed.is_initialized():
             _maybe_shard_state_dict_for_tp(model, peft_model_state_dict, adapter_name)
 
@@ -1158,11 +1213,11 @@ class LoraModel(BaseTuner):
 
         if not any(
             str(peft_config.init_lora_weights).lower().startswith(prefix)
-            for prefix in ["pissa", "corda", "olora", "lora_ga", "true"]
+            for prefix in ["pissa", "corda", "astra", "olora", "lora_ga", "true"]
         ):
             warnings.warn(
-                "`path_initial_model_for_weight_conversion` only works for converting a PiSSA/CorDA/OLoRA/LoRA-GA adapter to "
-                "a LoRA adapter"
+                "`path_initial_model_for_weight_conversion` only works for converting a "
+                "PiSSA/CorDA/Astra/OLoRA/LoRA-GA adapter to a LoRA adapter"
             )
 
         initial_adapter_name = os.path.basename(path_initial_model_for_weight_conversion)
@@ -1174,9 +1229,10 @@ class LoraModel(BaseTuner):
             )
             is_pissa = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower().startswith("pissa")
             is_corda = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "corda"
+            is_astra = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "astra"
             is_olora = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "olora"
             is_lora_ga = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "lora_ga"
-            if is_pissa or is_corda or is_olora or is_lora_ga:
+            if is_pissa or is_corda or is_astra or is_olora or is_lora_ga:
                 raise ValueError(
                     "The `init_lora_weights` parameter of the initial adapter should be set to `True`. "
                     "Otherwise, `self.load_adapter` will subtract the decomposed values again based on the "

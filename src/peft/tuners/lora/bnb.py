@@ -121,7 +121,14 @@ if is_bnb_available():
 
                 bias_data = None
                 if self.lora_bias[active_adapter]:
-                    bias_data = self.get_base_layer().bias.data + self.lora_B[active_adapter].bias
+                    if getattr(self.get_base_layer(), "bias", None) is None:
+                        raise RuntimeError(
+                            "Impossible to merge LoRA with `lora_bias=True` because the base layer has no bias."
+                        )
+                    bias_data = (
+                        self.get_base_layer().bias.data
+                        + self.lora_B[active_adapter].bias * self.scaling[active_adapter]
+                    )
                     if safe_merge and not torch.isfinite(bias_data).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
@@ -170,7 +177,7 @@ if is_bnb_available():
                 ).to(weight.device)
 
                 if self.lora_bias[active_adapter]:
-                    self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias
+                    self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias * self.scaling[active_adapter]
                 state.reset_grads()
 
         def get_delta_weight(self, adapter):
@@ -398,7 +405,14 @@ if is_bnb_4bit_available():
 
                 bias_data = None
                 if self.lora_bias[active_adapter]:
-                    bias_data = self.get_base_layer().bias.data + self.lora_B[active_adapter].bias
+                    if getattr(self.get_base_layer(), "bias", None) is None:
+                        raise RuntimeError(
+                            "Impossible to merge LoRA with `lora_bias=True` because the base layer has no bias."
+                        )
+                    bias_data = (
+                        self.get_base_layer().bias.data
+                        + self.lora_B[active_adapter].bias * self.scaling[active_adapter]
+                    )
                     if safe_merge and not torch.isfinite(bias_data).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
@@ -450,7 +464,7 @@ if is_bnb_4bit_available():
                 self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
 
                 if self.lora_bias[active_adapter]:
-                    self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias
+                    self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias * self.scaling[active_adapter]
 
         def get_delta_weight(self, adapter):
             return (

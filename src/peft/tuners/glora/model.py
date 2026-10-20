@@ -77,8 +77,8 @@ class GloraModel(BaseTuner):
 
         if type(target_base_layer) is not nn.Linear:
             raise ValueError(
-                f"Target module {target} is not a plain torch.nn.Linear (after unwrapping); "
-                "GLoRA does not support this layer type."
+                f"Target module {target} is not supported. Currently, only the following modules are supported: "
+                "`torch.nn.Linear` (subclasses are not supported)."
             )
 
         return GloraLinear(target, adapter_name, config=peft_config)

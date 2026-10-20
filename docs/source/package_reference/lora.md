@@ -40,7 +40,7 @@ This approach has a number of advantages:
 
 In principle, LoRA can be applied to any subset of weight matrices in a neural network to reduce the number of trainable parameters. However, for simplicity and further parameter efficiency, LoRA is typically only applied to the attention blocks in Transformer models - it may be worth targeting other layers as well. The resulting number of trainable parameters in a LoRA model depends on the size of the update matrices, which is determined mainly by the rank `r` and the shape of the original weight matrix.
 
-You can initialize the low-rank matrices with different use-cases in mind - task awareness (CoRDA, EVA), faster convergence (PiSSA), mitigating quantizations (LoftQ) - just to name a few use-cases. Read about the different initializations [below](#initialization). The default initialization is for LoRA to be a no-op, to gradually learn new behavior without interfering much with the existing model.
+You can initialize the low-rank matrices with different use-cases in mind - task awareness (CorDA, EVA, Astra), faster convergence (PiSSA), mitigating quantizations (LoftQ) - just to name a few use-cases. Read about the different initializations [below](#initialization). The default initialization is for LoRA to be a no-op, to gradually learn new behavior without interfering much with the existing model.
 
 ## Usage
 
@@ -58,8 +58,7 @@ config = LoraConfig(
     modules_to_save=["classifier"],
 )
 model = get_peft_model(model, config)
-model.print_trainable_parameters()
-"trainable params: 667,493 || all params: 86,543,818 || trainable%: 0.7712775047664294"
+model.print_healthcheck()
 ```
 
 
@@ -152,6 +151,36 @@ peft_model = get_peft_model(model, lora_config)
 ```
 
 For detailed instruction on using CorDA, please follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/corda_finetuning).
+</hfoption>
+
+<hfoption id="Astra">
+[Astra](https://huggingface.co/papers/2602.19111) builds task-aware LoRA adapters from the tail eigenvectors of the covariance matrix of the module output activations, estimated from a small calibration dataset of the downstream task. The pretrained weight is projected onto the subspace spanned by the tail eigenvectors to initialize the adapter, which constrains the update to the activation subspace that is most relevant for the downstream task and speeds up convergence.
+
+You need to configure the initialization method to "astra", explicitly set `target_modules`, and provide the
+calibration dataset to collect covariance matrices.
+
+```py
+@torch.no_grad()
+def run_model():
+    # Assume `model` and `dataset` is in context...
+    model.eval()
+    for batch in dataset:
+        model(**batch)
+
+
+from peft.tuners.lora import AstraConfig, preprocess_astra
+
+astra_config = AstraConfig()
+lora_config = LoraConfig(
+    init_lora_weights="astra",
+    target_modules=["q_proj", "v_proj"],
+    astra_config=astra_config,
+)
+preprocess_astra(model, lora_config, run_model=run_model)
+peft_model = get_peft_model(model, lora_config)
+```
+
+For detailed instruction on using Astra, please follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/astra_finetuning).
 </hfoption>
 
 <hfoption id="OLoRA">
@@ -626,6 +655,9 @@ model.merge_adapter()
 # unmerge the LoRA layers from the base model
 model.unmerge_adapter()
 ```
+
+> [!TIP]
+> On a quantized model, unmerging is not exact: merging re-quantizes the base weight, and repeated merge and unmerge cycles can accumulate rounding error. See [Merging adapters into quantized weights](../developer_guides/quantization#merging-adapters-into-quantized-weights).
 
 > [!WARNING]
 > If several adapters are active and only some of them are merged, the adapters that are not merged are silently not applied. This behavior will change in PEFT v1.0. See [Merging only some of the active adapters](../developer_guides/troubleshooting#merging-only-some-of-the-active-adapters).
@@ -1140,4 +1172,3 @@ To encode general knowledge, GenKnowSub subtracts the average of the provided ge
 ## Intruder Dimension Reduction
 
 [[autodoc]] tuners.lora.intruders.reduce_intruder_dimension
-
