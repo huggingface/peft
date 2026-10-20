@@ -31,6 +31,7 @@ import pytest
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
+import torch.nn.functional as F
 import transformers
 from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import get_backend, run_command
@@ -2353,6 +2354,152 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.single_gpu_tests
+    def test_bnb_8bit_merge_bias_applies_scaling(self):
+        # Regression test for #3741: the 8-bit merge applied the bias without `* scaling`, unlike
+        # the base path (`lora/layer.py`). Comparing the merged output against the unmerged
+        # (adapter-active) output is what pins the bug, since the pre-fix formula shifts the
+        # logits far more than the re-quantization noise. The round trip afterwards additionally
+        # checks that unmerge inverts merge. Runs on a real quantized model, so the dequant path
+        # is genuine.
+        model_id = "peft-internal-testing/opt-125m"
+
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+                device_map="auto",
+            )
+
+        torch.manual_seed(0)
+        model = get_peft_model(
+            model,
+            LoraConfig(
+                r=4,
+                lora_alpha=32,
+                target_modules=["q_proj"],
+                lora_bias=True,
+                init_lora_weights=False,
+            ),
+        ).eval()
+
+        layer = next(
+            module
+            for module in model.modules()
+            if isinstance(module, LoraLayer) and module.get_base_layer().bias is not None
+        )
+        # Sanity check: with a zero bias the parity assertions below would hold for any scaling.
+        assert layer.lora_B["default"].bias.abs().max() > 0
+
+        # bnb re-quantizes the weight on merge, so the outputs are not bit-identical even with the
+        # correct scaling. This tolerance absorbs that error, which grows with the effective scaling
+        # (8.0 here), while a dropped factor still shifts the output far beyond it.
+        atol, rtol = 1e-2, 1
+
+        inputs = torch.tensor([[1, 2, 3, 4, 5]], device=model.device)
+
+        with torch.inference_mode():
+            out_before = model(inputs).logits
+
+        model.merge_adapter()
+
+        with torch.inference_mode():
+            out_merged = model(inputs).logits
+
+        assert torch.allclose(
+            F.softmax(out_before, dim=-1),
+            F.softmax(out_merged, dim=-1),
+            atol=atol,
+            rtol=rtol,
+        )
+
+        model.unmerge_adapter()
+
+        with torch.inference_mode():
+            out_unmerged = model(inputs).logits
+
+        assert torch.allclose(
+            F.softmax(out_before, dim=-1),
+            F.softmax(out_unmerged, dim=-1),
+            atol=atol,
+            rtol=rtol,
+        )
+
+        # safe_merge NaN guard must raise ValueError (the missing `.all()` raised an
+        # ambiguous-Boolean RuntimeError instead on multi-element bias).
+        layer.lora_B["default"].bias.data.fill_(float("nan"))
+        with pytest.raises(ValueError, match="NaNs detected"):
+            model.merge_adapter(safe_merge=True)
+
+    @pytest.mark.single_gpu_tests
+    def test_bnb_4bit_merge_bias_applies_scaling(self):
+        # Same as above for the 4-bit path (#3741 comment scope), on a real quantized model.
+        model_id = "peft-internal-testing/opt-125m"
+
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+                device_map="auto",
+            )
+
+        torch.manual_seed(0)
+        model = get_peft_model(
+            model,
+            LoraConfig(
+                r=4,
+                lora_alpha=32,
+                target_modules=["q_proj"],
+                lora_bias=True,
+                init_lora_weights=False,
+            ),
+        ).eval()
+
+        layer = next(
+            module
+            for module in model.modules()
+            if isinstance(module, LoraLayer) and module.get_base_layer().bias is not None
+        )
+        # Sanity check: with a zero bias the parity assertions below would hold for any scaling.
+        assert layer.lora_B["default"].bias.abs().max() > 0
+
+        # Same comparison and tolerance as the 8-bit test above.
+        atol, rtol = 1e-2, 1
+
+        inputs = torch.tensor([[1, 2, 3, 4, 5]], device=model.device)
+
+        with torch.inference_mode():
+            out_before = model(inputs).logits
+
+        model.merge_adapter()
+
+        with torch.inference_mode():
+            out_merged = model(inputs).logits
+
+        assert torch.allclose(
+            F.softmax(out_before, dim=-1),
+            F.softmax(out_merged, dim=-1),
+            atol=atol,
+            rtol=rtol,
+        )
+
+        model.unmerge_adapter()
+
+        with torch.inference_mode():
+            out_unmerged = model(inputs).logits
+
+        assert torch.allclose(
+            F.softmax(out_before, dim=-1),
+            F.softmax(out_unmerged, dim=-1),
+            atol=atol,
+            rtol=rtol,
+        )
+
+        # safe_merge NaN guard must raise ValueError.
+        layer.lora_B["default"].bias.data.fill_(float("nan"))
+        with pytest.raises(ValueError, match="NaNs detected"):
+            model.merge_adapter(safe_merge=True)
 
 
 @require_non_cpu
