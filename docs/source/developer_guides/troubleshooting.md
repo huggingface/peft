@@ -91,6 +91,27 @@ Disadvantages of half precision adapter:
 
 Note that for most use cases, overall runtime and memory cost will be determined by the size of the base model and by the dataset, while the dtype of the PEFT adapter will only have a small impact.
 
+### Running a model in float16 on CPU is much slower
+
+If you run a model that was loaded in float16 (fp16) on the CPU, the forward pass can be much slower than the same model loaded in float32 (fp32) -- often by an order of magnitude. This is not specific to PEFT but to PyTorch, which does not offer fast CPU kernels for fp16. In the PyTorch autocast op listings, for instance, "ops that can autocast to float16" are defined for CUDA and XPU only, while the listing for CPU contains just bfloat16 and float32, see [CPU Op-Specific Behavior](https://pytorch.org/docs/stable/amp.html#cpu-op-specific-behavior).
+
+The slowdown is particularly pronounced for models that perform many matrix multiplications, and it is not limited to large models. For example, PEFT's Mixtral weight conversion tests used to take about 26 seconds per test on the CPU CI, almost entirely because of fp16 matmuls, compared to about 3 seconds with fp32.
+
+This can also happen implicitly: if the checkpoint on the Hub stores `torch_dtype: float16`, then loading it without passing a dtype gives you an fp16 model, even on CPU. Pass the dtype explicitly to avoid this:
+
+```python
+import torch
+from transformers import AutoModelForCausalLM
+
+# implicitly fp16 on CPU if the checkpoint is stored in fp16 -> slow
+model = AutoModelForCausalLM.from_pretrained(model_id)
+
+# explicitly fp32 -> much faster on CPU
+model = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.float32)
+```
+
+If you want to save memory and bfloat16 (bf16) is good enough for your use case, use that instead -- bfloat16 is the reduced precision dtype that PyTorch supports on CPU. Note that on older Transformers versions, the argument is called `torch_dtype` instead of `dtype`.
+
 ## Training runs but the model does not improve
 
 If training appears healthy (the loss goes down, checkpoints are saved without errors) but the resulting model performs no better than the base model, check whether the trainable parameters actually changed during training:
@@ -407,6 +428,10 @@ TunerModelStatus(
 ```
 
 ## Speed
+
+### Running on CPU with float16 is slow
+
+If the model was loaded in float16 (fp16) and runs on the CPU, the forward pass can be much slower than with float32 or bfloat16, see [Running a model in float16 on CPU is much slower](#running-a-model-in-float16-on-cpu-is-much-slower).
 
 ### Loading adapter weights is slow
 
