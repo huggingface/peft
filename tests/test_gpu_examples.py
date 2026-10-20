@@ -5110,6 +5110,8 @@ class TestUnshardedLoRASaveUnderZeRO3:
     @pytest.mark.single_gpu_tests
     def test_zero3_ungathered_save_warns_and_gather_succeeds(self, tmp_path):
         deepspeed = pytest.importorskip("deepspeed")
+        if dist.is_initialized():
+            _teardown_dist()
         _setup_dist(rank=0, world_size=1, port=29555)
 
         try:
@@ -5136,6 +5138,8 @@ class TestUnshardedLoRASaveUnderZeRO3:
     @pytest.mark.parametrize("lora_bias", [True, "all", "lora_only"])
     def test_zero3_gathered_save_doesnt_warn(self, tmp_path, recwarn, lora_bias):
         deepspeed = pytest.importorskip("deepspeed")
+        if dist.is_initialized():
+            _teardown_dist()
         _setup_dist(rank=0, world_size=1, port=29555)
 
         try:
