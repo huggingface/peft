@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 from typing import Any, Union
 
 import pytest
@@ -406,7 +407,7 @@ def test_cpt_partial_context_keeps_input_labels(
     # CPT uses four token types per demonstration; only positive multiples of four contribute to the loss.
     # Input types must be shifted past the context types without changing their roles. With an incomplete context,
     # an offset not divisible by four masks input answers (#3899), yielding NaN when no context answer remains.
-    # Compare incomplete and complete contexts against a loss reference that selects answers before any offset.
+    # Fixed logits let us write the expected answer losses explicitly for incomplete and complete contexts.
     torch.manual_seed(0)
     config_kwargs = (
         {}
@@ -424,28 +425,28 @@ def test_cpt_partial_context_keeps_input_labels(
     input_types = torch.tensor([[1, 2, 4, 4], [0, 4, 2, 4]]) if explicit_input_mask else torch.full_like(input_ids, 4)
     kwargs = {"input_type_mask": input_types.clone()} if explicit_input_mask else {}
 
-    output = model(input_ids=input_ids, labels=input_ids.clone(), **kwargs)
+    # Logit j is always j, so an answer token t has loss log(sum(exp(j), j=0..31)) - t.
+    with model.base_model.get_output_embeddings().register_forward_hook(
+        lambda module, inputs, output: torch.arange(32, device=output.device, dtype=output.dtype).expand_as(output)
+    ):
+        output = model(input_ids=input_ids, labels=input_ids.clone(), **kwargs)
 
-    # The explicit input mask mixes ignored tokens and type-4 answers; the default makes every input an answer.
-    # Select context and input answers separately, so the reference does not depend on the offset being tested.
-    # Each context has at most one answer group and each input has one: in decay mode, context answers get weight
-    # 0.95 and input answers get weight 1. Direct cross entropy then checks both label selection and group weighting.
-    prefix_labels = torch.tensor(config.cpt_token_ids).expand(2, -1)
-    prefix_types_tensor = torch.tensor(config.cpt_tokens_type_mask).expand(2, -1)
-    prefix_answers = (prefix_types_tensor > 0) & (prefix_types_tensor % 4 == 0)
-    input_answers = (input_types > 0) & (input_types % 4 == 0)
-    labels = torch.cat([prefix_labels, input_ids], dim=1)
-    labels[~torch.cat([prefix_answers, input_answers], dim=1)] = -100
-    losses = torch.nn.functional.cross_entropy(
-        output.logits[:, :-1].reshape(-1, 32), labels[:, 1:].reshape(-1), reduction="none"
-    ).view(2, -1)
-    weights = torch.ones_like(labels, dtype=torch.float32)
-    if weighted_loss == "decay":
-        weights[:, : config.num_virtual_tokens] = 0.95
-    valid = labels[:, 1:] != -100
-    expected = (losses[valid] * weights[:, 1:][valid]).mean()
+    log_normalizer = math.log(sum(math.exp(j) for j in range(32)))
+    if explicit_input_mask:
+        # The two samples select answers [7, 8] and [7, 5].
+        loss_sum = 4 * log_normalizer - (7 + 8 + 7 + 5)
+        label_count = 4
+    else:
+        # Without a mask, all four input tokens in each sample contribute.
+        loss_sum = 8 * log_normalizer - 2 * (5 + 6 + 7 + 8)
+        label_count = 8
+    if prefix_types in ([1, 2, 3, 4], [1, 2, 3, 4, 5]):
+        # Each sample also has one context answer, token 3, weighted by 0.95 only in decay mode.
+        context_weight = 0.95 if weighted_loss == "decay" else 1
+        loss_sum += 2 * context_weight * (log_normalizer - 3)
+        label_count += 2
 
-    torch.testing.assert_close(output.loss, expected)
+    torch.testing.assert_close(output.loss, output.loss.new_tensor(loss_sum / label_count))
 
 
 def test_cpt_forward_does_not_mutate_input_type_mask():
