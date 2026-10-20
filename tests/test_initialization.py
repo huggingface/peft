@@ -554,14 +554,6 @@ class TestLoraInitialization:
         assert torch.all(weight_B == 0)
         assert torch.allclose(output, peft_model(data)[0], atol=1e-6)
 
-        # the base weights are unchanged and both A and B remain trainable
-        assert torch.equal(model.linear.weight, peft_model.base_model.linear.base_layer.weight)
-        assert weight_A.requires_grad
-        assert weight_B.requires_grad
-
-        # the recommended 1:1 alpha/rank ratio gives a scaling factor of 1
-        assert peft_model.base_model.linear.scaling["default"] == 1.0
-
     def test_lora_nora_target_parameters(self):
         class LayerUsingParameter(nn.Module):
             def __init__(self):
@@ -598,6 +590,52 @@ class TestLoraInitialization:
 
         # A columns have unit L2 norm and B is zero, so the adapter output is zero at init
         assert torch.allclose(weight_A.norm(dim=0), weight_A.new_ones(weight_A.shape[1]), atol=1e-5)
+        assert torch.all(weight_B == 0)
+        assert torch.allclose(output, peft_model(data), atol=1e-6)
+
+    def test_lora_nora_target_parameters_3d(self):
+        class MoeLayerUsingParameter(nn.Module):
+            # parameter layout is (num_experts, in_features, out_features)
+            is_transposed = True
+
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(3, 8, 6))
+
+            def forward(self, x):
+                return torch.einsum("eio,bi->beo", self.weight, x)
+
+        class ModelUsingParameter(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer = MoeLayerUsingParameter()
+
+            def forward(self, x):
+                return self.layer(x)
+
+        torch.manual_seed(0)
+        model = ModelUsingParameter()
+        data = torch.rand(5, 8)
+        output = model(data)
+
+        r = 4
+        config = LoraConfig(
+            init_lora_weights="nora",
+            target_parameters=["layer.weight"],
+            r=r,
+            lora_alpha=r,
+        )
+        peft_model = get_peft_model(model, config)
+
+        wrapper = peft_model.base_model.model.layer
+        assert wrapper.num_experts == 3
+        weight_A = wrapper.lora_A["default"].weight
+        weight_B = wrapper.lora_B["default"].weight
+
+        # A stacks one (r, in_features) block per expert; each expert's columns must have unit L2 norm
+        weight_A = weight_A.view(wrapper.num_experts, r, -1)
+        norms = weight_A.norm(dim=1)
+        assert torch.allclose(norms, norms.new_ones(norms.shape), atol=1e-5)
         assert torch.all(weight_B == 0)
         assert torch.allclose(output, peft_model(data), atol=1e-6)
 

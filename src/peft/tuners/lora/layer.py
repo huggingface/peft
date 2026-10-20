@@ -337,13 +337,24 @@ class LoraLayer(BaseTunerLayer):
                     self.lora_arrow[adapter].on_adapter_change(self.lora_A, self.lora_B)
 
     def nora_init(self, adapter_name):
+        # When the adapter is being created under `init_empty_weights` (e.g. low_cpu_mem_usage=True), its parameters
+        # live on the meta device and will be filled in from a checkpoint after creation. Skip in that case.
+        if self.lora_B[adapter_name].weight.device.type == "meta":
+            return
         with torch.no_grad():
             A = self.lora_A[adapter_name].weight
-            A.div_(A.norm(dim=0, keepdim=True).clamp_min(1e-6))
+            num_experts = getattr(self, "num_experts", 1)
+            if num_experts > 1:
+                # For 3d parameters (e.g. MoE expert weights), A stacks one (r, in_features) block per expert along
+                # the first dimension, so normalize the columns of each block independently.
+                A = A.view(num_experts, self.r[adapter_name], -1)
+                A.div_(A.norm(dim=1, keepdim=True).clamp_min(1e-6))
+            else:
+                A.div_(A.norm(dim=0, keepdim=True).clamp_min(1e-6))
 
-        nn.init.zeros_(self.lora_B[adapter_name].weight) 
-        if self.lora_bias[adapter_name]: 
-            nn.init.zeros_(self.lora_B[adapter_name].bias) 
+        nn.init.zeros_(self.lora_B[adapter_name].weight)
+        if self.lora_bias[adapter_name]:
+            nn.init.zeros_(self.lora_B[adapter_name].bias)
 
     def reset_lora_parameters(self, adapter_name, init_lora_weights):
         if init_lora_weights is not False:
