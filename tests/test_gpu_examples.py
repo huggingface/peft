@@ -5130,8 +5130,7 @@ class TestUnshardedLoRASaveUnderZeRO3:
             lora_a = next(v for k, v in sd.items() if "lora_A" in k)
             assert lora_a.ndim == 2 and all(d > 0 for d in lora_a.shape)
         finally:
-            if dist.is_initialized():
-                dist.destroy_process_group()
+            _teardown_dist()
 
     @pytest.mark.single_gpu_tests
     @pytest.mark.parametrize("lora_bias", [True, "all", "lora_only"])
@@ -5156,8 +5155,7 @@ class TestUnshardedLoRASaveUnderZeRO3:
                 assert "not gathered" not in str(warning.message)
 
         finally:
-            if dist.is_initialized():
-                dist.destroy_process_group()
+            _teardown_dist()
 
 
 class TestBOFT:
