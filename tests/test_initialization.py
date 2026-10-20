@@ -6922,6 +6922,36 @@ class TestWeightTying:
         assert embed_lora_A.data_ptr() == lm_lora_B.data_ptr()
         assert embed_lora_B.data_ptr() == lm_lora_A.data_ptr()
 
+    @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
+    @pytest.mark.parametrize("autocast_adapter_dtype", [True, False])
+    def test_weight_tying_tied_model_target_modules_lora_half_precision(self, dtype, autocast_adapter_dtype):
+        # Regression test for issue #3929: ensure_weight_tying=True should preserve weight tying
+        # when base model is in half precision and autocast_adapter_dtype is enabled/disabled.
+        model = self.get_lm_model().to(dtype)
+
+        embed_token_config = LoraConfig(
+            target_modules=["linear", "lm_head"],
+            ensure_weight_tying=True,
+        )
+
+        model = get_peft_model(model, embed_token_config, autocast_adapter_dtype=autocast_adapter_dtype)
+
+        adapter_name = "default"
+        embed_lora_A = model.base_model.model.model.embed_tokens.lora_embedding_A[adapter_name]
+        embed_lora_B = model.base_model.model.model.embed_tokens.lora_embedding_B[adapter_name]
+
+        lm_lora_A = model.base_model.model.lm_head.lora_A[adapter_name].weight
+        lm_lora_B = model.base_model.model.lm_head.lora_B[adapter_name].weight
+
+        expected_adapter_dtype = torch.float32 if autocast_adapter_dtype else dtype
+        assert embed_lora_A.dtype == expected_adapter_dtype
+        assert lm_lora_B.dtype == expected_adapter_dtype
+
+        assert torch.allclose(embed_lora_A, lm_lora_B.T)
+        assert torch.allclose(embed_lora_B, lm_lora_A.T)
+        assert embed_lora_A.data_ptr() == lm_lora_B.data_ptr()
+        assert embed_lora_B.data_ptr() == lm_lora_A.data_ptr()
+
     @pytest.mark.parametrize("target_modules", [".*embed_tokens$", ".*lm_head$", ".*(embed_tokens|lm_head)$"])
     def test_weight_tying_tied_model_target_modules_str_lora(self, target_modules):
         # Same as `test_weight_tying_tied_model_target_modules_lora` but the tied module

@@ -1398,3 +1398,33 @@ class LoraModel(BaseTuner):
                     break
 
         peft_config.target_modules = target_modules
+
+    def _cast_adapter_dtype(self, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
+        super()._cast_adapter_dtype(adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
+        if not autocast_adapter_dtype:
+            return
+
+        peft_config = self.peft_config.get(adapter_name)
+        if not peft_config or not getattr(peft_config, "ensure_weight_tying", False):
+            return
+
+        target_modules_to_tie = getattr(peft_config, "target_modules_to_tie", []) or []
+        if not target_modules_to_tie:
+            return
+
+        tied_module = self.model.get_input_embeddings()
+        if not hasattr(tied_module, "lora_embedding_A") or adapter_name not in tied_module.lora_embedding_A:
+            return
+
+        emb_A = tied_module.lora_embedding_A[adapter_name]
+        emb_B = tied_module.lora_embedding_B[adapter_name]
+
+        for key in target_modules_to_tie:
+            try:
+                _, target, _ = _get_submodules(self.model, key.removeprefix("_orig_mod."))
+            except (AttributeError, KeyError):
+                continue
+            if hasattr(target, "lora_A") and adapter_name in target.lora_A:
+                target.lora_A[adapter_name].weight = nn.Parameter(emb_B.t(), requires_grad=emb_B.requires_grad)
+            if hasattr(target, "lora_B") and adapter_name in target.lora_B:
+                target.lora_B[adapter_name].weight = nn.Parameter(emb_A.t(), requires_grad=emb_A.requires_grad)
