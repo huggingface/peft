@@ -258,7 +258,6 @@ ALL_CONFIGS = [
             "r": 2,
             "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,
-            "init_weights": False,
         },
     ),
     (

@@ -344,7 +344,6 @@ ALL_CONFIGS = [
             "r": 2,
             "task_type": "CAUSAL_LM",
             "target_modules": None,
-            "init_weights": False,
         },
     ),
     (

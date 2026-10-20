@@ -108,9 +108,7 @@ def paca_linear_backward(
         grad_deltas = []
         for x_part, scaling in zip(x_parts, scalings):
             grad = _mm_to_dtype(g2.t(), x_part.reshape(-1, x_part.shape[-1]).to(g2.dtype), _grad_dtype(g2.dtype))
-            if scaling != 1:
-                grad.mul_(scaling)
-            grad_deltas.append(grad)
+            grad_deltas.append(grad.mul_(scaling))
     return [grad_x, *grad_deltas]
 
 

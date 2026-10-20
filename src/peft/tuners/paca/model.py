@@ -82,17 +82,14 @@ class PacaModel(BaseTuner):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
-        kwargs = {
-            "r": paca_config.r,
-            "paca_alpha": paca_config.paca_alpha,
-            "init_weights": paca_config.init_weights,
-            "random_seed": _get_layer_seed(paca_config.random_seed, current_key),
-        }
+        r = paca_config.r
+        paca_alpha = paca_config.paca_alpha
+        random_seed = _get_layer_seed(paca_config.random_seed, current_key)
 
         if isinstance(target, PacaLayer):
-            target.update_layer(adapter_name, **kwargs)
+            target.update_layer(adapter_name, r, paca_alpha, config=paca_config, random_seed=random_seed)
         else:
-            kwargs.update(get_quantization_kwargs(self))
+            kwargs = {"r": r, "paca_alpha": paca_alpha, "random_seed": random_seed, **get_quantization_kwargs(self)}
             new_module = self._create_new_module(paca_config, adapter_name, target, **kwargs)
             if adapter_name not in self.active_adapter:
                 # adding an additional adapter: it is not automatically trainable
@@ -115,4 +112,4 @@ class PacaModel(BaseTuner):
                 "`torch.nn.Linear`."
             )
 
-        return Linear(target, adapter_name, **kwargs)
+        return Linear(target, adapter_name, config=paca_config, **kwargs)

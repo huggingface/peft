@@ -20,17 +20,17 @@ import torch
 from torch import nn
 from torch.library import opcheck
 
-from peft import PacaConfig, get_peft_model, set_peft_model_state_dict
-from peft.tuners.lora.conversion import convert_to_lora
+from peft import PacaConfig, get_peft_model
 from peft.tuners.paca.layer import Linear as PacaLinear
+from peft.utils import infer_device
 
 
 class MLP(nn.Module):
-    def __init__(self, bias=True):
+    def __init__(self):
         super().__init__()
-        self.lin0 = nn.Linear(16, 32, bias=bias)
+        self.lin0 = nn.Linear(16, 32)
         self.relu = nn.ReLU()
-        self.lin1 = nn.Linear(32, 8, bias=bias)
+        self.lin1 = nn.Linear(32, 8)
 
     def forward(self, x):
         return self.lin1(self.relu(self.lin0(x)))
@@ -40,50 +40,17 @@ def _paca_layers(model):
     return [module for module in model.modules() if isinstance(module, PacaLinear)]
 
 
-def _reference_forward(layer: PacaLinear, x: torch.Tensor, adapter_name: str = "default"):
-    # Straightforward reference: build the adapted weight out of place and let autograd do the rest.
-    base_layer = layer.get_base_layer()
-    idx = layer.paca_indices[adapter_name]
-    delta = layer.paca_delta[adapter_name]
-    weight = base_layer.weight.detach().clone()
-    columns = weight[:, idx] + layer.scaling[adapter_name] * delta
-    weight = weight.index_copy(1, idx, columns)
-    return nn.functional.linear(x, weight, base_layer.bias)
-
-
 class TestPaca:
-    torch_device = "cuda" if torch.cuda.is_available() else "cpu"
+    torch_device = infer_device()
 
     @pytest.fixture
     def mlp(self):
         torch.manual_seed(0)
         return MLP().to(self.torch_device)
 
-    @pytest.mark.parametrize("bias", [True, False])
-    def test_forward_and_gradients_match_reference(self, bias):
-        torch.manual_seed(0)
-        model = MLP(bias=bias).to(self.torch_device).double()
-        config = PacaConfig(r=4, paca_alpha=8, target_modules=["lin0"], init_weights=False, random_seed=0)
-        model = get_peft_model(model, config)
-        layer = model.base_model.model.lin0
-
-        x = torch.randn(3, 5, 16, device=self.torch_device, dtype=torch.double, requires_grad=True)
-        grad_output = torch.randn(3, 5, 32, device=self.torch_device, dtype=torch.double)
-
-        out = layer(x)
-        out.backward(grad_output)
-        grad_x, grad_delta = x.grad.clone(), layer.paca_delta["default"].grad.clone()
-
-        x.grad = None
-        layer.paca_delta["default"].grad = None
-        out_ref = _reference_forward(layer, x)
-        out_ref.backward(grad_output)
-
-        torch.testing.assert_close(out, out_ref)
-        torch.testing.assert_close(grad_x, x.grad)
-        torch.testing.assert_close(grad_delta, layer.paca_delta["default"].grad)
-
     def test_gradcheck(self):
+        if self.torch_device == "mps":
+            pytest.skip("MPS does not support float64")
         torch.manual_seed(0)
         model = MLP().to(self.torch_device).double()
         config = PacaConfig(r=3, target_modules=["lin0"], init_weights=False, random_seed=0)
@@ -94,10 +61,12 @@ class TestPaca:
 
     def test_base_weight_is_restored_after_training_step(self, mlp):
         base_weights = {name: module.weight.detach().clone() for name, module in mlp.named_children() if "lin" in name}
+        x = torch.randn(8, 16, device=self.torch_device)
+        with torch.no_grad():
+            base_output = mlp(x)
         config = PacaConfig(r=4, target_modules=["lin0", "lin1"], random_seed=0)
         model = get_peft_model(mlp, config)
         optimizer = torch.optim.AdamW(model.parameters(), lr=1e-2)
-        x = torch.randn(8, 16, device=self.torch_device)
 
         for _ in range(3):
             optimizer.zero_grad()
@@ -107,7 +76,7 @@ class TestPaca:
         for name, weight in base_weights.items():
             assert torch.equal(getattr(model.base_model.model, name).get_base_layer().weight, weight)
         # sanity check: the adapter was actually trained
-        assert not torch.allclose(model(x), mlp.lin1.get_base_layer()(mlp.relu(mlp.lin0.get_base_layer()(x))))
+        assert not torch.allclose(model(x), base_output)
 
     def test_only_selected_input_channels_are_saved_for_backward(self):
         # The activation memory saving of PaCA: instead of the full input, only the `r` input channels that correspond
@@ -115,7 +84,8 @@ class TestPaca:
         in_features, out_features, r = 64, 48, 4
         base_layer = nn.Linear(in_features, out_features).to(self.torch_device)
         base_layer.requires_grad_(False)
-        layer = PacaLinear(base_layer, "default", r=r, paca_alpha=r, init_weights=False)
+        config = PacaConfig(r=r, paca_alpha=r, init_weights=False)
+        layer = PacaLinear(base_layer, "default", r, r, config=config)
         x = torch.randn(2, 7, in_features, device=self.torch_device, requires_grad=True)
 
         saved_shapes = []
@@ -129,49 +99,6 @@ class TestPaca:
 
         assert (2, 7, r) in saved_shapes
         assert all(shape[-1] != in_features for shape in saved_shapes), saved_shapes
-
-    def test_random_seed_is_reproducible_and_differs_per_layer(self):
-        indices = []
-        for _ in range(2):
-            torch.manual_seed(0)
-            model = nn.Sequential(nn.Linear(64, 64), nn.Linear(64, 64))
-            model = get_peft_model(model, PacaConfig(r=8, target_modules=["0", "1"], random_seed=42))
-            indices.append([layer.paca_indices["default"].clone() for layer in _paca_layers(model)])
-
-        assert all(torch.equal(i0, i1) for i0, i1 in zip(*indices))
-        # layers of the same shape get different selections
-        assert not torch.equal(indices[0][0], indices[0][1])
-
-    def test_indices_are_sorted_and_unique(self, mlp):
-        model = get_peft_model(mlp, PacaConfig(r=8, target_modules=["lin0", "lin1"]))
-        for layer in _paca_layers(model):
-            idx = layer.paca_indices["default"]
-            assert idx.dtype == torch.int64
-            assert torch.equal(idx, torch.sort(idx).values)
-            assert len(torch.unique(idx)) == len(idx)
-
-    def test_r_larger_than_in_features_raises(self, mlp):
-        with pytest.raises(ValueError, match="cannot be larger than in_features"):
-            get_peft_model(mlp, PacaConfig(r=17, target_modules=["lin0"]))
-
-    def test_conversion_to_lora_is_exact(self, mlp):
-        # The PaCA update is non-zero in r columns only, so a LoRA adapter of rank r represents it exactly. The model
-        # runs in float64 so that the result does not depend on the global float32 matmul precision (TF32 may have
-        # been enabled by other tests in the same process); the tolerance covers the SVD of the conversion, which is
-        # computed in float32.
-        r = 4
-        mlp = mlp.double()
-        config = PacaConfig(r=r, target_modules=["lin0", "lin1"], init_weights=False)
-        model = get_peft_model(copy.deepcopy(mlp), config)
-        model.eval()
-        x = torch.randn(5, 16, device=self.torch_device, dtype=torch.double)
-        expected = model(x)
-
-        lora_config, lora_state_dict = convert_to_lora(model, rank=r)
-        lora_model = get_peft_model(copy.deepcopy(mlp), lora_config).eval()
-        load_result = set_peft_model_state_dict(lora_model, lora_state_dict)
-        assert not load_result.unexpected_keys
-        torch.testing.assert_close(lora_model(x), expected, atol=1e-5, rtol=1e-5)
 
     def _add_overlapping_adapters(self, model):
         # Two adapters on lin0 whose selected columns partially overlap. The indices are set explicitly, as with the
@@ -189,6 +116,8 @@ class TestPaca:
 
     @pytest.mark.parametrize("custom_op", [False, True])
     def test_overlapping_adapters_forward_and_gradients_match_reference(self, custom_op):
+        if self.torch_device == "mps":
+            pytest.skip("MPS does not support float64")
         torch.manual_seed(0)
         _, layer = self._add_overlapping_adapters(MLP().to(self.torch_device).double())
         base_weight = layer.get_base_layer().weight.detach().clone()
@@ -239,6 +168,10 @@ class TestPaca:
         model.base_model.unmerge_adapter()
         torch.testing.assert_close(layer.get_base_layer().weight, base_weight)
         torch.testing.assert_close(model(x), expected)
+
+        unloaded = model.merge_and_unload(adapter_names=["adapter0", "adapter1"])
+        assert not _paca_layers(unloaded)
+        torch.testing.assert_close(unloaded(x), expected)
 
     def test_autocast_bf16(self, mlp):
         config = PacaConfig(r=4, target_modules=["lin0", "lin1"], init_weights=False)

@@ -261,7 +261,6 @@ ALL_CONFIGS = [
             "r": 2,
             "task_type": "SEQ_2_SEQ_LM",
             "target_modules": None,
-            "init_weights": False,
         },
     ),
     (

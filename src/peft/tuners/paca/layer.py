@@ -24,6 +24,8 @@ from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
 from peft.utils import quantization_extra_repr, resolve_quantization_backend
 
+from .config import PacaConfig
+
 
 # torch.library.custom_op, used for the torch.compile path (see _ops.py), was added in PyTorch 2.4
 _torch_supports_custom_ops = version.parse(torch.__version__) >= version.parse("2.4.0")
@@ -165,9 +167,7 @@ class _PacaLinearFunction(torch.autograd.Function):
                 continue
             x_part_2d = x_part.reshape(-1, x_part.shape[-1]).to(grad_output_2d.dtype)
             grad_delta = _mm_to_dtype(grad_output_2d.t(), x_part_2d, delta_dtype)
-            if scaling != 1:
-                grad_delta.mul_(scaling)
-            grad_deltas.append(grad_delta)
+            grad_deltas.append(grad_delta.mul_(scaling))
 
         return (grad_x, grad_bias, None, None, None, *grad_deltas)
 
@@ -205,11 +205,11 @@ class PacaLayer(BaseTunerLayer):
         adapter_name: str,
         r: int,
         paca_alpha: int,
-        init_weights: bool = True,
+        config: PacaConfig,
         random_seed: Optional[int] = None,
-        inference_mode: bool = False,
         **kwargs,
     ) -> None:
+        # random_seed is the per-layer seed derived from config.random_seed and the module name (see PacaModel)
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         if r > self.in_features:
@@ -224,10 +224,10 @@ class PacaLayer(BaseTunerLayer):
         # Sorting does not change which connections are trained, but gives a more regular memory access pattern.
         self.paca_indices[adapter_name] = torch.sort(indices).values
         self.paca_delta[adapter_name] = nn.Parameter(torch.empty(self.out_features, r))
-        self.reset_paca_parameters(adapter_name, init_weights)
+        self.reset_paca_parameters(adapter_name, config.init_weights)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
+        self.set_adapter(self.active_adapters, inference_mode=config.inference_mode)
 
     def reset_paca_parameters(self, adapter_name: str, init_weights: bool = True) -> None:
         if adapter_name not in self.paca_delta.keys():
@@ -237,29 +237,6 @@ class PacaLayer(BaseTunerLayer):
         else:
             # only used for testing, so that the adapter is not a no-op
             nn.init.normal_(self.paca_delta[adapter_name], std=0.1)
-
-    def set_scale(self, adapter: str, scale: float) -> None:
-        if adapter not in self.scaling:
-            # Ignore the case where the adapter is not in the layer
-            return
-        self.scaling[adapter] = scale * self.paca_alpha[adapter] / self.r[adapter]
-
-    def scale_layer(self, scale: float) -> None:
-        if scale == 1:
-            return
-        for active_adapter in self.active_adapters:
-            if active_adapter not in self.paca_delta.keys():
-                continue
-            self.scaling[active_adapter] *= scale
-
-    def unscale_layer(self, scale: Optional[float] = None) -> None:
-        for active_adapter in self.active_adapters:
-            if active_adapter not in self.paca_delta.keys():
-                continue
-            if scale is None:
-                self.scaling[active_adapter] = self.paca_alpha[active_adapter] / self.r[active_adapter]
-            else:
-                self.scaling[active_adapter] /= scale
 
     def _get_weight_for_matmul(self) -> torch.Tensor:
         """Return the tensor that the adapted columns are swapped into.
@@ -278,9 +255,9 @@ class Linear(nn.Module, PacaLayer):
         self,
         base_layer: nn.Module,
         adapter_name: str,
-        r: int = 8,
-        paca_alpha: int = 8,
-        init_weights: bool = True,
+        r: int,
+        paca_alpha: int,
+        config: PacaConfig,
         random_seed: Optional[int] = None,
         **kwargs,
     ) -> None:
@@ -290,7 +267,7 @@ class Linear(nn.Module, PacaLayer):
             raise ValueError("PaCA does not support nested base layers")
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, paca_alpha=paca_alpha, init_weights=init_weights, random_seed=random_seed)
+        self.update_layer(adapter_name, r, paca_alpha, config=config, random_seed=random_seed)
 
     def _adapted_columns(self, weight: torch.Tensor, adapter: str, sign: int) -> torch.Tensor:
         idx = self.paca_indices[adapter].to(weight.device)
@@ -369,32 +346,30 @@ class Linear(nn.Module, PacaLayer):
         return delta_weight.index_copy(1, idx, delta * self.scaling[adapter])
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        active_adapters = [a for a in self.active_adapters if a in self.paca_delta.keys()]
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            return self.base_layer(x, *args, **kwargs)
-        if self.merged:
-            return self.base_layer(x, *args, **kwargs)
-
-        active_adapters = [a for a in self.active_adapters if a in self.paca_delta.keys()]
-        if not active_adapters:
-            return self.base_layer(x, *args, **kwargs)
-
-        _warn_once_about_module_hooks(self)
-        indices = tuple(self.paca_indices[a] for a in active_adapters)
-        scalings = tuple(self.scaling[a] for a in active_adapters)
-        deltas = [self.paca_delta[a] for a in active_adapters]
-        bias = self.get_base_layer().bias
-        if self.quantization_backend is None and _torch_supports_custom_ops and torch.compiler.is_compiling():
-            # Under torch.compile, use opaque custom ops so that the in-place column swap is not functionalized into a
-            # copy of the full weight (see _ops.py).
-            if torch.is_autocast_enabled(x.device.type):
-                x = x.to(torch.get_autocast_dtype(x.device.type))
-            out = torch.ops.peft.paca_linear_forward(
-                x, self.get_base_layer().weight, bias, list(indices), [float(s) for s in scalings], deltas
-            )
-            return out[0]
-        return _PacaLinearFunction.apply(x, bias, self, indices, scalings, *deltas)
+            result = self.base_layer(x, *args, **kwargs)
+        elif self.merged or not active_adapters:
+            result = self.base_layer(x, *args, **kwargs)
+        else:
+            _warn_once_about_module_hooks(self)
+            indices = tuple(self.paca_indices[a] for a in active_adapters)
+            scalings = tuple(self.scaling[a] for a in active_adapters)
+            deltas = [self.paca_delta[a] for a in active_adapters]
+            bias = self.get_base_layer().bias
+            if self.quantization_backend is None and _torch_supports_custom_ops and torch.compiler.is_compiling():
+                # Under torch.compile, use opaque custom ops so that the in-place column swap is not functionalized
+                # into a copy of the full weight (see _ops.py).
+                if torch.is_autocast_enabled(x.device.type):
+                    x = x.to(torch.get_autocast_dtype(x.device.type))
+                result = torch.ops.peft.paca_linear_forward(
+                    x, self.get_base_layer().weight, bias, list(indices), [float(s) for s in scalings], deltas
+                )[0]
+            else:
+                result = _PacaLinearFunction.apply(x, bias, self, indices, scalings, *deltas)
+        return result
 
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
         # the delta weight is non-zero in r columns only, so a LoRA adapter of rank r represents it exactly

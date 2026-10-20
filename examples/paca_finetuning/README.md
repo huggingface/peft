@@ -3,10 +3,11 @@
 ## Introduction
 
 [PaCA](https://huggingface.co/papers/2503.01905) (ICLR 2025) fine-tunes `r` randomly selected input columns ("partial
-connections") of each targeted pretrained weight instead of adding adapter layers. Each adapted layer still runs a
-single matmul in forward and backward, and only the `r` input channels that belong to the trainable columns are kept
-for the backward pass. This makes training steps faster and reduces activation memory compared to adapter methods such
-as LoRA, which run an extra branch next to every layer and keep the full input activation.
+connections") of each targeted pretrained weight. The only trainable parameters are the updates of these columns;
+unlike LoRA, PaCA adds no extra low-rank matrices. Each adapted layer still runs a single matmul in forward and
+backward, and only the `r` input channels that belong to the trainable columns are kept for the backward pass. This
+makes training steps faster and reduces activation memory compared to methods such as LoRA, which run an extra low-rank
+branch next to every layer and keep the full input activation.
 
 ## Quick start
 

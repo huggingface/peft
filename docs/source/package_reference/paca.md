@@ -17,10 +17,10 @@ rendered properly in your Markdown viewer.
 # PaCA: Partial Connection Adaptation
 
 [PaCA](https://huggingface.co/papers/2503.01905) (ICLR 2025) is a PEFT method that targets training speed and activation
-memory. Instead of adding adapter layers, it fine-tunes `r` randomly selected input columns ("partial connections") of
-each targeted pretrained weight.
+memory. It fine-tunes `r` randomly selected input columns ("partial connections") of each targeted pretrained weight.
+The only trainable parameters are the updates of these columns; unlike LoRA, PaCA adds no extra low-rank matrices.
 
-Adapter methods such as LoRA run a small adapter branch next to every pretrained layer. The branch needs few FLOPs, but
+Methods such as LoRA run a small low-rank branch next to every pretrained layer. The branch needs few FLOPs, but
 it is executed sequentially with the pretrained layer and it keeps its own copy of the input activation for the backward
 pass. PaCA avoids both:
 
