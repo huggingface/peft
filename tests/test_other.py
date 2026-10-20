@@ -31,6 +31,7 @@ from transformers import (
 from peft import (
     AdaLoraConfig,
     HiraConfig,
+    IA3Config,
     LoHaConfig,
     LoraConfig,
     PeftModel,
@@ -397,6 +398,79 @@ class TestModulesToSaveUnloadNoActiveAdapter:
             assert torch.allclose(out_unloaded, out_base, atol=1e-6, rtol=1e-6)
 
 
+class TestModulesToSaveUnloadCompositeModule:
+    """Test unloading a modules_to_save module that is a composite module without a weight attribute.
+
+    For all PEFT methods that rely on BaseTuner._replace_module (i.e. all except a few like LoRA), unloading used to
+    raise an AttributeError for such modules, e.g. RobertaClassificationHead.
+    """
+
+    @pytest.fixture
+    def model(self):
+        class Head(nn.Module):
+            # composite module without a weight attribute
+            def __init__(self):
+                super().__init__()
+                self.dense = nn.Linear(8, 8)
+                self.out_proj = nn.Linear(8, 2)
+
+            def forward(self, x):
+                return self.out_proj(self.dense(x))
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(8, 8)
+                self.head = Head()
+
+            def forward(self, x):
+                return self.head(self.lin0(x))
+
+        torch.manual_seed(0)
+        return Model()
+
+    # The bug was in BaseTuner._replace_module, which is shared by all PEFT methods that don't override it, so checking
+    # a few of them is enough. LoRA, AdaLoRA, and HiRA override it, therefore they are checked explicitly.
+    @pytest.mark.parametrize(
+        "config_cls, config_kwargs",
+        [
+            (LoHaConfig, {}),
+            (IA3Config, {"feedforward_modules": []}),
+            (VeraConfig, {}),
+            (LoraConfig, {}),
+            (AdaLoraConfig, {"total_step": 1}),
+            (HiraConfig, {}),
+        ],
+    )
+    @pytest.mark.parametrize("unload_method", ["unload", "merge_and_unload"])
+    def test_unload_composite_modules_to_save(self, model, config_cls, config_kwargs, unload_method):
+        x = torch.randn(4, 8)
+        out_base = model(x)
+        original_head = model.head
+        # default init, i.e. the PEFT method is a no-op
+        config = config_cls(target_modules=["lin0"], modules_to_save=["head"], **config_kwargs)
+        peft_model = get_peft_model(model, config).eval()
+
+        # change the modules_to_save copy of the head so that it produces a different output
+        trained_head = peft_model.base_model.model.head.modules_to_save["default"]
+        with torch.no_grad():
+            trained_head.out_proj.bias.add_(1.0)
+        out_peft = peft_model(x)
+
+        unloaded = getattr(peft_model, unload_method)()
+        out_unloaded = unloaded(x)
+
+        if unload_method == "unload":
+            # the base model is restored
+            assert unloaded.head is original_head
+            assert torch.allclose(out_unloaded, out_base, atol=1e-6, rtol=1e-6)
+        else:
+            # the trained copy of the head is kept
+            assert unloaded.head is trained_head
+            assert torch.allclose(out_unloaded, out_peft, atol=1e-6, rtol=1e-6)
+            assert not torch.allclose(out_unloaded, out_base, atol=1e-6, rtol=1e-6)
+
+
 class TestModulesToSaveUnloadOriginalModule:
     """Test that unload() restores the original modules_to_save module, while merge_and_unload() keeps the trained
     copy."""
@@ -462,41 +536,41 @@ class TestModulesToSaveUnloadOriginalModule:
             assert unloaded.lin1 is trained_lin1
             assert torch.allclose(out_unloaded, out_peft, atol=1e-6, rtol=1e-6)
 
-        # Trainable tokens are used either alongside LoRA via trainable_token_indices, or as a standalone PEFT method
-        @pytest.mark.parametrize(
-            "config_cls, config_kwargs",
-            [
-                (LoraConfig, {"target_modules": ["lin0"], "trainable_token_indices": {"emb": [0, 1]}}),
-                (TrainableTokensConfig, {"target_modules": ["emb"], "token_indices": [0, 1]}),
-            ],
-        )
-        @pytest.mark.parametrize("unload_method", ["unload", "merge_and_unload"])
-        def test_unload_trainable_tokens(self, model_with_embedding, config_cls, config_kwargs, unload_method):
-            x = torch.arange(10).unsqueeze(0)
-            out_base = model_with_embedding(x)
-            emb_weight = model_with_embedding.emb.weight.detach().clone()
-            config = config_cls(**config_kwargs)
-            model = get_peft_model(model_with_embedding, config).eval()
+    # Trainable tokens are used either alongside LoRA via trainable_token_indices, or as a standalone PEFT method
+    @pytest.mark.parametrize(
+        "config_cls, config_kwargs",
+        [
+            (LoraConfig, {"target_modules": ["lin0"], "trainable_token_indices": {"emb": [0, 1]}}),
+            (TrainableTokensConfig, {"target_modules": ["emb"], "token_indices": [0, 1]}),
+        ],
+    )
+    @pytest.mark.parametrize("unload_method", ["unload", "merge_and_unload"])
+    def test_unload_trainable_tokens(self, model_with_embedding, config_cls, config_kwargs, unload_method):
+        x = torch.arange(10).unsqueeze(0)
+        out_base = model_with_embedding(x)
+        emb_weight = model_with_embedding.emb.weight.detach().clone()
+        config = config_cls(**config_kwargs)
+        model = get_peft_model(model_with_embedding, config).eval()
 
-            # change the trainable tokens so that they produce a different output
-            with torch.no_grad():
-                for name, param in model.named_parameters():
-                    if "trainable_tokens_delta" in name:
-                        param.add_(1.0)
-            out_peft = model(x)
+        # change the trainable tokens so that they produce a different output
+        with torch.no_grad():
+            for name, param in model.named_parameters():
+                if "trainable_tokens_delta" in name:
+                    param.add_(1.0)
+        out_peft = model(x)
 
-            unloaded = getattr(model, unload_method)()
-            out_unloaded = unloaded(x)
+        unloaded = getattr(model, unload_method)()
+        out_unloaded = unloaded(x)
 
-            assert isinstance(unloaded.emb, nn.Embedding)
-            if unload_method == "unload":
-                # the base model is restored
-                assert torch.equal(unloaded.emb.weight, emb_weight)
-                assert torch.allclose(out_unloaded, out_base, atol=1e-6, rtol=1e-6)
-            else:
-                # the trained tokens are merged
-                assert torch.allclose(out_unloaded, out_peft, atol=1e-6, rtol=1e-6)
-                assert not torch.allclose(out_unloaded, out_base, atol=1e-6, rtol=1e-6)
+        assert isinstance(unloaded.emb, nn.Embedding)
+        if unload_method == "unload":
+            # the base model is restored
+            assert torch.equal(unloaded.emb.weight, emb_weight)
+            assert torch.allclose(out_unloaded, out_base, atol=1e-6, rtol=1e-6)
+        else:
+            # the trained tokens are merged
+            assert torch.allclose(out_unloaded, out_peft, atol=1e-6, rtol=1e-6)
+            assert not torch.allclose(out_unloaded, out_base, atol=1e-6, rtol=1e-6)
 
 
 class TestModulesToSaveNameSubstringBug:
