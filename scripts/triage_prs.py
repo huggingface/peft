@@ -23,7 +23,7 @@ username` or `/peft-triage approved @username`.
 
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import cache
 from urllib.parse import urlsplit
 
@@ -253,7 +253,7 @@ def contains_approval(body, bot_name, author_login=None):
 def is_eligible_pr(pr, since):
     return (
         pr["state"] == "open"
-        and datetime.fromisoformat(pr["created_at"].replace("Z", "+00:00")) >= since
+        and datetime.fromisoformat(pr["created_at"]) >= since
         and not any(label["name"].lower() == TRIAGED_LABEL for label in pr["labels"])
     )
 
@@ -398,7 +398,7 @@ def main():
     triage = PullRequestTriage(
         client=GitHubClient(os.environ["GITHUB_TOKEN"]),
         repository=REPOSITORY,
-        since=datetime.strptime(START_DATE, "%Y-%m-%d").replace(tzinfo=timezone.utc),
+        since=datetime.strptime(START_DATE, "%Y-%m-%d").replace(tzinfo=UTC),
         bot_name=BOT_NAME,
         maintainers=MAINTAINERS.values(),
         allowed_users=ALLOW_LIST_USERS.values(),
