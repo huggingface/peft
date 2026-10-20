@@ -1253,6 +1253,13 @@ TEST_CASES = [
         PsoftConfig,
         {"target_modules": ["lin0"], "r": 4, "psoft_alpha": 4, "ab_svd_init": "pissa_init"},
     ),
+    (
+        # fan_in_fan_out=True is not correct for nn.Linear and is set to False when the layer is created
+        "Vanilla MLP PSOFT fan_in_fan_out",
+        "MLP",
+        PsoftConfig,
+        {"target_modules": ["lin0"], "r": 2, "psoft_alpha": 2, "fan_in_fan_out": True},
+    ),
     ########
     # Lily  #
     ########
@@ -2623,6 +2630,13 @@ class TestPeftCustomModel(PeftCommonTester):
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_merge_layers_after_adding_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
+
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_merge_layers_after_adding_adapter(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
@@ -3694,54 +3708,6 @@ class TestPeftCustomModel(PeftCommonTester):
 
         assert not model.base_model.model.lin0.merged
         assert model.active_adapter == "other"
-
-    @pytest.mark.parametrize(
-        "config_cls, config_kwargs",
-        [
-            (DeftConfig, {"init_weights": False}),
-            (TinyLoraConfig, {"r": 2, "u": 16, "init_weights": "uniform"}),
-        ],
-    )
-    def test_add_second_adapter_to_conv1d_target(self, config_cls, config_kwargs):
-        # Injecting the first adapter into a transformers Conv1D layer automatically corrects fan_in_fan_out=False to
-        # True. Adding a second adapter with the same config to the already wrapped layer must work the same way (as
-        # it does for LoRA): both adapters must be usable in the forward pass and for merging, and adding the second
-        # adapter must not break merging of the first one.
-        model = get_peft_model(ModelEmbConv1D(), config_cls(target_modules=["conv1d"], **config_kwargs))
-        model.add_adapter("other", config_cls(target_modules=["conv1d"], **config_kwargs))
-        model = model.to(self.torch_device).eval()
-        inputs = self.prepare_inputs_for_testing()
-
-        for adapter_name in ["other", "default"]:
-            model.set_adapter(adapter_name)
-            with torch.inference_mode():
-                output_unmerged = model(**inputs)
-            model.merge_adapter()
-            with torch.inference_mode():
-                output_merged = model(**inputs)
-            model.unmerge_adapter()
-            assert torch.allclose(output_unmerged, output_merged, atol=1e-5, rtol=1e-5)
-
-    def test_add_second_adapter_psoft_fan_in_fan_out_corrected(self):
-        # For nn.Linear, PSOFT corrects fan_in_fan_out=True to False when the layer is created. Adding a second adapter
-        # with the same config to the already wrapped layer must not flip the layer's fan_in_fan_out back to True.
-        config_kwargs = {"target_modules": ["lin0"], "r": 2, "fan_in_fan_out": True}
-        with pytest.warns(UserWarning, match="fan_in_fan_out=True is not compatible"):
-            model = get_peft_model(MLP(), PsoftConfig(**config_kwargs))
-        model.add_adapter("other", PsoftConfig(**config_kwargs))
-        model = model.to(self.torch_device).eval()
-        assert model.base_model.model.lin0.fan_in_fan_out is False
-        inputs = self.prepare_inputs_for_testing()
-
-        for adapter_name in ["other", "default"]:
-            model.set_adapter(adapter_name)
-            with torch.inference_mode():
-                output_unmerged = model(**inputs)
-            model.merge_adapter()
-            with torch.inference_mode():
-                output_merged = model(**inputs)
-            model.unmerge_adapter()
-            assert torch.allclose(output_unmerged, output_merged, atol=1e-5, rtol=1e-5)
 
     @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
     def test_set_adapter_non_overlapping_modules(self, config_cls):
