@@ -3722,6 +3722,27 @@ class TestPeftCustomModel(PeftCommonTester):
             model.unmerge_adapter()
             assert torch.allclose(output_unmerged, output_merged, atol=1e-5, rtol=1e-5)
 
+    def test_add_second_adapter_psoft_fan_in_fan_out_corrected(self):
+        # For nn.Linear, PSOFT corrects fan_in_fan_out=True to False when the layer is created. Adding a second adapter
+        # with the same config to the already wrapped layer must not flip the layer's fan_in_fan_out back to True.
+        config_kwargs = {"target_modules": ["lin0"], "r": 2, "fan_in_fan_out": True}
+        with pytest.warns(UserWarning, match="fan_in_fan_out=True is not compatible"):
+            model = get_peft_model(MLP(), PsoftConfig(**config_kwargs))
+        model.add_adapter("other", PsoftConfig(**config_kwargs))
+        model = model.to(self.torch_device).eval()
+        assert model.base_model.model.lin0.fan_in_fan_out is False
+        inputs = self.prepare_inputs_for_testing()
+
+        for adapter_name in ["other", "default"]:
+            model.set_adapter(adapter_name)
+            with torch.inference_mode():
+                output_unmerged = model(**inputs)
+            model.merge_adapter()
+            with torch.inference_mode():
+                output_merged = model(**inputs)
+            model.unmerge_adapter()
+            assert torch.allclose(output_unmerged, output_merged, atol=1e-5, rtol=1e-5)
+
     @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
     def test_set_adapter_non_overlapping_modules(self, config_cls):
         # Ensure that when setting multiple adapters, the active adapters are correctly being set, even if
