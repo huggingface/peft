@@ -94,7 +94,7 @@ When you add a bug fix, start by implementing the test and ensure it fails. Then
 
 #### Test location
 
-PEFT follows a rigorous structure for the test location. Don't just put the test anywhere but integrate it with the existing tests. If the test requires GPUs to run, place it into `test_gpu_examples.py`. When adding or modifying tests, read `tests/README.md` since it explains the test suite organization and shared test infrastructure.
+PEFT follows a rigorous structure for the test location. Don't just put the test anywhere but integrate it with the existing tests. If the test requires GPUs to run, place it into `test_gpu_examples.py`. When adding or modifying tests, read `tests/README.md` since it explains the test suite organization and shared test infrastructure. Not following these instructions can lead to closure of the PR.
 
 ### Coding style
 
@@ -112,3 +112,4 @@ PEFT follows a rigorous structure for the test location. Don't just put the test
 - Don't ask to be assigned to an issue if the poster of the issue already offered to work on it.
 - Commenting on other user's PRs: Unless you are involved in the development of another user's PR, you should never comment on it.
 - Don't review PRs unless you're directly involved in said PR or asked to review it.
+- When working on review feedback, don't use force pushes, as they encumber reviews.
