@@ -642,6 +642,29 @@ class TestLoraInitialization:
         with torch.no_grad():
             peft_model(input_ids)
 
+    @pytest.mark.parametrize(
+        "layer_cls, args", [(nn.Embedding, (10, 4)), (nn.Conv1d, (3, 4, 2)), (nn.Conv2d, (3, 4, 3))]
+    )
+    def test_lora_loftq_init_unsupported_layer_falls_back(self, layer_cls, args):
+        # LoftQ only supports linear layers, other layers use the default init, same as for LoRA-GA
+        model = nn.Sequential(layer_cls(*args)).to(self.torch_device)
+        weight = model[0].weight.detach().clone()
+        config = LoraConfig(init_lora_weights="loftq", loftq_config=LoftQConfig(loftq_bits=4), target_modules=["0"])
+        peft_model = get_peft_model(model, config)
+        assert torch.equal(peft_model.base_model.model[0].get_base_layer().weight, weight)
+
+    @require_bitsandbytes
+    def test_lora_loftq_init_target_parameters(self):
+        model = nn.Sequential(nn.Linear(16, 8)).to(self.torch_device)
+        weight = model[0].weight.detach().clone()
+        config = LoraConfig(
+            init_lora_weights="loftq", loftq_config=LoftQConfig(loftq_bits=4), target_parameters=["0.weight"]
+        )
+        peft_model = get_peft_model(model, config)
+        # LoftQ replaced the base weight and initialized lora_B with non-zero values
+        assert not torch.equal(peft_model.base_model.model[0].get_base_layer().weight, weight)
+        assert peft_model.base_model.model[0].lora_B["default"].weight.abs().sum() > 0
+
     def test_lora_pissa_conversion_same_output_after_loading(self, data, tmp_path):
         model = self.get_model()
         output_base = model(data)[0]

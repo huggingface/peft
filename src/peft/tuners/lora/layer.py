@@ -667,10 +667,6 @@ class LoraLayer(BaseTunerLayer):
             # initialize A the same way as the default for nn.Linear and B to zero
             self.lora_A[adapter_name].weight.data = lora_A
             self.lora_B[adapter_name].weight.data = lora_B
-        if adapter_name in self.lora_embedding_A.keys():
-            # initialize a the same way as the default for nn.linear and b to zero
-            self.lora_embedding_A[adapter_name].weight.data = lora_A
-            self.lora_embedding_B[adapter_name].weight.data = lora_B
         self.get_base_layer().weight.data = transpose(qweight, self.fan_in_fan_out)
 
     @torch.no_grad()
@@ -1330,10 +1326,8 @@ class Embedding(nn.Module, LoraLayer):
         if isinstance(init_lora_weights, str) and init_lora_weights.lower() == "mica":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.mica_init(adapter_name)
-        elif init_lora_weights == "loftq":
-            self.loftq_init(adapter_name)
-        elif init_lora_weights == "lora_ga":
-            # Embedding layers don't support LoRA-GA, fall back to standard initialization
+        elif init_lora_weights in ("loftq", "lora_ga"):
+            # Embedding layers don't support LoftQ or LoRA-GA, fall back to standard initialization
             self.reset_lora_parameters(adapter_name, True)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
@@ -1722,10 +1716,8 @@ class _ConvNd(nn.Module, LoraLayer):
 
         self.use_dora[adapter_name] = config.use_dora
 
-        if init_lora_weights == "loftq":
-            self.loftq_init(adapter_name)
-        elif init_lora_weights == "lora_ga":
-            # Conv layers don't support LoRA-GA, fall back to standard initialization
+        if init_lora_weights in ("loftq", "lora_ga"):
+            # Conv layers don't support LoftQ or LoRA-GA, fall back to standard initialization
             self.reset_lora_parameters(adapter_name, True)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
@@ -2572,7 +2564,7 @@ class ParamWrapper(nn.Module, LoraLayer):
                 self.olora_init(adapter_name)
         elif init_lora_weights == "loftq":
             with gather_params_ctx(self.get_base_layer().weight):
-                self.loftq_init(adapter_name)
+                self.loftq_init(adapter_name, config)
         elif init_lora_weights == "eva":
             nn.init.zeros_(self.lora_B[adapter_name].weight)
         elif init_lora_weights == "orthogonal":
