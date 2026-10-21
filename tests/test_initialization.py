@@ -38,6 +38,7 @@ from transformers import (
     LlamaConfig,
     LlamaForSequenceClassification,
 )
+from transformers.pytorch_utils import Conv1D
 
 from peft import (
     AdaLoraConfig,
@@ -90,14 +91,15 @@ from peft.import_utils import is_torchao_available
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.tuners.lokr.layer import LoKrLayer
 from peft.tuners.lora.astra import preprocess_astra
-from peft.tuners.lora.config import AstraConfig, CordaConfig
+from peft.tuners.lora.config import AstraConfig, CordaConfig, LoraGAConfig
 from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
+from peft.tuners.lora.loraga import preprocess_loraga
 from peft.utils import infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 from peft.utils.other import ModulesToSaveWrapper
 
-from .testing_utils import hub_online_once, require_deterministic_for_xpu
+from .testing_utils import hub_online_once, require_bitsandbytes, require_deterministic_for_xpu
 
 
 try:
@@ -553,6 +555,92 @@ class TestLoraInitialization:
         config = LoraConfig(init_lora_weights="OLoRA", target_modules=["linear"])
         peft_model = get_peft_model(deepcopy(model), config)
         assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
+
+    def test_lora_olora_init_conv1d(self):
+        # GPT-2 uses transformers' Conv1D, which stores the weight as (in_features, out_features), see #3996
+        model_id = "peft-internal-testing/tiny-random-gpt2"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device).eval()
+        input_ids = torch.tensor([[1, 2, 3, 4]], device=self.torch_device)
+        with torch.no_grad():
+            output = model(input_ids).logits
+
+        # c_attn and c_fc are rectangular, the c_proj of the attention is square
+        config = LoraConfig(
+            init_lora_weights="olora", target_modules=["c_attn", "c_fc", "c_proj"], fan_in_fan_out=True
+        )
+        peft_model = get_peft_model(model, config)
+        with torch.no_grad():
+            assert torch.allclose(output, peft_model(input_ids).logits, atol=1e-06)
+            assert torch.allclose(output, peft_model.merge_and_unload()(input_ids).logits, atol=1e-06)
+
+    def test_lora_ga_stable_init_conv1d(self):
+        # The output at init is unchanged either way, so compare B with an equivalent nn.Linear: stable scaling
+        # must use out_features, not the first dim of Conv1D's (in_features, out_features) weight, see #3996
+        torch.manual_seed(0)
+        conv = nn.Sequential(Conv1D(16, 8))
+        linear = nn.Sequential(nn.Linear(8, 16))
+        with torch.no_grad():
+            linear[0].weight.copy_(conv[0].weight.T)
+            linear[0].bias.copy_(conv[0].bias)
+        data, labels = torch.randn(4, 8), torch.randn(4, 16)
+
+        lora_B = []
+        for model, fan_in_fan_out in [(conv, True), (linear, False)]:
+            config = LoraConfig(
+                init_lora_weights="lora_ga",
+                lora_ga_config=LoraGAConfig(scale="stable"),
+                target_modules=["0"],
+                r=2,
+                fan_in_fan_out=fan_in_fan_out,
+            )
+            preprocess_loraga(model, config, train_step=lambda m=model: (m(data) - labels).square().mean().backward())
+            peft_model = get_peft_model(model, config)
+            lora_B.append(peft_model.base_model.model[0].lora_B["default"].weight)
+        torch.testing.assert_close(lora_B[0], lora_B[1])
+
+    @pytest.mark.parametrize("bd_target", ["target_modules_bd_a", "target_modules_bd_b"])
+    def test_lora_bdlora_init_conv1d(self, bd_target):
+        # BD-LoRA must not rely on in_features/out_features of the base layer, which Conv1D lacks, see #3996
+        model_id = "peft-internal-testing/tiny-random-gpt2"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device).eval()
+        input_ids = torch.tensor([[1, 2, 3, 4]], device=self.torch_device)
+        with torch.no_grad():
+            output = model(input_ids).logits
+
+        target_modules = ["c_attn", "c_fc", "c_proj"]
+        config = LoraConfig(
+            target_modules=target_modules, fan_in_fan_out=True, use_bdlora={bd_target: target_modules, "nblocks": 2}
+        )
+        peft_model = get_peft_model(model, config)
+        with torch.no_grad():
+            assert torch.allclose(output, peft_model(input_ids).logits, atol=1e-06)
+            assert torch.allclose(output, peft_model.merge_and_unload()(input_ids).logits, atol=1e-06)
+
+    @require_bitsandbytes
+    def test_lora_loftq_init_conv1d(self):
+        # LoftQ must quantize and decompose Conv1D's weight in the nn.Linear layout, see #3996
+        model_id = "peft-internal-testing/tiny-random-gpt2"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device).eval()
+        input_ids = torch.tensor([[1, 2, 3, 4]], device=self.torch_device)
+
+        # c_attn and c_fc are rectangular, so swapped A/B shapes would fail in the forward pass
+        config = LoraConfig(
+            init_lora_weights="loftq",
+            loftq_config=LoftQConfig(loftq_bits=4),
+            target_modules=["c_attn", "c_fc"],
+            fan_in_fan_out=True,
+        )
+        peft_model = get_peft_model(model, config)
+        lora_layers = [module for module in peft_model.modules() if isinstance(module, LoraLayer)]
+        assert lora_layers
+        for layer in lora_layers:
+            assert layer.lora_A["default"].weight.shape == (config.r, layer.in_features)
+            assert layer.lora_B["default"].weight.shape == (layer.out_features, config.r)
+        with torch.no_grad():
+            peft_model(input_ids)
 
     def test_lora_pissa_conversion_same_output_after_loading(self, data, tmp_path):
         model = self.get_model()

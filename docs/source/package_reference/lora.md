@@ -77,6 +77,8 @@ model.print_healthcheck()
 
 The initialization of LoRA weights is controlled by the parameter `init_lora_weights` in [`LoraConfig`]. By default, PEFT initializes LoRA weights with Kaiming-uniform for weight A and zeros for weight B resulting in an identity transform (same as the reference [implementation](https://github.com/microsoft/LoRA)).
 
+For `transformers.Conv1D` layers, such as GPT-2's projections, use `fan_in_fan_out=True` because their weights are stored as `(in_features, out_features)` rather than the `nn.Linear` layout. Supported weight-based initializers use the Linear layout for decomposition and restore the stored layout when updating the base weights. LoRA-GA's `"stable"` scaling also uses the output dimension regardless of the storage layout.
+
 It is also possible to pass `init_lora_weights="gaussian"`. As the name suggests, this initializes weight A with a Gaussian distribution and zeros for weight B (this is how [Diffusers](https://huggingface.co/docs/diffusers/index) initializes LoRA weights).
 
 ```py
