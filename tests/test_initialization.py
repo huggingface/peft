@@ -4994,13 +4994,15 @@ class TestInactiveAdapterHotSwapping:
             ("use_rslora", True, True),
         ],
     )
-    def test_hotswap_checks_target_config(self, config_key, value, compatible, tmp_path):
+    def test_hotswap_checks_target_config_of_correct_adapter(self, config_key, value, compatible, tmp_path):
         # Regression for #3821: validate the requested adapter, not the active default adapter.
+        # Hotswap-load an inactive adapter. Compatible configs should swap successfully without changing the active
+        # adapter; incompatible configs should raise without changing any model parameters.
         base_model = nn.Sequential(nn.Linear(10, 5))
-        target_config = LoraConfig(target_modules=["0"], r=2, init_lora_weights=False, **{config_key: value})
-        incoming_config = deepcopy(target_config) if compatible else LoraConfig(target_modules=["0"], r=2)
+        current_config = LoraConfig(target_modules=["0"], r=2, init_lora_weights=False, **{config_key: value})
+        incoming_config = deepcopy(current_config) if compatible else LoraConfig(target_modules=["0"], r=2)
         model = get_peft_model(deepcopy(base_model), LoraConfig(target_modules=["0"], r=2)).eval()
-        model.add_adapter("other", target_config)
+        model.add_adapter("other", current_config)
         model.eval()
         incoming = get_peft_model(deepcopy(base_model), incoming_config).eval()
         incoming.save_pretrained(tmp_path)
