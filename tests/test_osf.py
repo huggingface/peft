@@ -1,6 +1,7 @@
 import pytest
 import torch
 from torch.testing import assert_close
+from transformers.pytorch_utils import Conv1D
 
 from peft import OSFConfig, get_peft_model
 from peft.tuners.osf.layer import OSFLayer
@@ -105,3 +106,19 @@ def test_osf_merge_twice_applies_delta_once():
 
     assert_close(osf_linear.get_base_layer().weight, weight_after_first_merge)
     assert osf_linear.merged_adapters == ["default"]
+
+
+@pytest.mark.parametrize(
+    "layer",
+    [
+        pytest.param(torch.nn.Embedding(10, 8), id="embedding"),
+        pytest.param(Conv1D(8, 10), id="conv1d"),
+        pytest.param(torch.nn.Conv2d(1, 2, 3), id="conv2d"),
+    ],
+)
+def test_osf_unsupported_target_raises(layer):
+    # See #3986: OSF skipped these targets without an error, so the model had 0 trainable parameters.
+    model = torch.nn.Sequential()
+    model.add_module("layer", layer)
+    with pytest.raises(TypeError, match="is not supported"):
+        get_peft_model(model, OSFConfig(target_modules=["layer"]))

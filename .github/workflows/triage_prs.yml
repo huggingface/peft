@@ -5,7 +5,7 @@
 # Listed maintainers, public Hugging Face members, and allowlisted
 # contributors receive "triaged" automatically. Others must link an
 # open PEFT issue approved by a listed maintainer or public Hugging
-# Face member with "/peft-triage: approved" on its own line outside a
+# Face member with "/peft-triage approved" on its own line outside a
 # code block, or link one of the discussions allowlisted in
 # scripts/triage_prs.py. The command may include a username to limit
 # approval to that PR author. Accepted issue references: #123,

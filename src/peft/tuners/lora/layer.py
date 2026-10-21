@@ -400,7 +400,8 @@ class LoraLayer(BaseTunerLayer):
 
         scale_factor = self.scaling[adapter_name]
         r = self.r[adapter_name]
-        weight_tensor = weight_tensor.to(torch.float32)
+        # Factorize in the Linear layout even when the base layer stores (fan_in, fan_out), as in GPT-2.
+        weight_tensor = transpose(weight_tensor.to(torch.float32), self.fan_in_fan_out)
         Q, R = torch.linalg.qr(weight_tensor.data)
 
         Qr, Rr = Q[:, :r], R[:r]
@@ -409,6 +410,7 @@ class LoraLayer(BaseTunerLayer):
         self.lora_B[adapter_name].weight.data = Qr.contiguous()
 
         weight_tensor.data -= scale_factor * self.lora_B[adapter_name].weight @ self.lora_A[adapter_name].weight
+        weight_tensor = transpose(weight_tensor, self.fan_in_fan_out)
         if bnb_param_type == "4bit":
             weight_tensor = orig_weight.__class__(
                 weight_tensor,
@@ -653,7 +655,7 @@ class LoraLayer(BaseTunerLayer):
         del linear.eigens
 
     def loftq_init(self, adapter_name, config: LoraConfig):
-        weight = self.get_base_layer().weight
+        weight = transpose(self.get_base_layer().weight, self.fan_in_fan_out)
         kwargs = {
             "num_bits": config.loftq_config["loftq_bits"],
             "reduced_rank": self.r[adapter_name],
@@ -669,7 +671,7 @@ class LoraLayer(BaseTunerLayer):
             # initialize a the same way as the default for nn.linear and b to zero
             self.lora_embedding_A[adapter_name].weight.data = lora_A
             self.lora_embedding_B[adapter_name].weight.data = lora_B
-        self.get_base_layer().weight.data = qweight
+        self.get_base_layer().weight.data = transpose(qweight, self.fan_in_fan_out)
 
     @torch.no_grad()
     def orthogonal_init(self, adapter_name):
@@ -769,7 +771,7 @@ class LoraLayer(BaseTunerLayer):
             lora_B_weight = U[:, indices] @ torch.diag(S_B)  # Shape: (out_features, r)
 
         scaling_factor = self.scaling[adapter_name]
-        out_features = weight.shape[0]
+        out_features = self.out_features
 
         if scale == "stable":
             scale_factor = (out_features**0.25) / (stable_gamma**0.5)
@@ -2096,10 +2098,16 @@ class MultiheadAttention(nn.Module, LoraLayer):
     def add_zero_attn(self) -> bool:
         return self.get_base_layer().add_zero_attn
 
-    def update_layer(self, *args, **kwargs) -> None:
-        super().update_layer(*args, **kwargs)
+    def update_layer(self, *args, config: LoraConfig, **kwargs) -> None:
+        # lora_bias is not applied correctly for MHA and there is no use case for it, see #3935. Checking it here covers
+        # both __init__ and adding another adapter to an existing layer.
+        if config.lora_bias:
+            raise ValueError(
+                f"{self.__class__.__name__} does not support lora_bias=True, please set lora_bias to False"
+            )
+        super().update_layer(*args, config=config, **kwargs)
         # Note: LoRA is applied to both in_proj and out_proj. There is currently no way to only specify one of them.
-        self.base_layer.out_proj.update_layer(*args, **kwargs)
+        self.base_layer.out_proj.update_layer(*args, config=config, **kwargs)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
