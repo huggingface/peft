@@ -71,6 +71,15 @@ class AdamssLayer(BaseTunerLayer):
         self._disable_adapters = False
         self.merged_adapters = []
 
+    @property
+    def dtype(self) -> torch.dtype:
+        base_layer = self.get_base_layer()
+        if hasattr(base_layer, "dtype"):
+            return base_layer.dtype
+        elif hasattr(base_layer, "weight"):
+            return base_layer.weight.dtype
+        return next(self.parameters()).dtype
+
     def reset_importance(self, adapter_name: str) -> None:
         """
         Clear stored importance stats for an adapter.
@@ -337,7 +346,6 @@ class Linear(nn.Module, AdamssLayer):
             **kwargs,
         )
         self._active_adapter = adapter_name
-        self.dtype = base_layer.weight.dtype
 
     def _load_from_state_dict(
         self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs

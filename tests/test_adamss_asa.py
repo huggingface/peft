@@ -270,3 +270,31 @@ class TestAdamssAsa:
         for layer in layers:
             for p in layer.adamss_A["default"]:
                 assert p.requires_grad
+
+    def test_model_dtype_casting_forward(self):
+        """Test that casting PEFT model's dtype (e.g. to bfloat16 or float16) after init does not crash forward (#4003)."""
+        base = SimpleMLP()
+        config = AdamssConfig(
+            target_modules=["lin0", "lin1"],
+            r=4,
+            num_subspaces=2,
+            subspace_rank=1,
+            init_weights=None,
+        )
+        model = get_peft_model(base, config)
+
+        x = torch.randn(2, 20)
+        out_fp32 = model(x)
+        assert out_fp32.dtype == torch.float32
+
+        # Cast model to bfloat16 and run forward
+        model = model.to(torch.bfloat16)
+        x_bf16 = x.to(torch.bfloat16)
+        out_bf16 = model(x_bf16)
+        assert out_bf16.dtype == torch.bfloat16
+
+        # Cast model to float16 and run forward
+        model = model.to(torch.float16)
+        x_fp16 = x.to(torch.float16)
+        out_fp16 = model(x_fp16)
+        assert out_fp16.dtype == torch.float16
