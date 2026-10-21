@@ -86,7 +86,7 @@ from peft import (
     inject_adapter_in_model,
     set_peft_model_state_dict,
 )
-from peft.import_utils import is_bnb_available, is_torchao_available
+from peft.import_utils import is_torchao_available
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.tuners.lokr.layer import LoKrLayer
 from peft.tuners.lora.astra import preprocess_astra
@@ -98,7 +98,7 @@ from peft.utils import infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 from peft.utils.other import ModulesToSaveWrapper
 
-from .testing_utils import hub_online_once, require_deterministic_for_xpu
+from .testing_utils import hub_online_once, require_bitsandbytes, require_deterministic_for_xpu
 
 
 try:
@@ -617,15 +617,13 @@ class TestLoraInitialization:
             assert torch.allclose(output, peft_model(input_ids).logits, atol=1e-06)
             assert torch.allclose(output, peft_model.merge_and_unload()(input_ids).logits, atol=1e-06)
 
-    @pytest.mark.skipif(
-        not (is_bnb_available() and torch.cuda.is_available()), reason="LoftQ requires bitsandbytes and a CUDA device"
-    )
+    @require_bitsandbytes
     def test_lora_loftq_init_conv1d(self):
         # LoftQ must quantize and decompose Conv1D's weight in the nn.Linear layout, see #3996
         model_id = "peft-internal-testing/tiny-random-gpt2"
         with hub_online_once(model_id):
-            model = AutoModelForCausalLM.from_pretrained(model_id).to("cuda").eval()
-        input_ids = torch.tensor([[1, 2, 3, 4]], device="cuda")
+            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device).eval()
+        input_ids = torch.tensor([[1, 2, 3, 4]], device=self.torch_device)
 
         # c_attn and c_fc are rectangular, so swapped A/B shapes would fail in the forward pass
         config = LoraConfig(
