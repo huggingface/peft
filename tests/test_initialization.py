@@ -13,6 +13,9 @@
 # limitations under the License.
 
 import copy
+import importlib.machinery
+import importlib.metadata
+import importlib.util
 import itertools
 import math
 import platform
@@ -28,12 +31,19 @@ from huggingface_hub import snapshot_download
 from safetensors.torch import load_file, save_file
 from scipy import stats
 from torch import nn
-from transformers import AutoModelForCausalLM, LlamaConfig, LlamaForSequenceClassification
+from transformers import (
+    AutoModelForCausalLM,
+    DistilBertConfig,
+    DistilBertForSequenceClassification,
+    LlamaConfig,
+    LlamaForSequenceClassification,
+)
 
 from peft import (
     AdaLoraConfig,
     AdamssConfig,
     BeftConfig,
+    BOFTConfig,
     C3AConfig,
     DeloraConfig,
     EvaConfig,
@@ -49,6 +59,7 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     MissConfig,
+    OFTConfig,
     PeanutConfig,
     PeftMixedModel,
     PeftModel,
@@ -64,6 +75,7 @@ from peft import (
     PsoftConfig,
     RoadConfig,
     ShadowConfig,
+    ShiraConfig,
     SupertuningConfig,
     TinyLoraConfig,
     VBLoRAConfig,
@@ -71,12 +83,15 @@ from peft import (
     VeraConfig,
     WaveFTConfig,
     get_peft_model,
+    get_peft_model_state_dict,
     inject_adapter_in_model,
     set_peft_model_state_dict,
 )
+from peft.import_utils import is_torchao_available
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.tuners.lokr.layer import LoKrLayer
-from peft.tuners.lora.config import CordaConfig
+from peft.tuners.lora.astra import preprocess_astra
+from peft.tuners.lora.config import AstraConfig, CordaConfig
 from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
@@ -1274,6 +1289,57 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config, adapter_name="foobar")
 
+    @pytest.mark.parametrize("modules_to_save", [["out"], ["A"], ["B"], ["out", "A"]])
+    def test_modules_to_save_does_not_match_lora_submodule(self, modules_to_save):
+        # modules_to_save is matched against module names. A name must not match a sub-module that the LoRA layer
+        # created for itself, e.g. "out" must not match "linear.lora_dropout" and "A" must not match "linear.lora_A",
+        # which used to raise a TypeError because those are nn.ModuleDicts. Only the real module is wrapped. See #3755.
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(10, 10)
+                self.out = nn.Linear(10, 2)
+                self.A = nn.Linear(2, 2)
+                self.B = nn.Linear(2, 2)
+
+        config = LoraConfig(target_modules=["linear"], modules_to_save=modules_to_save)
+        model = get_peft_model(MyModule(), config)
+
+        wrapped = {name for name, module in model.named_modules() if isinstance(module, ModulesToSaveWrapper)}
+        assert wrapped == {f"base_model.model.{name}" for name in modules_to_save}
+        # the LoRA layer's own sub-modules are untouched
+        lora_layer = model.base_model.model.linear
+        assert isinstance(lora_layer.lora_A, nn.ModuleDict)
+        assert isinstance(lora_layer.lora_B, nn.ModuleDict)
+        assert isinstance(lora_layer.lora_dropout, nn.ModuleDict)
+
+    def test_modules_to_save_requires_full_module_name(self):
+        # modules_to_save matches whole module names, so "classifier" must not match "my_classifier".
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(10, 10)
+                self.classifier = nn.Linear(10, 2)
+                self.my_classifier = nn.Linear(10, 2)
+
+        config = LoraConfig(target_modules=["linear"], modules_to_save=["classifier"])
+        model = get_peft_model(MyModule(), config)
+
+        wrapped = {name for name, module in model.named_modules() if isinstance(module, ModulesToSaveWrapper)}
+        assert wrapped == {"base_model.model.classifier"}
+
+    def test_seq_cls_auto_modules_to_save_targets_expected_layers(self):
+        # The classification head must still be auto-targeted for task_type="SEQ_CLS". DistilBERT is the relevant
+        # case: its randomly initialized `pre_classifier` used to be wrapped only because "classifier" happened to be
+        # a suffix of it, so it is now listed explicitly. See #3755.
+        config = DistilBertConfig(vocab_size=100, dim=32, hidden_dim=64, n_layers=2, n_heads=2, num_labels=2)
+        model = DistilBertForSequenceClassification(config)
+        peft_config = LoraConfig(task_type="SEQ_CLS", target_modules=["q_lin", "v_lin"])
+        model = get_peft_model(model, peft_config)
+
+        wrapped = {name for name, module in model.named_modules() if isinstance(module, ModulesToSaveWrapper)}
+        assert wrapped == {"base_model.model.classifier", "base_model.model.pre_classifier"}
+
     def test_trainable_token_indices_targets_lora_layer_raises(self):
         # Same test as test_modules_to_save_targets_lora_layer_raises, but using trainable_token_indices
         model = self.get_model()
@@ -1426,6 +1492,16 @@ class TestLoraInitialization:
         msg = re.escape("MultiheadAttention does not support DoRA (yet), please set use_dora to False")
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config)
+
+    def test_mha_with_lora_bias_raises(self, mha_cls):
+        # lora_bias is not supported for MHA, see #3935. Test both creating the layer and adding a second adapter.
+        msg = re.escape("MultiheadAttention does not support lora_bias=True, please set lora_bias to False")
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(mha_cls(), LoraConfig(target_modules=["mha"], lora_bias=True))
+
+        model = get_peft_model(mha_cls(), LoraConfig(target_modules=["mha"]))
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", LoraConfig(target_modules=["mha"], lora_bias=True))
 
     def test_mha_exposes_attributes(self, mha_cls):
         # MHA requires a bunch of attributes to be exposed, try to check them exhaustively here
@@ -1825,6 +1901,23 @@ class TestLoraInitialization:
         assert not [w for w in caught if "did not match any targeted module" in str(w.message)], (
             "matching pattern key should not warn"
         )
+
+    def test_pattern_keys_matching_target_parameters_do_not_warn(self):
+        # Pattern keys can refer to parameters targeted with target_parameters, e.g. MoE experts, see #3874
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            model = get_peft_model(
+                self.get_model(),
+                LoraConfig(
+                    target_modules=[],
+                    target_parameters=["linear.weight"],
+                    rank_pattern={"linear.weight": 2},
+                    alpha_pattern={"linear.weight": 100},
+                ),
+            )
+
+        assert not [w for w in caught if "did not match any targeted module" in str(w.message)]
+        assert model.base_model.model.linear.r["default"] == 2
 
     def test_partially_matched_pattern_warns_for_unmatched_keys_only(self):
         # When some keys match and others don't, the warning names exactly the unmatched ones.
@@ -3277,21 +3370,41 @@ class TestHraInitialization:
 
     torch_device = infer_device()
 
-    def test_error_raised_for_conv2d_groups_greater_than_one(self):
-        # HRA does not support grouped convolutions, so constructing an adapter for a Conv2d layer with
-        # `groups > 1` must fail immediately and clearly.
-        class ModelConvGroups(nn.Module):
+    def get_model_conv2d(self, **conv_kwargs):
+        class ModelConv2D(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.conv = nn.Conv2d(4, 8, kernel_size=3, groups=2)
+                self.conv = nn.Conv2d(4, 8, **conv_kwargs)
 
             def forward(self, X):
                 return self.conv(X)
 
-        base_model = ModelConvGroups().eval().to(self.torch_device)
+        return ModelConv2D().eval().to(self.torch_device)
+
+    def test_error_raised_for_conv2d_groups_greater_than_one(self):
+        # HRA does not support grouped convolutions, so constructing an adapter for a Conv2d layer with
+        # `groups > 1` must fail immediately and clearly.
+        base_model = self.get_model_conv2d(kernel_size=3, groups=2).eval().to(self.torch_device)
         config = HRAConfig(target_modules=["conv"], r=4)
         with pytest.raises(NotImplementedError, match="HRA does not support .* layers with groups > 1"):
             get_peft_model(base_model, config)
+
+    def test_conv2d_non_square_kernel(self):
+        # HRA supports non-square conv kernels; check that the unmerged forward matches the merged result.
+        torch.manual_seed(0)
+        base_model = self.get_model_conv2d(kernel_size=(3, 5), padding=(1, 2))
+        # init_weights=False, otherwise the adapter is a no-op and the comparison trivial
+        config = HRAConfig(target_modules=["conv"], r=4, init_weights=False)
+        model = get_peft_model(base_model, config).eval()
+
+        x = torch.randn(2, 4, 10, 10, device=self.torch_device)
+        with torch.inference_mode():
+            output = model(x)
+        model.merge_adapter()
+        with torch.inference_mode():
+            output_merged = model(x)
+
+        assert torch.allclose(output, output_merged, atol=1e-5, rtol=1e-5)
 
 
 class TestNoInfiniteRecursionDeepspeed:
@@ -3447,6 +3560,71 @@ class TestCustomModelConfigWarning:
         get_peft_model(custom_module, LoraConfig(target_modules=["lin"], base_model_name_or_path=custom_name))
         msg = f"was renamed from '{custom_name}' to 'foobar'"
         assert any(msg in str(warning.message) for warning in recwarn.list)
+
+
+class TestIncompatibleTorchaoInstalled:
+    # An installed torchao version that PEFT doesn't support should not break PEFT for models that don't use torchao.
+    # See #3964 for context. LoRA checks for torchao in dispatch_torchao, the other methods in
+    # resolve_quantization_backend.
+    config_cases = [
+        (LoraConfig, {}),
+        (BOFTConfig, {"boft_block_size": 2}),
+        (MissConfig, {"r": 2}),
+        (OFTConfig, {"r": 0, "oft_block_size": 2}),
+        (ShiraConfig, {"r": 1}),
+        (VeraConfig, {}),
+    ]
+    config_ids = ["lora", "boft", "miss", "oft", "shira", "vera"]
+
+    @pytest.fixture
+    def custom_module(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(10, 10)
+
+        return MyModule()
+
+    @pytest.fixture
+    def old_torchao_installed(self, monkeypatch):
+        # Simulate an installed torchao 0.10.0 (the version preinstalled on Google Colab), so that the test doesn't
+        # require a real torchao installation.
+        find_spec = importlib.util.find_spec
+        version = importlib.metadata.version
+
+        def fake_find_spec(name, *args, **kwargs):
+            if name == "torchao":
+                return importlib.machinery.ModuleSpec("torchao", None)
+            return find_spec(name, *args, **kwargs)
+
+        def fake_version(name):
+            if name == "torchao":
+                return "0.10.0"
+            return version(name)
+
+        monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+        monkeypatch.setattr(importlib.metadata, "version", fake_version)
+        is_torchao_available.cache_clear()
+        yield
+        is_torchao_available.cache_clear()
+
+    def test_old_torchao_is_not_available(self, old_torchao_installed):
+        with pytest.warns(UserWarning, match="incompatible version of torchao"):
+            assert not is_torchao_available()
+
+    @pytest.mark.parametrize("config_cls, config_kwargs", config_cases, ids=config_ids)
+    def test_old_torchao_does_not_break_injection(
+        self, old_torchao_installed, custom_module, config_cls, config_kwargs
+    ):
+        with pytest.warns(UserWarning, match="incompatible version of torchao"):
+            get_peft_model(custom_module, config_cls(target_modules=["lin"], **config_kwargs))
+
+    @pytest.mark.parametrize("config_cls, config_kwargs", config_cases, ids=config_ids)
+    def test_no_warning_without_old_torchao(self, custom_module, config_cls, config_kwargs, recwarn):
+        # without an incompatible torchao installed, there should be no warning
+        is_torchao_available.cache_clear()
+        get_peft_model(custom_module, config_cls(target_modules=["lin"], **config_kwargs))
+        assert not any("incompatible version of torchao" in str(warning.message) for warning in recwarn.list)
 
 
 class TestLowCpuMemUsage:
@@ -4379,6 +4557,320 @@ class TestCordaInitialization:
         with torch.no_grad():
             output_peft = peft_model(input_ids).logits
         assert torch.allclose(output_base, output_peft, atol=1e-5)
+
+
+class TestAstraInitialization:
+    """Test class to check the initialization of Astra adapters."""
+
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # choose a large weight so that averages are close to expected values
+                self.linear = nn.Linear(1000, 1000)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        return MyModule().eval().to(self.torch_device)
+
+    def get_small_model(self):
+        class SmallModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(64, 16)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        return SmallModule().eval().to(self.torch_device)
+
+    @pytest.fixture
+    def data(self):
+        torch.manual_seed(233)
+        return torch.rand(1000, 1000).to(self.torch_device)
+
+    def test_lora_astra_requires_rank_at_most_out_features(self, tmp_path):
+        model = self.get_small_model()
+        data = torch.rand(4, 64).to(self.torch_device)
+
+        config = LoraConfig(init_lora_weights="astra", target_modules=["linear"], r=32)
+        with pytest.raises(ValueError, match="Astra requires `r` <= out_features"):
+            preprocess_astra(model, config, run_model=lambda: model(data))
+
+        # when the cache is reused, preprocessing does not crop, so the rank is checked when the adapter is created
+        cache_file = tmp_path / "astra_cache.pt"
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            r=8,
+            astra_config=AstraConfig(cache_file=cache_file),
+        )
+        preprocess_astra(model, config, run_model=lambda: model(data))
+
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            r=32,
+            astra_config=AstraConfig(cache_file=cache_file),
+        )
+        preprocess_astra(model, config)
+        with pytest.raises(ValueError, match="Astra requires `r` <= out_features"):
+            get_peft_model(model, config)
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_lora_astra_linear_init_low_precision_base(self, data, dtype):
+        # The residual weight is rounded to the base dtype after the fp32 projection has been subtracted, so the
+        # identity property only holds up to that rounding.
+        model = self.get_model().to(dtype)
+        data = data.to(dtype)
+        output_base = model(data)
+
+        config = LoraConfig(init_lora_weights="astra", target_modules=["linear"], r=8)
+        preprocess_astra(model, config, run_model=lambda: model(data), hooked_model=model)
+        peft_model = get_peft_model(model, config)
+
+        assert torch.allclose(output_base, peft_model(data), atol=1e-2)
+
+    def test_lora_astra_file_paths_without_directory(self, data, tmp_path, monkeypatch):
+        # a bare filename has no directory component, so no directory needs to be created
+        monkeypatch.chdir(tmp_path)
+        model = self.get_model()
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            astra_config=AstraConfig(cache_file="astra_cache.pt", covariance_file="covariance_cache.pt"),
+        )
+        preprocess_astra(model, config, run_model=lambda: model(data), hooked_model=model)
+
+        assert (tmp_path / "astra_cache.pt").exists()
+        assert (tmp_path / "covariance_cache.pt").exists()
+
+    def test_lora_astra_requires_target_modules(self):
+        model = self.get_model()
+        config = LoraConfig(
+            init_lora_weights="astra",
+            astra_config=AstraConfig(),
+        )
+
+        with pytest.raises(ValueError, match="`target_modules` must be set explicitly"):
+            preprocess_astra(model, config)
+
+    def test_lora_astra_does_not_support_target_parameters(self):
+        with pytest.raises(ValueError, match="`target_parameters` is not supported with Astra"):
+            LoraConfig(
+                init_lora_weights="astra",
+                target_modules=["linear"],
+                target_parameters=["linear.weight"],
+            )
+
+    def test_lora_astra_requires_astra_config(self):
+        model = self.get_model()
+        config = LoraConfig(
+            target_modules=["linear"],
+        )
+
+        with pytest.raises(ValueError, match="`lora_config.astra_config` must be set to use Astra"):
+            preprocess_astra(model, config)
+
+    def test_lora_astra_no_redundant_fields(self, data):
+        original_model = self.get_model()
+        model = deepcopy(original_model)
+
+        astra_config = AstraConfig()
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            astra_config=astra_config,
+        )
+        preprocess_astra(
+            model,
+            config,
+            run_model=lambda: model(data),
+            hooked_model=model,
+        )
+        peft_model = get_peft_model(model, config)
+
+        # check if the redundant fields are removed
+        assert not hasattr(peft_model.base_model.linear, "sample_count")
+        assert not hasattr(peft_model.base_model.linear, "covariance_matrix")
+        assert not hasattr(peft_model.base_model.linear, "rank")
+        assert not hasattr(peft_model.base_model.linear, "eigens")
+
+    def test_lora_astra_sample_count(self, data):
+        model = self.get_model()
+
+        astra_config = AstraConfig(
+            prune_temporary_fields=False,
+        )
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            astra_config=astra_config,
+        )
+
+        def run_model():
+            model(data)
+            model(data)
+
+        preprocess_astra(
+            model,
+            config,
+            run_model=run_model,
+            hooked_model=model,
+        )
+
+        # Temporary fields are kept when pruning is disabled.
+        layer = model.linear
+        assert hasattr(layer, "covariance_matrix")
+        assert hasattr(layer, "sample_count")
+
+        # The covariance hook increments `sample_count` once per forward pass, and `run_model` performs two.
+        assert layer.sample_count == 2
+
+    def test_lora_astra_hook_unregister(self, data):
+        original_model = self.get_model()
+        model = deepcopy(original_model)
+        hook_call_count = 0
+
+        def hook(*args):
+            nonlocal hook_call_count
+            hook_call_count += 1
+
+        model.linear.register_forward_hook(hook)
+
+        astra_config = AstraConfig(
+            prune_temporary_fields=False,
+        )
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            astra_config=astra_config,
+        )
+        preprocess_astra(
+            model,
+            config,
+            run_model=lambda: model(data),
+            hooked_model=model,
+        )
+
+        # after preprocessing, external and internal hook should be run once
+        assert hook_call_count == 1
+        assert model.linear.sample_count == 1
+
+        # run preprocessed model once
+        model(data)
+
+        # the external hook should be kept, but the internal hook should be gone
+        assert hook_call_count == 2
+        assert model.linear.sample_count == 1
+
+    def test_lora_astra_linear_init_default(self, data, tmp_path):
+        original_model = self.get_model()
+        model = deepcopy(original_model)
+        output_base = model(data)
+
+        astra_config = AstraConfig(
+            cache_file=tmp_path / "astra_cache.pt",
+            covariance_file=tmp_path / "covariance_cache.pt",
+        )
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            astra_config=astra_config,
+        )
+        preprocess_astra(
+            model,
+            config,
+            run_model=lambda: model(data),
+            hooked_model=model,
+        )
+        peft_model = get_peft_model(model, config)
+
+        # check if adapter performs an identity transformation; the tolerance accounts for the float32 rounding
+        # error of subtracting and re-adding the projected weight
+        assert torch.allclose(output_base, peft_model(data), atol=1e-05)
+
+        # modify the weights, or else the adapter performs an identity transformation
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        output_astra = peft_model(data)
+
+        # sanity check
+        tol = 1e-06
+        assert not torch.allclose(output_base, output_astra, atol=tol, rtol=tol)
+
+        # if load eigendecomposition result from cache, the output should be the same
+        model = deepcopy(original_model)
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            astra_config=AstraConfig(cache_file=tmp_path / "astra_cache.pt"),
+        )
+        preprocess_astra(model, config)
+        peft_model = get_peft_model(model, config)
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        assert torch.allclose(output_astra, peft_model(data), atol=1e-06)
+
+    def test_lora_astra_conversion_same_output_after_loading(self, data, tmp_path):
+        model = self.get_model()
+        output_base = model(data)
+
+        astra_config = AstraConfig()
+        config = LoraConfig(init_lora_weights="astra", target_modules=["linear"], r=8, astra_config=astra_config)
+        preprocess_astra(model, config, run_model=lambda: model(data), hooked_model=model)
+        peft_model = get_peft_model(deepcopy(model), config)
+        # save the initial model
+        peft_model.peft_config["default"].init_lora_weights = True
+        peft_model.save_pretrained(tmp_path / "init-model")
+        peft_model.peft_config["default"].init_lora_weights = "astra"
+
+        # modify the weights, or else the adapter performs an identity transformation
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        output_astra = peft_model(data)
+
+        # sanity check
+        tol = 1e-06
+        assert not torch.allclose(output_base, output_astra, atol=tol, rtol=tol)
+
+        # save the model normally
+        peft_model.save_pretrained(tmp_path / "astra-model")
+        model_loaded = PeftModel.from_pretrained(deepcopy(model), tmp_path / "astra-model")
+        output_loaded = model_loaded(data)
+
+        assert torch.allclose(output_astra, output_loaded, atol=tol, rtol=tol)
+        # sanity check: ranks should still be 8 as initially
+        assert model_loaded.peft_config["default"].r == 8
+        assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 8
+        # sanity check: the base model weights were indeed changed
+        assert not torch.allclose(
+            model.linear.weight, model_loaded.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+        # save the model with conversion
+        peft_config_keys_before = list(peft_model.peft_config.keys())
+        peft_config_dict_before = peft_model.peft_config["default"].to_dict()
+        peft_model.save_pretrained(
+            tmp_path / "astra-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+        )
+        peft_config_keys_after = list(peft_model.peft_config.keys())
+        peft_config_dict_after = peft_model.peft_config["default"].to_dict()
+        assert peft_config_keys_before == peft_config_keys_after
+        assert peft_config_dict_before == peft_config_dict_after
+
+        model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "astra-model-converted")
+        output_converted = model_converted(data)
+
+        # tolerance accounts for the float32 rounding error of subtracting and re-adding the projected weight
+        assert torch.allclose(output_astra, output_converted, atol=1e-05, rtol=tol)
+        # rank should be double of what it was initially
+        assert model_converted.peft_config["default"].r == 16
+        assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 16
+        # base model weights should be the same as the initial model
+        assert torch.allclose(
+            model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
 
 
 class TestEvaInitialization:
@@ -6774,6 +7266,166 @@ class TestTinyLoraInitialization:
         model_control = get_peft_model(mlp_control, config_b2, adapter_name="b")
 
         assert len(model.tinylora_v["b"]) == len(model_control.tinylora_v["b"]) == 1
+
+
+class TestAdapterNameCollisionFiltering:
+    # Bug-fix test for https://github.com/huggingface/peft/issues/3584: the adapter-name filter used to
+    # match by raw string containment, so an adapter whose NAME equals a base-model module path segment
+    # (e.g. an adapter called "mlp" while a submodule is literally named "mlp") silently dropped the
+    # saved adapter's own tensors. The filter now matches by tuner-slot position.
+
+    @pytest.fixture
+    def mlp_net(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(32, 32)
+                self.mlp = nn.Linear(32, 32)
+
+        return Net()
+
+    def test_partial_collision_saves_all_default_tensors(self, mlp_net):
+        # The "default" adapter targets both `lin0` and `mlp`. A second adapter is named "mlp" -- the same
+        # string as the submodule. The containment filter used to drop every key containing ".mlp."; after
+        # the fix all default keys are kept.
+        torch.manual_seed(0)
+        model = get_peft_model(
+            mlp_net,
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0", "mlp"], lora_dropout=0.0),
+        )
+        model.add_adapter("mlp", LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0))
+
+        state_dict = get_peft_model_state_dict(model, adapter_name="default")
+        assert set(state_dict.keys()) == {
+            "base_model.model.lin0.lora_A.weight",
+            "base_model.model.lin0.lora_B.weight",
+            "base_model.model.mlp.lora_A.weight",
+            "base_model.model.mlp.lora_B.weight",
+        }
+
+    def test_full_collision_keeps_default_tensors(self, mlp_net):
+        # The "default" adapter targets ONLY `mlp` while the second adapter is named "mlp": every default
+        # key collided, so the checkpoint was written empty. After the fix the keys survive.
+        torch.manual_seed(0)
+        model = get_peft_model(
+            mlp_net,
+            LoraConfig(r=4, lora_alpha=8, target_modules=["mlp"], lora_dropout=0.0),
+        )
+        model.add_adapter("mlp", LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0))
+
+        state_dict = get_peft_model_state_dict(model, adapter_name="default")
+        assert set(state_dict.keys()) == {
+            "base_model.model.mlp.lora_A.weight",
+            "base_model.model.mlp.lora_B.weight",
+        }
+
+    def test_colliding_name_first_adapter_selects_right_keys(self, mlp_net):
+        # Reversed order: the FIRST adapter is named "mlp", the second is "default". Selecting "mlp" must
+        # return the mlp adapter's own weights (not default's), and vice versa. Non-zero init makes the
+        # two adapters' weights distinct so a mix-up would fail.
+        torch.manual_seed(0)
+        model = get_peft_model(
+            mlp_net,
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0", "mlp"], lora_dropout=0.0, init_lora_weights=False),
+            adapter_name="mlp",
+        )
+        model.add_adapter(
+            "default",
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0", "mlp"], lora_dropout=0.0, init_lora_weights=False),
+        )
+
+        for name in ("mlp", "default"):
+            state_dict = get_peft_model_state_dict(model, adapter_name=name)
+            assert set(state_dict.keys()) == {
+                "base_model.model.lin0.lora_A.weight",
+                "base_model.model.lin0.lora_B.weight",
+                "base_model.model.mlp.lora_A.weight",
+                "base_model.model.mlp.lora_B.weight",
+            }
+            for key in state_dict:
+                module_name = key.rpartition(".")[0]
+                weight = model.get_submodule(module_name)[name].weight
+                assert torch.equal(state_dict[key], weight)
+
+    def test_save_load_round_trip_with_colliding_adapter_name(self, mlp_net, tmp_path):
+        # End-to-end: save the default adapter, reload it on a fresh model, and assert the saved weights
+        # survive the round trip. Non-zero init keeps the check meaningful (B is not trivially zero).
+        torch.manual_seed(0)
+        model = get_peft_model(
+            mlp_net,
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0", "mlp"], lora_dropout=0.0, init_lora_weights=False),
+        )
+        model.add_adapter(
+            "mlp",
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0, init_lora_weights=False),
+        )
+
+        before = {n: p.detach().clone() for n, p in get_peft_model_state_dict(model, adapter_name="default").items()}
+        model.save_pretrained(str(tmp_path), selected_adapters=["default"])
+
+        reloaded = PeftModel.from_pretrained(type(mlp_net)(), str(tmp_path), adapter_name="default")
+        after = {n: p.detach().clone() for n, p in get_peft_model_state_dict(reloaded, adapter_name="default").items()}
+        assert set(after) == set(before)
+        for k in before:
+            assert torch.equal(before[k], after[k]), f"weight for {k} changed across save/load"
+
+    def test_real_second_adapter_is_still_filtered(self, mlp_net):
+        # The fix must not regress the original behaviour: a real second adapter that shares no name with
+        # any module path segment must still be filtered out when saving only the default adapter.
+        torch.manual_seed(0)
+        model = get_peft_model(
+            mlp_net,
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0", "mlp"], lora_dropout=0.0),
+        )
+        model.add_adapter("foo", LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0))
+
+        # The raw state contains both adapters — the filtered view for "default" must not leak "foo".
+        assert any("foo" in k for k in model.state_dict().keys())
+        state_dict = get_peft_model_state_dict(model, adapter_name="default")
+        assert set(state_dict.keys()) == {
+            "base_model.model.lin0.lora_A.weight",
+            "base_model.model.lin0.lora_B.weight",
+            "base_model.model.mlp.lora_A.weight",
+            "base_model.model.mlp.lora_B.weight",
+        }
+        # Value attribution: every returned weight must be default's, not foo's.
+        for key in state_dict:
+            module_name = key.rpartition(".")[0]
+            weight = model.get_submodule(module_name)["default"].weight
+            assert torch.equal(state_dict[key], weight)
+
+    def test_adapter_named_like_tuner_attribute(self, mlp_net):
+        # Adapter literally named "lora_A": the segment after the `lora_A` tuner prefix is the
+        # adapter name here, not a module path. Selecting "default" must keep default's keys and
+        # selecting "lora_A" must return only its own. Non-zero init keeps the value check below
+        # meaningful.
+        torch.manual_seed(0)
+        model = get_peft_model(
+            mlp_net,
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0", "mlp"], lora_dropout=0.0, init_lora_weights=False),
+        )
+        model.add_adapter(
+            "lora_A",
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0, init_lora_weights=False),
+        )
+
+        default_state_dict = get_peft_model_state_dict(model, adapter_name="default")
+        assert set(default_state_dict.keys()) == {
+            "base_model.model.lin0.lora_A.weight",
+            "base_model.model.lin0.lora_B.weight",
+            "base_model.model.mlp.lora_A.weight",
+            "base_model.model.mlp.lora_B.weight",
+        }
+        lora_a_state_dict = get_peft_model_state_dict(model, adapter_name="lora_A")
+        assert set(lora_a_state_dict.keys()) == {
+            "base_model.model.lin0.lora_A.weight",
+            "base_model.model.lin0.lora_B.weight",
+        }
+        # Value attribution: every returned weight must be the "lora_A" adapter's, not default's.
+        for key in lora_a_state_dict:
+            module_name = key.rpartition(".")[0]
+            weight = model.get_submodule(module_name)["lora_A"].weight
+            assert torch.equal(lora_a_state_dict[key], weight)
 
 
 class TestLohaInitialization:

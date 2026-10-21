@@ -16,6 +16,7 @@ import inspect
 import json
 import os
 import pickle
+import sys
 import tempfile
 import warnings
 
@@ -73,6 +74,7 @@ from peft import (
 )
 from peft.tuners.lora.config import (
     ArrowConfig,
+    AstraConfig,
     BdLoraConfig,
     CordaConfig,
     EvaConfig,
@@ -248,6 +250,28 @@ class TestPeftConfig:
 
             config_from_json = config_class.from_json_file(config_path)
             assert config.to_dict() == config_from_json
+
+    @pytest.mark.skipif(
+        not sys.platform.startswith("win"), reason="locale-encoding regression only manifests on Windows"
+    )
+    def test_from_json_file_utf8_non_ascii(self, tmp_path):
+        # Config files are UTF-8; without an explicit encoding, reading them on Windows falls back
+        # to the locale encoding (e.g. cp936), crashing or corrupting literal non-ASCII values
+        # (e.g. a hand-edited config or one written by another tool with ensure_ascii=False).
+        value = "汉 模型 🤗 Ё"
+        config_path = os.path.join(tmp_path, "adapter_config.json")
+        # Write the config with literal (non-escaped) non-ASCII characters.
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump({"base_model_name_or_path": value, "peft_type": "LORA"}, f, ensure_ascii=False)
+
+        loaded = LoraConfig.from_json_file(config_path)
+        assert loaded["base_model_name_or_path"] == value
+
+        # Roundtrip through save_pretrained to lock in the write-side encoding pin as well.
+        roundtrip_dir = os.path.join(tmp_path, "roundtrip")
+        LoraConfig(base_model_name_or_path=value).save_pretrained(roundtrip_dir)
+        reloaded = LoraConfig.from_json_file(os.path.join(roundtrip_dir, "adapter_config.json"))
+        assert reloaded["base_model_name_or_path"] == value
 
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
     def test_to_dict(self, config_class, mandatory_kwargs):
@@ -671,6 +695,50 @@ class TestPeftConfig:
             peft_config = config_class(**mandatory_kwargs)
         assert peft_config.peft_version == version + "@UNKNOWN"
 
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
+    def test_peft_version_missing_is_recorded(self, config_class, mandatory_kwargs, tmp_path):
+        # Configs from before PEFT 0.18.0 have no peft_version. When loading them, peft_version is set to the current
+        # version, but the private _peft_version_missing attribute records that it was missing. It must not be saved.
+        peft_config = config_class(**mandatory_kwargs)
+        peft_config.save_pretrained(tmp_path)
+        assert config_class.from_pretrained(tmp_path)._peft_version_missing is False
+
+        config_path = tmp_path / "adapter_config.json"
+        config_dict = json.loads(config_path.read_text())
+        del config_dict["peft_version"]
+        config_path.write_text(json.dumps(config_dict))
+
+        for config_loaded in (config_class.from_pretrained(tmp_path), PeftConfig.from_pretrained(tmp_path)):
+            assert config_loaded._peft_version_missing is True
+            assert config_loaded.peft_version == peft_config.peft_version
+
+        config_loaded.save_pretrained(tmp_path / "resaved")
+        config_dict = json.loads((tmp_path / "resaved" / "adapter_config.json").read_text())
+        assert "_peft_version_missing" not in config_dict
+        assert config_dict["peft_version"] == peft_config.peft_version
+
+    def test_save_pretrained_sorts_keys_except_pattern_keys(self, tmp_path):
+        # The config is written with sorted keys, nested dicts included, but the order of rank_pattern and
+        # alpha_pattern is kept, see #3818. Testing LoRA is enough: all configs are saved by the same
+        # PeftConfigMixin.save_pretrained, and the methods that support these arguments use the same names.
+        config = LoraConfig(
+            rank_pattern={"module.foo": 16, "foo": 4},
+            alpha_pattern={"module.foo": 2, "foo": 8},
+            init_lora_weights="loftq",
+            loftq_config={"loftq_iter": 2, "loftq_bits": 4},
+        )
+        config.save_pretrained(tmp_path)
+        config_dict = json.loads((tmp_path / "adapter_config.json").read_text())
+
+        assert list(config_dict["rank_pattern"]) == ["module.foo", "foo"]
+        assert list(config_dict["alpha_pattern"]) == ["module.foo", "foo"]
+        assert list(config_dict["loftq_config"]) == ["loftq_bits", "loftq_iter"]
+
+        # apart from the order of the pattern keys, the file is the same as when sorting all keys
+        for key in ("rank_pattern", "alpha_pattern"):
+            config_dict[key] = dict(sorted(config_dict[key].items()))
+        assert json.dumps(config_dict, indent=2) == json.dumps(config_dict, indent=2, sort_keys=True)
+
 
 class TestLoraNestedConfigRoundTrip:
     # Regression tests for https://github.com/huggingface/peft/issues/3583:
@@ -681,6 +749,7 @@ class TestLoraNestedConfigRoundTrip:
         [
             ("eva_config", EvaConfig, "rho", 7.5),
             ("corda_config", CordaConfig, "corda_method", "kpm"),
+            ("astra_config", AstraConfig, "verbose", True),
             ("arrow_config", ArrowConfig, "top_k", 4),
             ("lora_ga_config", LoraGAConfig, "direction", "ArBr"),
             ("use_bdlora", BdLoraConfig, "nblocks", 4),

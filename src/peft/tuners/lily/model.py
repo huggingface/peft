@@ -94,7 +94,10 @@ class LilyModel(BaseTuner):
                 config=lily_config,
             )
 
-        raise NotImplementedError(f"Lily does not support target modules of type {type(target_base_layer)} yet.")
+        raise ValueError(
+            f"Target module {target} is not supported. Currently, only the following modules are supported: "
+            "`torch.nn.Linear`."
+        )
 
     def _post_injection_hook(self, model: nn.Module, config: LilyConfig, adapter_name: str) -> None:
         """
