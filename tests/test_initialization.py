@@ -1492,6 +1492,16 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config)
 
+    def test_mha_with_lora_bias_raises(self, mha_cls):
+        # lora_bias is not supported for MHA, see #3935. Test both creating the layer and adding a second adapter.
+        msg = re.escape("MultiheadAttention does not support lora_bias=True, please set lora_bias to False")
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(mha_cls(), LoraConfig(target_modules=["mha"], lora_bias=True))
+
+        model = get_peft_model(mha_cls(), LoraConfig(target_modules=["mha"]))
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", LoraConfig(target_modules=["mha"], lora_bias=True))
+
     def test_mha_exposes_attributes(self, mha_cls):
         # MHA requires a bunch of attributes to be exposed, try to check them exhaustively here
         model = mha_cls()

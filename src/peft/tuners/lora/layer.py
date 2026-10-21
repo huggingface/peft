@@ -2096,10 +2096,16 @@ class MultiheadAttention(nn.Module, LoraLayer):
     def add_zero_attn(self) -> bool:
         return self.get_base_layer().add_zero_attn
 
-    def update_layer(self, *args, **kwargs) -> None:
-        super().update_layer(*args, **kwargs)
+    def update_layer(self, *args, config: LoraConfig, **kwargs) -> None:
+        # lora_bias is not applied correctly for MHA and there is no use case for it, see #3935. Checking it here covers
+        # both __init__ and adding another adapter to an existing layer.
+        if config.lora_bias:
+            raise ValueError(
+                f"{self.__class__.__name__} does not support lora_bias=True, please set lora_bias to False"
+            )
+        super().update_layer(*args, config=config, **kwargs)
         # Note: LoRA is applied to both in_proj and out_proj. There is currently no way to only specify one of them.
-        self.base_layer.out_proj.update_layer(*args, **kwargs)
+        self.base_layer.out_proj.update_layer(*args, config=config, **kwargs)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
