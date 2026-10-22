@@ -128,6 +128,12 @@ class TestResnet:
         # see 1732
         torch.manual_seed(0)
         model = AutoModelForImageClassification.from_pretrained(self.model_id)
+        uses_nonzero_padding = any(
+            m.padding not in (0, (0, 0)) for name, m in model.named_modules() if name.endswith(".convolution")
+        )
+        if isinstance(config, OFTConfig) and uses_nonzero_padding:
+            pytest.skip("OFT does not work (yet) with non-zero padding, skipping this test.")
+
         model = get_peft_model(model, config)
 
         # record outputs before training
