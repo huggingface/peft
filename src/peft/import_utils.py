@@ -14,6 +14,7 @@
 import importlib
 import importlib.metadata as importlib_metadata
 import platform
+import warnings
 from functools import lru_cache
 
 import packaging.version
@@ -29,7 +30,22 @@ is_transformers_ge_v5_4_0 = packaging.version.parse(transformers.__version__) >=
 
 is_transformers_ge_v5_6_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.6.0.dev0")
 
+# transformers 5.13.0 introduced the `distributed_config` kwarg for `from_pretrained`,
+# replacing the `tp_plan` and `tp_size` kwargs (removed in 5.15.0).
+is_transformers_ge_v5_13_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse(
+    "5.13.0.dev0"
+)
+
 is_transformers_le_4_53 = packaging.version.parse(transformers.__version__) < packaging.version.parse("4.54.0.dev0")
+
+is_transformers_ge_v5_17_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.17.0")
+
+try:
+    from transformers.distributed.tensor_parallel import apply_tensor_parallelism  # noqa: F401
+
+    is_transformers_dtensor_tp = True
+except ImportError:
+    is_transformers_dtensor_tp = False
 
 
 @lru_cache
@@ -144,11 +160,27 @@ def is_torchao_available() -> bool:
         return False
 
     if torchao_version < TORCHAO_MINIMUM_VERSION:
-        raise ImportError(
+        # Warn instead of raising, since an old torchao is often installed without being used (e.g. on Google Colab).
+        # Raising would break PEFT for all models, not just torchao-quantized ones.
+        warnings.warn(
             f"Found an incompatible version of torchao. Found version {torchao_version}, "
-            f"but only versions above {TORCHAO_MINIMUM_VERSION} are supported"
+            f"but only versions above {TORCHAO_MINIMUM_VERSION} are supported. torchao support in PEFT is disabled; "
+            "if you want to use a torchao-quantized model with PEFT, please upgrade torchao."
         )
+        return False
     return True
+
+
+@lru_cache
+def is_torchao_ge_v0_18_0() -> bool:
+    """Return True if torchao is installed and its version is >= 0.18.0.
+
+    torchao 0.18.0 removed the v1 tensor subclass system (AffineQuantizedTensor, LinearActivationQuantizedTensor) in
+    favor of v2 tensor subclasses (Int8Tensor, Int4Tensor, etc.) that inherit from TorchAOBaseTensor.
+    """
+    if not is_torchao_available():
+        return False
+    return packaging.version.parse(importlib_metadata.version("torchao")) >= packaging.version.parse("0.18.0")
 
 
 @lru_cache

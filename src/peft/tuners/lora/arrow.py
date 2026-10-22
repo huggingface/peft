@@ -364,8 +364,10 @@ def ensure_adapters_target_linear_layers_only(model, adapter_names: list[str]):
 
     if offenders:
         lines = [
-            "LoRA adapters must only target Linear-like layers "
-            "(nn.Linear, nn.Conv1d, HF Conv1D, or bitsandbytes.nn.Linear4bit). Found:"
+            (
+                "LoRA adapters must only target Linear-like layers "
+                "(nn.Linear, nn.Conv1d, HF Conv1D, or bitsandbytes.nn.Linear4bit). Found:"
+            )
         ]
         for name, full_name, tname in offenders:
             lines.append(f"  - adapter '{name}' on module '{full_name}' of type {tname}")

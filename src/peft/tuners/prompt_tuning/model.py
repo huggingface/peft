@@ -16,12 +16,13 @@ import math
 
 import torch
 
+from peft.tuners.tuners_utils import BasePromptEncoder
 from peft.utils.integrations import gather_params_ctx
 
 from .config import PromptTuningInit
 
 
-class PromptEmbedding(torch.nn.Module):
+class PromptEmbedding(BasePromptEncoder):
     """
     The model to encode virtual tokens into prompt embeddings.
 

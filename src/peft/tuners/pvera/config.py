@@ -68,15 +68,10 @@ class PveraConfig(PeftConfig):
         layers_pattern (`Optional[Union[List[str], str]]`):
             The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
             `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
-        sample_at_inference (`bool` | `dict`, defaults to `False`):
-            Whether to sample from the learned PVeRA distribution at inference. If false, the learned mean is used. The
-            default is False (indicating false for all adapters). If True is provided, then the value will be true for
-            all adapters. If a dict is provided, then a specific value can be specified per adapter (with False by
-            default for non-specified adapters). For example
-            `sample_at_inference={'encoder.layer.0.attention.attention.query': True}` will only sample at inference for
-            one specific adapter.
+        sample_at_inference (`bool`, defaults to `False`):
+            Whether to sample from the learned PVeRA distribution at inference. If False, the learned mean is used.
         generator_seed (`int`, defaults to None):
-            Random seed for the generator for sampling from the learned distribution.
+            Random seed for the generator used to sample from the learned distribution.
     """
 
     r: int = field(
@@ -180,17 +175,14 @@ class PveraConfig(PeftConfig):
         default=False,
         metadata={
             "help": (
-                "Whether to sample from the learned PVeRA distribution at inference. If false, the learned mean is used. The "
-                "default is False (indicating false for all adapters). If True is provided, then the value will be true for "
-                "all adapters. If a dict is provided, then a specific value can be specified per adapter (with False by "
-                "default for non-specified adapters). For example "
-                "`sample_at_inference={'encoder.layer.0.attention.attention.query': True}` will only sample at inference for "
-                "one specific adapter."
+                "Whether to sample from the learned PVeRA distribution at inference. If False, the learned mean is "
+                "used."
             ),
         },
     )
-    generator_seed: int = field(
-        default=None, metadata={"help": "Random seed for the generator for sampling from the learned distribution."}
+    generator_seed: Optional[int] = field(
+        default=None,
+        metadata={"help": "Random seed for the generator used to sample from the learned distribution."},
     )
 
     def __post_init__(self):
@@ -200,7 +192,7 @@ class PveraConfig(PeftConfig):
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
         # check for layers_to_transform and layers_pattern
-        if self.layers_pattern and not self.layers_to_transform:
+        if self.layers_pattern and self.layers_to_transform is None:
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
         if not self.save_projection:
             warnings.warn(

@@ -117,21 +117,32 @@ class Linear(nn.Module, IA3Layer):
                 ia3_l = transpose(self.ia3_l[active_adapter].data, self.fan_in_fan_out)
                 orig_dtype = base_layer.weight.data.dtype
                 if safe_merge:
-                    orig_weights = base_layer.weight.data
-                    orig_weights = torch.mul(orig_weights, ia3_l)
+                    output_weight = torch.mul(base_layer.weight.data, ia3_l)
 
-                    if not torch.isfinite(orig_weights).all():
+                    if not torch.isfinite(output_weight).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
-                    base_layer.weight.data = orig_weights.to(orig_dtype)
+
+                    output_bias = None
+                    if not self.is_feedforward and (base_layer.bias is not None):
+                        scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
+                        output_bias = torch.mul(base_layer.bias.data, scaling.data)
+                        if not torch.isfinite(output_bias).all():
+                            raise ValueError(
+                                f"NaNs detected in the merged bias. The adapter {active_adapter} seems to be broken"
+                            )
+
+                    base_layer.weight.data = output_weight.to(orig_dtype)
+                    if output_bias is not None:
+                        base_layer.bias.data = output_bias.to(base_layer.bias.data.dtype)
                 else:
                     base_layer.weight.data = torch.mul(base_layer.weight.data, ia3_l).to(orig_dtype)
 
-                if not self.is_feedforward and (base_layer.bias is not None):
-                    scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
-                    orig_dtype = base_layer.bias.data.dtype
-                    base_layer.bias.data = torch.mul(base_layer.bias.data, scaling.data).to(orig_dtype)
+                    if not self.is_feedforward and (base_layer.bias is not None):
+                        scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
+                        bias_dtype = base_layer.bias.data.dtype
+                        base_layer.bias.data = torch.mul(base_layer.bias.data, scaling.data).to(bias_dtype)
 
                 self.merged_adapters.append(active_adapter)
 
@@ -219,6 +230,22 @@ class _ConvNd(nn.Module, IA3Layer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
+    def _get_ia3_scaling_for_weight(self, ia3_scaling: torch.Tensor) -> torch.Tensor:
+        if not self.is_feedforward:
+            return ia3_scaling.transpose(0, 1)
+
+        base_layer = self.get_base_layer()
+        if base_layer.groups == 1:
+            return ia3_scaling
+
+        in_channels_per_group = base_layer.in_channels // base_layer.groups
+        out_channels_per_group = base_layer.out_channels // base_layer.groups
+        ia3_scaling = ia3_scaling.reshape(base_layer.groups, 1, in_channels_per_group, *ia3_scaling.shape[2:])
+        ia3_scaling = ia3_scaling.expand(
+            base_layer.groups, out_channels_per_group, in_channels_per_group, *ia3_scaling.shape[3:]
+        )
+        return ia3_scaling.reshape(base_layer.out_channels, in_channels_per_group, *ia3_scaling.shape[3:])
+
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
@@ -241,9 +268,7 @@ class _ConvNd(nn.Module, IA3Layer):
             if active_adapter in self.ia3_l.keys():
                 base_layer = self.get_base_layer()
                 orig_dtype = base_layer.weight.data.dtype
-                ia3_scaling = self.ia3_l[active_adapter].data
-                if not self.is_feedforward:
-                    ia3_scaling = ia3_scaling.transpose(0, 1)
+                ia3_scaling = self._get_ia3_scaling_for_weight(self.ia3_l[active_adapter].data)
 
                 if safe_merge:
                     output_weight = torch.mul(base_layer.weight.data, ia3_scaling).clone()
@@ -253,13 +278,24 @@ class _ConvNd(nn.Module, IA3Layer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
+                    output_bias = None
+                    if not self.is_feedforward and (base_layer.bias is not None):
+                        scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
+                        output_bias = torch.mul(base_layer.bias.data, scaling.data)
+                        if not torch.isfinite(output_bias).all():
+                            raise ValueError(
+                                f"NaNs detected in the merged bias. The adapter {active_adapter} seems to be broken"
+                            )
+
                     base_layer.weight.data = output_weight.to(orig_dtype)
+                    if output_bias is not None:
+                        base_layer.bias.data = output_bias.to(orig_dtype)
                 else:
                     base_layer.weight.data = torch.mul(base_layer.weight.data, ia3_scaling).to(orig_dtype)
 
-                if not self.is_feedforward and (base_layer.bias is not None):
-                    scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
-                    base_layer.bias.data = torch.mul(base_layer.bias.data, scaling.data).to(orig_dtype)
+                    if not self.is_feedforward and (base_layer.bias is not None):
+                        scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
+                        base_layer.bias.data = torch.mul(base_layer.bias.data, scaling.data).to(orig_dtype)
 
                 self.merged_adapters.append(active_adapter)
 
@@ -278,9 +314,7 @@ class _ConvNd(nn.Module, IA3Layer):
                 base_layer = self.get_base_layer()
                 orig_dtype = base_layer.weight.data.dtype
                 # divide by (IA)^3 vector. Add tolerace to avoid division by zero
-                ia3_scaling = self.ia3_l[active_adapter].data
-                if not self.is_feedforward:
-                    ia3_scaling = ia3_scaling.transpose(0, 1)
+                ia3_scaling = self._get_ia3_scaling_for_weight(self.ia3_l[active_adapter].data)
                 base_layer.weight.data = torch.div(base_layer.weight.data, ia3_scaling + 1e-8).to(orig_dtype)
 
                 if not self.is_feedforward and (base_layer.bias is not None):
@@ -333,4 +367,4 @@ class Conv3d(_ConvNd):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if not self._kernel_dim == 5:
-            raise ValueError(f"Conv2d layer kernel must have 5 dimensions, not {self._kernel_dim}")
+            raise ValueError(f"Conv3d layer kernel must have 5 dimensions, not {self._kernel_dim}")

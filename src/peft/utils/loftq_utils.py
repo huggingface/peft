@@ -29,7 +29,8 @@ from safetensors import SafetensorError, safe_open
 from transformers.utils import cached_file
 from transformers.utils.hub import get_checkpoint_shard_files
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_xpu_available
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available
+from peft.utils.other import infer_device
 
 
 def _low_rank_decomposition(weight, reduced_rank=32):
@@ -67,7 +68,7 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
         raise RuntimeError(
             "Native support for nf4 is was removed in PEFT 0.20. Please install a recent version of bitsandbytes.",
         )
-    compute_device = "xpu" if is_xpu_available() else "cuda"
+    compute_device = infer_device()
 
     weight = weight.to(device=compute_device, dtype=torch.float32)
     res = weight.clone()
@@ -109,7 +110,7 @@ def _loftq_init_new(qweight, weight, num_bits: int, reduced_rank: int):
     if not is_bnb_4bit_available():
         raise ValueError("bitsandbytes 4bit quantization is not available.")
 
-    compute_device = "xpu" if is_xpu_available() else "cuda"
+    compute_device = infer_device()
     dequantized_weight = bnb.functional.dequantize_4bit(qweight.data, qweight.quant_state)
 
     weight = weight.to(device=compute_device, dtype=torch.float32)
@@ -179,7 +180,7 @@ class _SafetensorLoader:
         with safe_open(file_path, framework="pt", device="cpu") as f:
             try:
                 tensor = f.get_tensor(name)
-            except SafetensorError as exc:
+            except SafetensorError:
                 # no matching key found, we probably need to remove the base model prefix
                 if self.base_model_prefix:
                     # remove 1 extra character for "."

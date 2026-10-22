@@ -302,6 +302,29 @@ class AdaLoraModel(LoraModel):
                     )
         return state_dict
 
+    @classmethod
+    def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
+        to_return = super()._get_adapter_state_dict(model, config, adapter_name, state_dict, unwanted_adapter_names)
+        # ranknum is deterministic (always set to float(r)) and is therefore not saved
+        to_return = {k: v for k, v in to_return.items() if not k.endswith(f".ranknum.{adapter_name}")}
+        rank_pattern = config.rank_pattern
+        if rank_pattern is not None:
+            rank_pattern = {k.replace(f".{adapter_name}", ""): v for k, v in rank_pattern.items()}
+            config.rank_pattern = rank_pattern
+            to_return = model.resize_state_dict_by_rank_pattern(rank_pattern, to_return, adapter_name)
+        return to_return
+
+    @classmethod
+    def _remap_adapter_state_dict_for_load(cls, model, config, adapter_name, state_dict):
+        # skip the LoraModel implementation, its DoRA renaming and tensor parallel handling don't apply to AdaLoRA
+        peft_model_state_dict = super(LoraModel, cls)._remap_adapter_state_dict_for_load(
+            model, config, adapter_name, state_dict
+        )
+        rank_pattern = config.rank_pattern
+        if rank_pattern is not None:
+            model.resize_modules_by_rank_pattern(rank_pattern, adapter_name)
+        return peft_model_state_dict
+
     def update_and_allocate(self, global_step):
         """
         This method updates Adalora budget and mask.

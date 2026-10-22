@@ -30,12 +30,17 @@ from .config import PveraConfig
 class PveraLayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weights
     adapter_layer_names = ("pvera_lambda_b", "pvera_lambda_d")
-    other_param_names = ("pvera_A", "pvera_B", "pvera_dropout", "r")
+    other_param_names = ("pvera_A", "pvera_B", "pvera_dropout", "r", "sample_at_inference", "pvera_generator")
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer
         self.r = {}
         self.pvera_dropout = nn.ModuleDict({})
+        self.sample_at_inference = {}
+        # One generator per adapter, so that adding an adapter does not reset the sampling of the existing ones. A
+        # torch.Generator is bound to its device and is not moved by nn.Module.to(), hence these always live on CPU
+        # and the sampled noise is moved to the target device instead, see `_reparametrize`.
+        self.pvera_generator: dict[str, Optional[torch.Generator]] = {}
 
         # For storing vector scale
         self.pvera_lambda_b = nn.ParameterDict({})
@@ -84,16 +89,18 @@ class PveraLayer(BaseTunerLayer):
         inference_mode = config.inference_mode
 
         self.r[adapter_name] = r
+        self.sample_at_inference[adapter_name] = config.sample_at_inference
         if pvera_dropout > 0.0:
             pvera_dropout_layer = nn.Dropout(p=pvera_dropout)
         else:
             pvera_dropout_layer = nn.Identity()
 
         if config.generator_seed is not None:
-            self.generator = torch.Generator()
-            self.generator.manual_seed(config.generator_seed)
+            generator = torch.Generator()
+            generator.manual_seed(config.generator_seed)
         else:
-            self.generator = None
+            generator = None
+        self.pvera_generator[adapter_name] = generator
 
         self.pvera_dropout.update(nn.ModuleDict({adapter_name: pvera_dropout_layer}))
         # Actual trainable parameters
@@ -149,14 +156,18 @@ class PveraLayer(BaseTunerLayer):
                 nn.init.zeros_(self.pvera_lambda_d[adapter_name]).fill_(d_initial)
                 nn.init.zeros_(self.pvera_lambda_b[adapter_name])
 
-    def _reparametrize(self, mu, logvar, sample_at_inference):
-        if self.training or (not self.training and sample_at_inference):
-            std = torch.exp(0.5 * logvar)
-            eps = torch.randn_like(std, generator=self.generator)
-            z = mu + eps * std
+    def _reparametrize(self, mu, logvar, adapter_name):
+        if not (self.training or self.sample_at_inference[adapter_name]):
+            return mu
+
+        std = torch.exp(0.5 * logvar)
+        generator = self.pvera_generator[adapter_name]
+        if generator is None:
+            eps = torch.randn_like(std)
         else:
-            z = mu
-        return z
+            # the generator is on CPU and cannot be moved, so sample on CPU and move the noise to the right device
+            eps = torch.randn(std.shape, dtype=std.dtype, generator=generator).to(std.device)
+        return mu + eps * std
 
 
 class Linear(nn.Linear, PveraLayer):
@@ -176,7 +187,6 @@ class Linear(nn.Linear, PveraLayer):
         super(nn.Linear, self).__init__()
         PveraLayer.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = config.fan_in_fan_out
-        self.sample_at_inference = config.sample_at_inference
 
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, pvera_A, pvera_B, r, config=config)
@@ -304,9 +314,7 @@ class Linear(nn.Linear, PveraLayer):
                 dropout = self.pvera_dropout[active_adapter]
                 x = x.to(lambda_d.dtype)
                 mu, logvar = (lambda_d * F.linear(dropout(x), sliced_A)).chunk(2, dim=-1)
-                result = result + lambda_b * F.linear(
-                    self._reparametrize(mu, logvar, self.sample_at_inference), sliced_B
-                )
+                result = result + lambda_b * F.linear(self._reparametrize(mu, logvar, active_adapter), sliced_B)
 
         result = result.to(previous_dtype)
         return result

@@ -201,9 +201,6 @@ class AdamssLayer(BaseTunerLayer):
         # Store projection matrix in BufferDict (frozen, device-aware)
         self.adamss_newB[adapter_name] = VVT[0, 0, :, :].detach().to(dtype)
 
-        # Use user-specified subspace_rank
-        rank_per_subspace = subspace_rank
-
         # Initialize trainable subspace parameters
         # Collect parameters in lists, then create ParameterList for proper state_dict keys
         A_params = []
@@ -490,9 +487,8 @@ class Linear(nn.Module, AdamssLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weight
-
                     # Also update bias if present
+                    orig_bias = None
                     if base_layer.bias is not None:
                         orig_bias = base_layer.bias.data.clone()
                         delta_bias = self.get_delta_bias(active_adapter)
@@ -501,6 +497,10 @@ class Linear(nn.Module, AdamssLayer):
                             raise ValueError(
                                 f"NaNs detected in the merged bias. The adapter {active_adapter} seems to be broken"
                             )
+
+                    # write only after both checks passed, so a failed safe merge leaves the base layer untouched
+                    base_layer.weight.data = orig_weight
+                    if orig_bias is not None:
                         base_layer.bias.data = orig_bias
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)

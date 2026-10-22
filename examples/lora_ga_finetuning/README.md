@@ -244,7 +244,7 @@ preprocess_loraga(model, lora_config, train_step, cache_file="loraga_gradients.p
 
 # Clean up full-precision model
 del model
-torch.cuda.empty_cache()
+torch.accelerator.empty_cache()
 ```
 
 ### Step 2: Load quantized model and apply LoRA-GA

@@ -253,7 +253,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
-    def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
+    def get_delta_weight(self, adapter_name: str, *, apply_rank_dropout: bool = False) -> torch.Tensor:
         # https://github.com/KohakuBlueleaf/LyCORIS/blob/e4259b870d3354a9615a96be61cb5d07455c58ea/lycoris/modules/lokr.py#L224
         if adapter_name in self.lokr_w1:
             w1 = self.lokr_w1[adapter_name]
@@ -276,9 +276,8 @@ class LoKrLayer(nn.Module, LycorisLayer):
         # Regular reshape to match base layer shape
         weight = weight.reshape(base_layer.weight.shape)
 
-        # Perform rank dropout during training - drop rows of addition weights
         rank_dropout = self.rank_dropout[adapter_name]
-        if self.training and rank_dropout:
+        if apply_rank_dropout:
             drop = (torch.rand(weight.size(0)) > rank_dropout).float()
             drop = drop.view(-1, *[1] * len(weight.shape[1:])).to(weight.device)
             if self.rank_dropout_scale[adapter_name]:
@@ -337,7 +336,8 @@ class Linear(LoKrLayer):
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
-        delta_weight = self.get_delta_weight(adapter_name)
+        apply_rank_dropout = self.training and bool(self.rank_dropout[adapter_name])
+        delta_weight = self.get_delta_weight(adapter_name, apply_rank_dropout=apply_rank_dropout)
         input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         return F.linear(input, delta_weight)
@@ -373,7 +373,8 @@ class Conv2d(LoKrLayer):
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
-        delta_weight = self.get_delta_weight(adapter_name)
+        apply_rank_dropout = self.training and bool(self.rank_dropout[adapter_name])
+        delta_weight = self.get_delta_weight(adapter_name, apply_rank_dropout=apply_rank_dropout)
         input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()
@@ -414,7 +415,8 @@ class Conv1d(LoKrLayer):
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
-        delta_weight = self.get_delta_weight(adapter_name)
+        apply_rank_dropout = self.training and bool(self.rank_dropout[adapter_name])
+        delta_weight = self.get_delta_weight(adapter_name, apply_rank_dropout=apply_rank_dropout)
         input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()

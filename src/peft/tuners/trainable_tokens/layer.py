@@ -139,11 +139,13 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             # lm_head doesn't have embedding_dim attribute
             embed_dim = self.get_base_layer().in_features
 
+        if check_deepspeed_zero3_enabled():
+            originals = self._collect_token_weights(weight, self.token_indices[adapter_name], embed_dim)
+        else:
+            originals = self.weight[self.token_indices[adapter_name]]
+
         if init_weights:
-            if check_deepspeed_zero3_enabled():
-                values = self._collect_token_weights(weight, self.token_indices[adapter_name], embed_dim)
-            else:
-                values = self.weight[self.token_indices[adapter_name]]
+            values = originals
         else:
             # random init with matching dtype/device
             values = torch.randn(
@@ -153,7 +155,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             )
 
         self.trainable_tokens_delta[adapter_name] = nn.Parameter(values.clone(), requires_grad=True)
-        self.trainable_tokens_original[adapter_name] = values.clone()
+        self.trainable_tokens_original[adapter_name] = originals.detach().clone()
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
@@ -182,6 +184,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         adapter_names = check_adapters_to_merge(self, adapter_names)
+        adapter_names = [name for name in adapter_names if name in self.trainable_tokens_delta]
 
         if not adapter_names:
             # no adapter to merge
@@ -218,6 +221,8 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         W = self.base_layer.weight
 
         for adapter_name in active_adapters:
+            if adapter_name not in self.trainable_tokens_delta:
+                continue
             index = torch.tensor(self.token_indices[adapter_name]).to(W.device)
             deltas = self.trainable_tokens_delta[adapter_name].to(W)
             W = W.index_copy(dim=0, index=index, source=deltas)
@@ -228,6 +233,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         return W
 
     def forward_adapters(self, x: torch.Tensor, active_adapters, *args, **kwargs) -> torch.Tensor:
+        active_adapters = [name for name in active_adapters if name in self.trainable_tokens_delta]
         if self.disable_adapters or not active_adapters:
             if self.merged:
                 self.unmerge()
@@ -265,6 +271,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
                 result = F.linear(
                     input=x,
                     weight=W,
+                    bias=self.base_layer.bias,
                 )
             else:
                 raise ValueError(

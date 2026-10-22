@@ -186,7 +186,7 @@ class FrodConfig(PeftConfig):
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
         # check for layers_to_transform and layers_pattern
-        if self.layers_pattern and not self.layers_to_transform:
+        if self.layers_pattern and self.layers_to_transform is None:
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
         if self.sparse_rate < 0 or self.sparse_rate > 1:
             raise ValueError(f"`sparse_rate` should be between 0 and 1, got {self.sparse_rate}.")

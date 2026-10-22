@@ -57,6 +57,7 @@ from utils import (
 from data import get_train_valid_test_datasets, get_wiki_small
 from peft import AdaLoraConfig, AdamssConfig, PeftConfig, initialize_kv_prefix_from_text
 from peft.utils import CONFIG_NAME, infer_device
+from peft.utils.healthcheck import format_healthcheck
 
 
 # number of batches per bucket, increasing this further has diminishing returns
@@ -83,7 +84,10 @@ def get_generation_config(*, seq_len, generate_kwargs) -> GenerationConfig:
 
 def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm: bool = False) -> tuple[list[str], list[str]]:
     generate_kwargs = generate_kwargs.copy()
-    generate_kwargs["pad_token_id"] = tokenizer.eos_token_id
+
+    if "pad_token_id" not in generate_kwargs:
+        generate_kwargs["pad_token_id"] = tokenizer.pad_token_id
+
     with torch.inference_mode():
         predictions = []
         responses = []
@@ -192,16 +196,25 @@ def train(
     if init_kv_cache_prefix is not None:
         initialize_kv_prefix_from_text(model, tokenizer, text=init_kv_cache_prefix)
 
-    # print this after getting the optimizer, in case it modifies requires_gard
-    if hasattr(model, "get_nb_trainable_parameters"):
-        num_trainable_params, num_params = model.get_nb_trainable_parameters()
+    # print this after getting the optimizer, in case it modifies requires_gard; the healthcheck does not support
+    # prompt learning methods and adaption prompt
+    if hasattr(model, "healthcheck") and not (
+        model.active_peft_config.is_prompt_learning or model.active_peft_config.is_adaption_prompt
+    ):
+        healthcheck = model.healthcheck()
+        print_verbose(format_healthcheck(healthcheck))
+        num_trainable_params = healthcheck["summary"]["trainable_params"]
+        num_params = healthcheck["summary"]["total_params"]
     else:
-        num_params = model.num_parameters()
-        num_trainable_params = num_params
-    print_verbose(
-        f"trainable params: {num_trainable_params:,d} || all params: {num_params:,d} || "
-        f"trainable: {100 * num_trainable_params / num_params:.4f}%"
-    )
+        if hasattr(model, "get_nb_trainable_parameters"):
+            num_trainable_params, num_params = model.get_nb_trainable_parameters()
+        else:
+            num_params = model.num_parameters()
+            num_trainable_params = num_params
+        print_verbose(
+            f"trainable params: {num_trainable_params:,d} || all params: {num_params:,d} || "
+            f"trainable: {100 * num_trainable_params / num_params:.4f}%"
+        )
 
     status = TrainStatus.FAILED
     tic_train = time.perf_counter()
@@ -371,7 +384,7 @@ def train(
             tokenizer=tokenizer,
             ds=ds_test,
             batch_size=batch_size_eval,
-            generate_kwargs={**generation_kwargs, "pad_token_id": tokenizer.eos_token_id},
+            generate_kwargs={**generation_kwargs},
             use_tqdm=len(ds_test) > 100,
         )
         accuracy = get_accuracy(predictions=predictions, responses=responses)

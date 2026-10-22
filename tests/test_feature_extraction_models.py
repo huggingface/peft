@@ -37,19 +37,19 @@ from peft import (
     PeanutConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
-    PromptLearningConfig,
     PromptTuningConfig,
     PsoftConfig,
     RandLoraConfig,
     RoadConfig,
     ShiraConfig,
+    SupertuningConfig,
     TinyLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
 )
 
-from .testing_common import PeftCommonTester
+from .testing_common import PeftCommonTester, skip_non_prompt_learning
 from .testing_utils import set_init_weights_false
 
 
@@ -261,6 +261,15 @@ ALL_CONFIGS = [
         },
     ),
     (
+        SupertuningConfig,
+        {
+            "sparsity": 0.9,
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "init_weights": False,
+        },
+    ),
+    (
         VBLoRAConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
@@ -324,11 +333,6 @@ ALL_CONFIGS = [
         },
     ),
 ]
-
-
-def skip_non_prompt_learning(config_cls):
-    if not issubclass(config_cls, PromptLearningConfig) or (config_cls == PrefixTuningConfig):
-        pytest.skip("Skip tests that are not prompt learning or that are prefix tuning")
 
 
 def skip_deberta_lora_tests(config_cls, model_id):

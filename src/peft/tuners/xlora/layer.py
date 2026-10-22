@@ -48,6 +48,11 @@ class XLoraLayer:
     Apply the scalings for the adapter.
     """
 
+    @property
+    def adapters_disabled(self) -> bool:
+        """Whether the X-LoRA adapter is disabled, e.g. inside a `disable_adapter` context."""
+        return self.model.disabled
+
     @staticmethod
     def apply_scalings_to_x(x: torch.Tensor, scalings_layer: torch.Tensor, adapter: int) -> torch.Tensor:
         # scalings_layer = [batch_size, seq_len, n_classes]
@@ -101,6 +106,9 @@ class XLoraLinearLayer(XLoraLayer):
         """
 
         previous_dtype = x.dtype
+        if self.adapters_disabled:
+            return self.target.base_layer(x, *args, **kwargs).to(previous_dtype)
+
         if scalings is not None:
             xlora_scalings = self.get_maybe_topk_scalings(scalings)
 
@@ -147,6 +155,9 @@ class XLoraEmbeddingLayer(XLoraLayer):
         This method is designed to be a drop-in-replacement for the LoRA layers' .forward method. To use it, a bound
         method must be created (bound to an instance of the XLoraLayer class).
         """
+
+        if self.adapters_disabled:
+            return self.target.base_layer(x, *args, **kwargs)
 
         if scalings is not None:
             xlora_scalings = self.get_maybe_topk_scalings(scalings)
@@ -205,6 +216,9 @@ class XLoraConv2dLayer(XLoraLayer):
         """
 
         previous_dtype = x.dtype
+
+        if self.adapters_disabled:
+            return self.target.base_layer(x, *args, **kwargs).to(previous_dtype)
 
         if scalings is not None:
             xlora_scalings = self.get_maybe_topk_scalings(scalings)

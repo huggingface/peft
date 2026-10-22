@@ -16,8 +16,10 @@
 # with some refactor
 import torch
 
+from peft.tuners.tuners_utils import BasePromptEncoder
 
-class PrefixEncoder(torch.nn.Module):
+
+class PrefixEncoder(BasePromptEncoder):
     r"""
     The `torch.nn` model to encode the prefix.
 

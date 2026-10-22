@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # Installation
 
-Before you start, you will need to setup your environment, install the appropriate packages, and configure 🤗 PEFT. 🤗 PEFT is tested on **Python 3.9+**.
+Before you start, you will need to setup your environment, install the appropriate packages, and configure 🤗 PEFT. 🤗 PEFT is tested on **Python 3.11+**.
 
 🤗 PEFT is available on PyPI, as well as GitHub:
 
@@ -25,6 +25,23 @@ Before you start, you will need to setup your environment, install the appropria
 To install 🤗 PEFT from PyPI:
 
 ```bash
+pip install peft
+```
+
+## CUDA Windows Arm64
+
+To install PEFT with PyTorch CUDA on Windows Arm64, such as for NVIDIA RTX Spark laptops, install PyTorch from the NVIDIA PyPI index. These devices require NVIDIA's Windows Arm64 builds of PyTorch, which are not available on the default PyPI index or the standard PyTorch wheel index.
+
+Run the command below to check if your system detects an NVIDIA GPU.
+
+```bash
+nvidia-smi
+```
+
+Install PyTorch from the NVIDIA PyPI index, then install PEFT.
+
+```bash
+pip install torch --index-url https://pypi.nvidia.com/nvtorch_oot_nightly
 pip install peft
 ```
 
