@@ -939,6 +939,30 @@ def tokenize_wiki(examples, tokenizer, chunk_size, min_len, skip_prefix=False):
     return {"input_ids": chunks}
 
 
+def tokenize_conversational(examples, tokenizer, chunk_size, min_len, skip_prefix=False):
+    chunks = []
+    skipped = 0
+    for conversation in examples["conversations"]:
+        tokens = tokenizer.apply_chat_template(conversation)['input_ids']
+
+        if skip_prefix:
+            # in this case we only train on the "regenerated" data, not on the prefix,
+            # to make sure that we match the model's distribution with the MTP adapter.
+            prefix = tokenizer.apply_chat_template(conversation[:-1])['input_ids']
+            prefix_len = len(tokens) - len(prefix)
+            tokens = tokens[prefix_len:]
+
+        for i_split in range(0, len(tokens), chunk_size):
+            chunk = tokens[i_split : i_split + chunk_size]
+            if len(chunk) > min_len:
+                chunks.append(([tokenizer.bos_token_id] if tokenizer.bos_token else []) + chunk)
+            else:
+                skipped += 1
+
+    print(f"skipped samples due to minimum length not satisfied: {skipped}.")
+    return {"input_ids": chunks}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-r", type=int, default=16)
@@ -951,6 +975,7 @@ def main():
         "This is important for self-distillation datasets that have a prompt + generated data - during training we'd "
         "want to skip the prompt since it is not what we want to learn, we want to match the generated data."
     ))
+    parser.add_argument("--dataset_type", choices=["wiki", "conversational"])
     parser.add_argument("--seq_len", type=int, default=128)
     parser.add_argument("--model_id", type=str, default="meta-llama/Llama-3.2-3B")
     parser.add_argument("--lr", type=float)
@@ -1041,8 +1066,14 @@ def main():
         ds = load_dataset(args.dataset, split="train", streaming=True)
         num_valid_samples = args.num_valid
         min_len = args.batch_size * args.k + 2 + 1  # see augment_mtp for details
+        if args.dataset_type == "wiki":
+            mapping_fn = tokenize_wiki
+        elif args.dataset_type == "conversational":
+            mapping_fn = tokenize_conversational
+        else:
+            raise TypeError("Invalid dataset type")
         dataset_train = ds.skip(num_valid_samples).map(
-            partial(tokenize_wiki, tokenizer=tokenizer, chunk_size=args.seq_len, min_len=min_len, skip_prefix=args.skip_prefix),
+            partial(mapping_fn, tokenizer=tokenizer, chunk_size=args.seq_len, min_len=min_len, skip_prefix=args.skip_prefix),
             batched=True,
             remove_columns=ds.column_names,
             drop_last_batch=True,
@@ -1158,6 +1189,8 @@ def main():
         'decay_steps': args.decay_steps,
         'lr_schedule': args.lr_schedule,
         'output_dir': args.output_dir,
+        'dataset': args.dataset,
+        'dataset_type': args.dataset_type,
         **asdict(train_config),
     })
 
