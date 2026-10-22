@@ -22,7 +22,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer, get_cosine_schedule_with_warmup
 
 from huggingface_hub import HfApi
-from peft import EvaConfig, LoraConfig, TaskType, get_peft_model, initialize_lora_eva_weights
+from peft import LoraConfig, TaskType, get_peft_model
 
 
 @dataclass
@@ -979,8 +979,6 @@ def main():
     parser.add_argument("--checkpoint_step", type=int, default=1000)
     parser.add_argument("--num_valid", type=int, default=200)
     parser.add_argument("--max_grad_norm", type=float, default=2)
-    parser.add_argument("--eva_init", action="store_true", default=False)
-    parser.add_argument("--eva_samples", type=int, default=128)
     parser.add_argument("--hub_id", type=str, default=None)
     parser.add_argument("--trackio_space", type=str, default=None)
 
@@ -1021,8 +1019,6 @@ def main():
         use_rslora=True,
         trainable_token_indices=mask_token_ids,
         ensure_weight_tying=True,
-        init_lora_weights="eva" if args.eva_init else True,
-        eva_config=EvaConfig(rho=2.0) if args.eva_init else None,
     )
 
     model = get_peft_model(model, lora_config)
@@ -1151,35 +1147,6 @@ def main():
         hub_id=args.hub_id,
         skip_prefix=args.skip_prefix,
     )
-
-    # If we use EVA init for LoRA we need to initialize that with data.
-    # Let's do that here.
-    if args.eva_init:
-        def build_eva_calibration_loader(dataset_train, tokenizer):
-            batches = []
-            for i, sample in enumerate(dataset_train):
-                if i >= args.eva_samples:
-                    break
-                sample = [n.item() for n in sample["input_ids"]] if isinstance(sample, dict) else sample[0].tolist()
-                input_ids, labels, _ = augment_mtp(
-                    sample,
-                    bs=args.batch_size,
-                    num_mtp=args.k,
-                    use_lc_loss=args.use_lc_loss,
-                    use_tv_loss=args.use_tv_loss,
-                )
-                batch = tokenizer.pad({"input_ids": input_ids}, return_tensors="pt")
-                # include labels so that EVA can ignore the non-MTP tokens
-                batch["labels"] = torch.tensor([l + [-100] * (batch["input_ids"].shape[1] - len(l)) for l in labels])
-            return batches
-
-        eva_loader = build_eva_calibration_loader(dataset_train, tokenizer)
-        initialize_lora_eva_weights(
-            model,
-            dataloader=eva_loader,
-            forward_fn=lambda m, inputs: m(input_ids=inputs['input_ids'],
-                                           attention_mask=inputs['attention_mask']),
-        )
 
     trackio.config.update({
         'r': args.r,
