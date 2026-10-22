@@ -245,7 +245,19 @@ class TestConvArguments:
     def should_skip(self, config, conv_kwargs):
         kernel_size = conv_kwargs.get("kernel_size", 3)
         kernel_is_square = isinstance(kernel_size, int) or len(set(kernel_size)) == 1
-        return config.peft_type in {"OFT", "HRA", "BOFT"} and not kernel_is_square
+        return config.peft_type in {"HRA", "BOFT"} and not kernel_is_square
+
+    def get_expected_oft_error(self, config, conv_kwargs):
+        if config.peft_type != "OFT":
+            return None
+        if conv_kwargs.get("dilation", 1) not in (1, (1, 1)):
+            return "Conv2d with dilation > 1 is not supported by OFT"
+        kernel_size = conv_kwargs.get("kernel_size", 3)
+        if not isinstance(kernel_size, int) and kernel_size[0] != kernel_size[1]:
+            return "Conv2d with non-square kernels is not supported by OFT"
+        if conv_kwargs.get("padding", 0) not in (0, (0, 0), "valid"):
+            return "Conv2d with non-zero padding is not supported by OFT"
+        return None
 
     @pytest.mark.parametrize("config", CONFIGS.values(), ids=CONFIGS.keys())
     @pytest.mark.parametrize("conv_kwargs", conv_kwargs)
@@ -264,8 +276,9 @@ class TestConvArguments:
         config = copy.deepcopy(config)
         config.target_modules = {"convolution"}
 
-        if config.peft_type == "OFT" and conv_kwargs.get("dilation", 1) != 1:
-            with pytest.raises(ValueError, match="Conv2d with dilation > 1 is not supported by OFT"):
+        expected_error = self.get_expected_oft_error(config, conv_kwargs)
+        if expected_error:
+            with pytest.raises(ValueError, match=expected_error):
                 model = get_peft_model(model, config).eval()
             return
 
@@ -293,8 +306,9 @@ class TestConvArguments:
         config = copy.deepcopy(config)
         config.target_modules = {"convolution"}
 
-        if (config.peft_type == "OFT") and (conv_kwargs.get("dilation", 1) != 1):
-            with pytest.raises(ValueError, match="Conv2d with dilation > 1 is not supported by OFT"):
+        expected_error = self.get_expected_oft_error(config, conv_kwargs)
+        if expected_error:
+            with pytest.raises(ValueError, match=expected_error):
                 model = get_peft_model(model, config).eval()
             return
 
@@ -306,3 +320,119 @@ class TestConvArguments:
 
         atol, rtol = 1e-4, 1e-4
         assert torch.allclose(output_base, output_merged, atol=atol, rtol=rtol)
+
+    @pytest.mark.parametrize("config", CONFIGS.values(), ids=CONFIGS.keys())
+    @pytest.mark.parametrize("conv_kwargs", conv_kwargs)
+    def test_unmerged_and_merged_forward_same_result(self, config, conv_kwargs, request):
+        # merging should not change the result
+        if self.should_skip(config, conv_kwargs):
+            pytest.skip("This method assumes square convolution kernels throughout its weight handling")
+
+        if isinstance(config, AdaLoraConfig) and conv_kwargs.get("padding_mode", "zeros") != "zeros":
+            request.node.add_marker(
+                pytest.mark.xfail(reason="AdaLoRA's adapter branch ignores padding_mode", strict=True)
+            )
+
+        torch.manual_seed(0)
+        model = self.get_conv_model(**conv_kwargs)
+
+        inputs = self.get_inputs(**conv_kwargs)
+        with torch.inference_mode():
+            output_base = model(inputs)
+
+        config = copy.deepcopy(config)
+        config.target_modules = {"convolution"}
+        # override init weights argument
+        config.init_weights = False
+        config.init_lora_weights = False
+        config.init_ia3_weights = False
+
+        expected_error = self.get_expected_oft_error(config, conv_kwargs)
+        if expected_error:
+            with pytest.raises(ValueError, match=expected_error):
+                model = get_peft_model(model, config).eval()
+            return
+
+        model = get_peft_model(model, config).eval()
+        with torch.inference_mode():
+            output_peft = model(inputs)
+
+        atol, rtol = 1e-4, 1e-4
+        # non-identity init: sanity check that the result is different from the base result
+        assert not torch.allclose(output_base, output_peft, atol=atol, rtol=rtol)
+
+        model.merge_adapter()
+        with torch.inference_mode():
+            output_merged = model(inputs)
+        assert torch.allclose(output_merged, output_peft, atol=atol, rtol=rtol)
+
+        model.unmerge_adapter()
+        with torch.inference_mode():
+            output_unmerged = model(inputs)
+        assert torch.allclose(output_unmerged, output_peft, atol=atol, rtol=rtol)
+
+        unloaded = model.merge_and_unload()
+        with torch.inference_mode():
+            output_unloaded = model(inputs)
+        assert torch.allclose(output_unloaded, output_peft, atol=atol, rtol=rtol)
+
+    @pytest.mark.parametrize("config", CONFIGS.values(), ids=CONFIGS.keys())
+    @pytest.mark.parametrize("conv_kwargs", conv_kwargs)
+    def test_multi_adapter_unmerged_and_merged_forward_same_result(self, config, conv_kwargs):
+        # same as test_unmerged_and_merged_forward_same_result but with multiple adapters
+        if self.should_skip(config, conv_kwargs):
+            pytest.skip("This method assumes square convolution kernels throughout its weight handling")
+        if isinstance(config, AdaLoraConfig):
+            pytest.skip("AdaLoRA does not support multiple adapters, skipping this test")
+
+        torch.manual_seed(0)
+        model = self.get_conv_model(**conv_kwargs)
+
+        inputs = self.get_inputs(**conv_kwargs)
+
+        config = copy.deepcopy(config)
+        config.target_modules = {"convolution"}
+        # override init weights argument
+        config.init_weights = False
+        config.init_lora_weights = False
+        config.init_ia3_weights = False
+
+        expected_error = self.get_expected_oft_error(config, conv_kwargs)
+        if expected_error:
+            with pytest.raises(ValueError, match=expected_error):
+                model = get_peft_model(model, config).eval()
+            return
+
+        model = get_peft_model(model, copy.deepcopy(config)).eval()
+        with torch.inference_mode():
+            output_default = model(inputs)
+
+        model.add_adapter("other", config)
+        model.set_adapter("other")
+        with torch.inference_mode():
+            output_other = model(inputs)
+
+        atol, rtol = 1e-4, 1e-4
+        # sanity check: adapters should prodcue different outputs
+        assert not torch.allclose(output_default, output_other, atol=atol, rtol=rtol)
+
+        model.base_model.set_adapter(["default", "other"])
+        with torch.inference_mode():
+            output_both = model(inputs)
+        assert not torch.allclose(output_both, output_default, atol=atol, rtol=rtol)
+        assert not torch.allclose(output_both, output_other, atol=atol, rtol=rtol)
+
+        model.merge_adapter()
+        with torch.inference_mode():
+            output_merged = model(inputs)
+        assert torch.allclose(output_merged, output_both, atol=atol, rtol=rtol)
+
+        model.unmerge_adapter()
+        with torch.inference_mode():
+            output_unmerged = model(inputs)
+        assert torch.allclose(output_unmerged, output_both, atol=atol, rtol=rtol)
+
+        unloaded = model.merge_and_unload()
+        with torch.inference_mode():
+            output_unloaded = model(inputs)
+        assert torch.allclose(output_unloaded, output_both, atol=atol, rtol=rtol)

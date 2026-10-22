@@ -722,6 +722,10 @@ class Conv2d(nn.Module, OFTLayer):
         base_layer = self.get_base_layer()
         if any(dilation > 1 for dilation in base_layer.dilation):
             raise ValueError("Conv2d with dilation > 1 is not supported by OFT.")
+        if base_layer.kernel_size[0] != base_layer.kernel_size[1]:
+            raise ValueError("Conv2d with non-square kernels is not supported by OFT.")
+        if base_layer.padding not in ((0, 0), "valid"):
+            raise ValueError("Conv2d with non-zero padding is not supported by OFT.")
 
         conv_filter_dim = self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
 
@@ -788,7 +792,8 @@ class Conv2d(nn.Module, OFTLayer):
             # no adapter to merge
             return
 
-        for active_adapter in adapter_names:
+        # Weight rotations compose in the opposite order to input rotations.
+        for active_adapter in reversed(adapter_names):
             if active_adapter in self.oft_R.keys():
                 base_layer = self.get_base_layer()
                 oft_mat = self.get_delta_weight(active_adapter)
