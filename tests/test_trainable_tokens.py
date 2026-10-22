@@ -600,6 +600,40 @@ class TestTrainableTokens:
         assert not torch.allclose(adapter_2_output[:, idcs_to_modify], original_output_2[:, idcs_to_modify])
         assert torch.allclose(adapter_2_output[:, idcs_to_keep], original_output_2[:, idcs_to_keep])
 
+    def test_multiple_adapters_only_one_with_trainable_tokens_save_load(self, tmp_path):
+        # Only the first adapter uses trainable tokens, the second one is a plain LoRA adapter. Saving and loading
+        # must not expect the trainable tokens wrapper to hold the second adapter, see #3919.
+        torch.manual_seed(0)
+        base_model = ModelEmb()
+        x = torch.arange(10).view(2, 5)
+
+        config_tt = LoraConfig(
+            target_modules=["lin0"], trainable_token_indices={"emb": [1, 2]}, init_lora_weights=False
+        )
+        config_plain = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+        model = get_peft_model(copy.deepcopy(base_model), config_tt)
+        model.add_adapter("other", config_plain)
+        self.simulate_training(model.base_model.model.emb.token_adapter)
+        model.eval()
+
+        output_default = model(x)
+        model.set_adapter("other")
+        output_other = model(x)
+        assert not torch.allclose(output_default, output_other)
+
+        model.save_pretrained(tmp_path)
+        assert (tmp_path / "adapter_model.safetensors").exists()
+        assert (tmp_path / "other" / "adapter_model.safetensors").exists()
+
+        loaded = PeftModel.from_pretrained(copy.deepcopy(base_model), tmp_path)
+        load_result = loaded.load_adapter(tmp_path / "other", adapter_name="other")
+        assert load_result.missing_keys == []
+        loaded.eval()
+
+        assert torch.allclose(loaded(x), output_default)
+        loaded.set_adapter("other")
+        assert torch.allclose(loaded(x), output_other)
+
     def test_stand_alone_raises_target_layer_not_found(self, model):
         config = TrainableTokensConfig(target_modules=["doesnt_exist"], token_indices=[0, 1, 3])
         with pytest.raises(ValueError) as e:

@@ -261,8 +261,10 @@ class OFTRotationModule(nn.Module):
             self.weight, self.block_size, self.use_cayley_neumann, self.num_cayley_neumann_terms
         )
 
-        # Unfold the input for Conv2d layer
-        if len(orig_shape) == 4:
+        # Unfold the input for Conv2d layer. Linear and Embedding layers have no kernel_size; their 4d inputs, e.g.
+        # (batch, height, width, channels), are rotated along the last dimension like any other input.
+        is_conv2d_input = len(orig_shape) == 4 and self.kernel_size != (0, 0)
+        if is_conv2d_input:
             x = self._unfold(x)
 
         folded_shape = x.shape
@@ -278,7 +280,7 @@ class OFTRotationModule(nn.Module):
 
         x_rotated = x_rotated_reshaped.reshape(*folded_shape)
 
-        if len(orig_shape) == 4:
+        if is_conv2d_input:
             x_rotated = self._fold(x_rotated, orig_shape)
 
         return x_rotated.to(required_dtype)

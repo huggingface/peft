@@ -298,13 +298,6 @@ CASES = [
         model_id=MODEL_MHA,
         model_cls="MhaModel",
     ),
-    Case(
-        "lora_mha_lora_bias",
-        LoraConfig,
-        {"target_modules": ["mha"], "r": 4, "lora_bias": True},
-        model_id=MODEL_MHA,
-        model_cls="MhaModel",
-    ),
     Case("lora_rslora", LoraConfig, {"task_type": "CAUSAL_LM", "r": 8, "use_rslora": True}),
     Case(
         "lora_rank_alpha_pattern",

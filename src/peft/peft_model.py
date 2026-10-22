@@ -24,7 +24,7 @@ from collections.abc import Sequence
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal, Optional, Self, Union
 
 import packaging.version
 import torch
@@ -448,7 +448,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         low_cpu_mem_usage: bool = False,
         key_mapping: Optional[dict[str, str]] = None,
         **kwargs: Any,
-    ) -> PeftModel:
+    ) -> Self:
         r"""
         Instantiate a PEFT model from a pretrained model and loaded PEFT weights.
 
@@ -735,6 +735,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             raise ValueError("Not supported")
 
         prompt_encoder = prompt_encoder.to(self.device)
+        if config.inference_mode:
+            prompt_encoder.requires_grad_(False)
         self.prompt_encoder.update(torch.nn.ModuleDict({adapter_name: prompt_encoder}))
         self.prompt_tokens[adapter_name] = torch.arange(
             config.num_virtual_tokens * config.num_transformer_submodules
@@ -1706,7 +1708,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         Sets the active adapter.
 
-        Only one adapter can be active at a time.
+        Only one adapter can be active at a time because not all PEFT methods support multiple active adapters. To
+        activate multiple adapters for supported methods, use `model.base_model.set_adapter(adapter_names)`.
 
         Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True) unless
         inference_mode is True.
@@ -1717,6 +1720,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             inference_mode (`bool`, optional):
                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
+        if not isinstance(adapter_name, str):
+            raise TypeError(
+                "PeftModel.set_adapter only supports a single adapter name as a string. "
+                "To activate multiple adapters, use model.base_model.set_adapter(adapter_names) "
+                "if the PEFT method supports it."
+            )
         if adapter_name not in self.peft_config:
             raise ValueError(f"Adapter {adapter_name} not found.")
         is_prompt_learning = self.peft_config[adapter_name].is_prompt_learning
@@ -2338,7 +2347,8 @@ class PeftModelForCausalLM(PeftModel):
             # Generate prefix type mask and shift input type mask values to avoid conflicts
             prefix_type_mask = torch.Tensor(cpt_tokens_type_mask).long().view(1, -1)
             prefix_type_mask = prefix_type_mask.repeat(batch_size, 1).to(labels.device)
-            adjusted_input_type_mask = input_type_mask
+            # copy before shifting so the caller-provided mask is not modified in place
+            adjusted_input_type_mask = input_type_mask.clone()
             adjusted_input_type_mask[adjusted_input_type_mask > 0] += prefix_type_mask.max()
             # Concatenate prefix and shifted input type masks
             cpt_type_mask = torch.cat((prefix_type_mask, adjusted_input_type_mask), dim=1)
@@ -2355,9 +2365,7 @@ class PeftModelForCausalLM(PeftModel):
         else:
             # Calculate the loss using the custom CPT loss function
             cpt_embedding = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
-            base_model_output = cpt_embedding.calculate_loss(
-                base_model_output, cpt_labels, cpt_type_mask, self.peft_config["default"]
-            )
+            base_model_output = cpt_embedding.calculate_loss(base_model_output, cpt_labels, cpt_type_mask, peft_config)
             return base_model_output
 
     def generate(self, *args, **kwargs):

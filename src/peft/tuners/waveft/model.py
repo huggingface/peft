@@ -56,7 +56,9 @@ class WaveFTModel(BaseTuner):
                 target_modules_info.append((name, input_dim, output_dim))
 
         if not target_modules_info:
-            raise ValueError("No target modules found for proportional parameter allocation.")
+            raise ValueError(
+                "No layer types compatible with WaveFT were found. Please check `peft_config.target_modules`."
+            )
 
         total_sum = sum(input_dim * output_dim for (_, input_dim, output_dim) in target_modules_info)
         num_layers = len(target_modules_info)
