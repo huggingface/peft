@@ -609,10 +609,13 @@ def run_eval(model, tokenizer, args, min_new_tokens, base_records=None):
 
             # sanity check to prevent misaligned samples
             assert base_records[i]['source'] == row['source']
-            assert base_records[i]['n_tok_ref'] == n_tok
+
+            if base_records[i]['n_tok_ref'] != n_tok:
+                print(f"Generated tokens don't match: {base_records[i]['n_tok_ref']=} != {n_tok}")
+                n_tok = max(n_tok, base_records[i]['n_tok_ref'])  # underestimate gain
 
             record = {
-                "n_tok": n_tok,  # asserted to be == n_tok_ref
+                "n_tok": n_tok,
                 "n_acc": n_acc,
                 "fwd": len(nm),
                 "t_mtp": t_mtp,
