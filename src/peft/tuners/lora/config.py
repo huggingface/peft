@@ -579,11 +579,11 @@ class LoraConfig(PeftConfig):
             zero, and freezes B during training; only A is updated. Currently supported for linear and embedding
             layers. Passing `"nora"` results in the initialization of <a
             href='https://huggingface.co/papers/2608.31036' >Normalized Low-Rank Adaptation (NoRA)</a>, which
-            normalizes each column of the randomly initialized LoRA A weight to unit L2 norm and sets the LoRA B
-            weight to zero. Normalization is applied only at initialization; the base weights are unchanged and both
-            A and B remain trainable. The recommended setting is `lora_alpha` equal to `r` with `use_rslora=False`,
-            which keeps a 1:1 ratio and a scaling factor of 1. Currently supported for linear layers and for
-            `nn.Parameter`s targeted with `target_parameters`.
+            normalizes each column of the randomly initialized LoRA A weight to unit L2 norm and sets the LoRA B weight
+            to zero. Normalization is applied only at initialization; the base weights are unchanged and both A and B
+            remain trainable. The recommended setting is `lora_alpha` equal to `r` with `use_rslora=False`, which keeps
+            a 1:1 ratio and a scaling factor of 1. Currently supported for linear layers and for `nn.Parameter`s
+            targeted with `target_parameters`.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
