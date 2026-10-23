@@ -1589,6 +1589,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"r": 2, "target_modules": ["lin0"], "init_weights": False},
         {"r": 2, "target_modules": ["lin1"], "init_weights": False},
     ),
+    # the selected columns of the two adapters overlap (2 and 4), the updates of both are added there
+    (
+        "PaCA Overlapping",
+        "paca",
+        PacaConfig,
+        {"r": 4, "target_modules": ["lin0"], "init_weights": False, "paca_indices_pattern": {"lin0": [0, 2, 4, 6]}},
+        {
+            "r": 4,
+            "paca_alpha": 2,
+            "target_modules": ["lin0"],
+            "init_weights": False,
+            "paca_indices_pattern": {"lin0": [2, 4, 7, 9]},
+        },
+    ),
     # Check Supra (r set) here: if the hybrid works with multiple adapters, pure Super does too.
     (
         "Supertuning Same",

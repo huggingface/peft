@@ -100,26 +100,26 @@ class TestPaca:
         assert (2, 7, r) in saved_shapes
         assert all(shape[-1] != in_features for shape in saved_shapes), saved_shapes
 
-    def _add_overlapping_adapters(self, model):
-        # Two adapters on lin0 whose selected columns partially overlap. The indices are set explicitly, as with the
-        # random selection it depends on the seed whether there is an overlap at all. The scalings differ (2.0, 0.5).
-        model = get_peft_model(
-            model, PacaConfig(r=4, target_modules=["lin0"], init_weights=False), adapter_name="adapter0"
-        )
-        model.add_adapter("adapter1", PacaConfig(r=4, paca_alpha=2, target_modules=["lin0"], init_weights=False))
-        layer = model.base_model.model.lin0
-        device = layer.paca_delta["adapter0"].device
-        layer.paca_indices["adapter0"] = torch.tensor([1, 3, 5, 7], device=device)
-        layer.paca_indices["adapter1"] = torch.tensor([3, 5, 9, 11], device=device)
-        model.base_model.set_adapter(["adapter0", "adapter1"])
-        return model, layer
-
     @pytest.mark.parametrize("custom_op", [False, True])
     def test_overlapping_adapters_forward_and_gradients_match_reference(self, custom_op):
         if self.torch_device == "mps":
             pytest.skip("MPS does not support float64")
         torch.manual_seed(0)
-        _, layer = self._add_overlapping_adapters(MLP().to(self.torch_device).double())
+        # two adapters on lin0 whose selected columns overlap (3 and 5), with different scalings (2.0, 0.5)
+        config0 = PacaConfig(
+            r=4, target_modules=["lin0"], init_weights=False, paca_indices_pattern={"lin0": [1, 3, 5, 7]}
+        )
+        config1 = PacaConfig(
+            r=4,
+            paca_alpha=2,
+            target_modules=["lin0"],
+            init_weights=False,
+            paca_indices_pattern={"lin0": [3, 5, 9, 11]},
+        )
+        model = get_peft_model(MLP().to(self.torch_device).double(), config0, adapter_name="adapter0")
+        model.add_adapter("adapter1", config1)
+        model.base_model.set_adapter(["adapter0", "adapter1"])
+        layer = model.base_model.model.lin0
         base_weight = layer.get_base_layer().weight.detach().clone()
         x = torch.randn(3, 5, 16, device=self.torch_device, dtype=torch.double, requires_grad=True)
         grad_output = torch.randn(3, 5, 32, device=self.torch_device, dtype=torch.double)
@@ -155,23 +155,6 @@ class TestPaca:
             grads, [x.grad, layer.paca_delta["adapter0"].grad, layer.paca_delta["adapter1"].grad]
         ):
             torch.testing.assert_close(grad, grad_ref)
-
-    def test_overlapping_adapters_merge_and_unmerge(self, mlp):
-        model, layer = self._add_overlapping_adapters(mlp)
-        model.eval()
-        base_weight = layer.get_base_layer().weight.detach().clone()
-        x = torch.randn(5, 16, device=self.torch_device)
-        expected = model(x)
-
-        model.base_model.merge_adapter(["adapter0", "adapter1"])
-        torch.testing.assert_close(model(x), expected)
-        model.base_model.unmerge_adapter()
-        torch.testing.assert_close(layer.get_base_layer().weight, base_weight)
-        torch.testing.assert_close(model(x), expected)
-
-        unloaded = model.merge_and_unload(adapter_names=["adapter0", "adapter1"])
-        assert not _paca_layers(unloaded)
-        torch.testing.assert_close(unloaded(x), expected)
 
     def test_autocast_bf16(self, mlp):
         config = PacaConfig(r=4, target_modules=["lin0", "lin1"], init_weights=False)
