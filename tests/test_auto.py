@@ -15,7 +15,7 @@ import tempfile
 
 import pytest
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, GPT2Config, GPT2LMHeadModel
 
 from peft import (
     AutoPeftModel,
@@ -261,6 +261,21 @@ class TestPeftAutoModel:
         # > size mismatch for base_model.model.lm_head.modules_to_save.default.weight: copying a param with shape
         # torch.Size([151936, 896]) from checkpoint, the shape in current model is torch.Size([151646, 896]).
         AutoPeftModelForCausalLM.from_pretrained(tmp_path)
+
+    def test_peft_causal_lm_subfolder(self, tmp_path):
+        # subfolder refers to the adapter location only, the base model must not be looked up in it
+        base_dir = tmp_path / "base"
+        config = GPT2Config(n_layer=1, n_head=2, n_embd=8, vocab_size=32, n_positions=16)
+        base_model = GPT2LMHeadModel(config)
+        base_model.save_pretrained(base_dir)
+
+        model = get_peft_model(base_model, LoraConfig(target_modules=["c_attn"]))
+        model.base_model.peft_config["default"].base_model_name_or_path = str(base_dir)
+        model.save_pretrained(tmp_path / "adapters" / "sub")
+
+        # does not raise
+        model = AutoPeftModelForCausalLM.from_pretrained(tmp_path / "adapters", subfolder="sub")
+        assert isinstance(model, PeftModelForCausalLM)
 
     @pytest.mark.parametrize(
         "auto_class, model_id",

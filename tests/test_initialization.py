@@ -3747,6 +3747,20 @@ class TestLoadAdapterOfflineMode:
             base_model = AutoModelForCausalLM.from_pretrained(self.base_model, cache_dir=tmp_path)
             PeftModel.from_pretrained(base_model, self.peft_model_id, cache_dir=tmp_path)
 
+    def test_load_checkpoint_offline_subfolder(self, changed_default_cache_dir, tmp_path):
+        # The adapter is in a subfolder of a cached Hub repo; the cache layout is what an earlier online load leaves
+        commit = "0" * 40
+        repo_dir = tmp_path / "hub" / "models--someuser--adapters"
+        (repo_dir / "refs").mkdir(parents=True)
+        (repo_dir / "refs" / "main").write_text(commit)
+
+        model = get_peft_model(nn.Sequential(nn.Linear(4, 4)), LoraConfig(target_modules=["0"]))
+        model.save_pretrained(repo_dir / "snapshots" / commit / "sub")
+
+        with self.hub_offline_ctx():
+            # does not raise
+            PeftModel.from_pretrained(nn.Sequential(nn.Linear(4, 4)), "someuser/adapters", subfolder="sub")
+
 
 class TestCustomModelConfigWarning:
     # Check potential warnings when the user provided base_model_name_or_path is overridden by PEFT. See #2001 for
