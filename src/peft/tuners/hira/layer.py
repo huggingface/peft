@@ -587,15 +587,6 @@ class _ConvNd(nn.Module, HiraLayer):
             result = self.base_layer(x, *args, **kwargs)
             torch_result_dtype = result.dtype
             base = self.get_base_layer()
-            # Determine which convolution function to use
-            if isinstance(base, nn.Conv1d):
-                conv_fn = F.conv1d
-            elif isinstance(base, nn.Conv2d):
-                conv_fn = F.conv2d
-            elif isinstance(base, nn.Conv3d):
-                conv_fn = F.conv3d
-            else:
-                raise TypeError(f"Unsupported conv layer {type(base)} for HiRA.")
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.hira_A.keys():
                     continue
@@ -609,15 +600,7 @@ class _ConvNd(nn.Module, HiraLayer):
                 # element-wise modulate base weight: W0 ⊙ (B@A)
                 base_weight = base.weight
                 eff_weight = base_weight * bia
-                hira_out = conv_fn(
-                    x_drop,
-                    eff_weight,
-                    bias=None,
-                    stride=base.stride,
-                    padding=base.padding,
-                    dilation=getattr(base, "dilation", 1),
-                    groups=base.groups,
-                )
+                hira_out = base._conv_forward(x_drop, eff_weight, None)
                 result = result + hira_out
 
             result = result.to(torch_result_dtype)
