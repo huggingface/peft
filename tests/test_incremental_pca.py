@@ -188,3 +188,26 @@ def test_incremental_pca_lowrank(iris):
     ipcalr.fit(X)
 
     assert_close(ipca.components_, ipcalr.components_, rtol=1e-7, atol=1e-7)
+
+
+@pytest.mark.skipif(not torch.backends.mps.is_available(), reason="requires MPS")
+def test_incremental_pca_on_mps_matches_cpu():
+    # MPS has no float64, so the running statistics must not be accumulated in float64 there.
+    torch.manual_seed(0)
+    batches = [torch.randn(64, 16) for _ in range(3)]
+
+    ipca_cpu = IncrementalPCA(n_components=4)
+    ipca_mps = IncrementalPCA(n_components=4)
+    for batch in batches:
+        ipca_cpu.partial_fit(batch)
+        ipca_mps.partial_fit(batch.to("mps"))
+
+    # components are only defined up to sign
+    # CPU accumulates in float64, MPS in float32, so compare in float32
+    assert_close(ipca_mps.components_.abs().cpu(), ipca_cpu.components_.abs().float(), atol=1e-4, rtol=1e-4)
+    assert_close(
+        ipca_mps.transform(batches[0].to("mps")).abs().cpu(),
+        ipca_cpu.transform(batches[0]).abs().float(),
+        atol=1e-4,
+        rtol=1e-4,
+    )

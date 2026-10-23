@@ -17,6 +17,11 @@ from typing import Optional
 import torch
 
 
+def _accumulation_dtype(device: torch.device) -> torch.dtype:
+    # MPS has no float64 support, so accumulate in float32 there and in float64 everywhere else.
+    return torch.float32 if torch.device(device).type == "mps" else torch.float64
+
+
 class IncrementalPCA:
     """
     An implementation of Incremental Principal Components Analysis (IPCA) that leverages PyTorch for GPU acceleration.
@@ -151,25 +156,25 @@ class IncrementalPCA:
         updated_sample_count = last_sample_count + new_sample_count
 
         if last_mean is None:
-            last_sum = torch.zeros(X.shape[1], dtype=torch.float64, device=X.device)
+            last_sum = torch.zeros(X.shape[1], dtype=_accumulation_dtype(X.device), device=X.device)
         else:
             last_sum = last_mean * last_sample_count
 
-        new_sum = X.sum(dim=0, dtype=torch.float64)
+        new_sum = X.sum(dim=0, dtype=_accumulation_dtype(X.device))
 
         updated_mean = (last_sum + new_sum) / updated_sample_count
 
         T = new_sum / new_sample_count
         temp = X - T
-        correction = temp.sum(dim=0, dtype=torch.float64).square()
+        correction = temp.sum(dim=0, dtype=_accumulation_dtype(X.device)).square()
         temp.square_()
-        new_unnormalized_variance = temp.sum(dim=0, dtype=torch.float64)
+        new_unnormalized_variance = temp.sum(dim=0, dtype=_accumulation_dtype(X.device))
         new_unnormalized_variance -= correction / new_sample_count
         if last_variance is None:
             updated_variance = new_unnormalized_variance / updated_sample_count
         else:
             last_unnormalized_variance = last_variance * last_sample_count
-            last_over_new_count = last_sample_count.double() / new_sample_count
+            last_over_new_count = last_sample_count.to(_accumulation_dtype(X.device)) / new_sample_count
             updated_unnormalized_variance = (
                 last_unnormalized_variance
                 + new_unnormalized_variance
@@ -267,7 +272,9 @@ class IncrementalPCA:
         else:
             col_batch_mean = torch.mean(X, dim=0)
             X -= col_batch_mean
-            mean_correction_factor = torch.sqrt((self.n_samples_seen_.double() / n_total_samples) * n_samples)
+            mean_correction_factor = torch.sqrt(
+                (self.n_samples_seen_.to(_accumulation_dtype(X.device)) / n_total_samples) * n_samples
+            )
             mean_correction = mean_correction_factor * (self.mean_ - col_batch_mean)
             X = torch.vstack(
                 (
@@ -311,7 +318,7 @@ class IncrementalPCA:
             torch.Tensor: Transformed data tensor with shape (n_samples, n_components).
         """
         X = X - self.mean_
-        return torch.mm(X.double(), self.components_.T).to(X.dtype)
+        return torch.mm(X.to(_accumulation_dtype(X.device)), self.components_.T).to(X.dtype)
 
     @staticmethod
     def gen_batches(n: int, batch_size: int, min_batch_size: int = 0):
