@@ -16,7 +16,7 @@ import enum
 from typing import Optional
 
 
-class PeftType(str, enum.Enum):
+class PeftType(str, enum.Enum):  # noqa: UP042
     """
     Enum class for the different types of adapters in PEFT.
 
@@ -103,7 +103,7 @@ class PeftType(str, enum.Enum):
     DEFT = "DEFT"
 
 
-class TaskType(str, enum.Enum):
+class TaskType(str, enum.Enum):  # noqa: UP042
     """
     Enum class for the different types of tasks supported by PEFT.
 

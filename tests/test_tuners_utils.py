@@ -652,6 +652,52 @@ class TestExcludedModuleNames:
         with pytest.raises(NoMatchingPeftModuleError, match="Target modules .* not found in the base model"):
             model.add_adapter("other", LoraConfig(target_modules=["non_existent_module"]))
 
+    def test_failed_second_adapter_injection_does_not_leave_orphaned_parameters(self):
+        # Make the first target valid and the second target invalid for a Mamba model. The failed add_adapter call must
+        # not leave the valid target partially updated even though validation fails later in the target list.
+        class MambaLikeModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.safe = nn.Linear(4, 4, bias=False)
+                self.out_proj = nn.Linear(4, 4, bias=False)
+                self.config = type("Config", (), {"model_type": "mamba"})()
+
+            def forward(self, inputs):
+                return self.out_proj(self.safe(inputs))
+
+        model = get_peft_model(MambaLikeModel(), LoraConfig(target_modules=["safe"]))
+
+        with pytest.raises(ValueError, match="incompatible with Mamba-based models"):
+            model.add_adapter("other", LoraConfig(target_modules=["safe", "out_proj"]))
+
+        # Rolling back the config is not enough: the failed adapter must not remain in the model state dict either.
+        assert list(model.peft_config) == ["default"]
+        assert not any(".other." in key for key in model.state_dict())
+
+    def test_failed_initial_adapter_injection_does_not_mutate_model(self):
+        # Snapshot a plain base model before a later target rejects the initial adapter injection.
+        class MambaLikeModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.safe = nn.Linear(4, 4, bias=False)
+                self.out_proj = nn.Linear(4, 4, bias=False)
+                self.config = type("Config", (), {"model_type": "mamba"})()
+
+            def forward(self, inputs):
+                return self.out_proj(self.safe(inputs))
+
+        model = MambaLikeModel()
+        state_dict_before = deepcopy(model.state_dict())
+
+        with pytest.raises(ValueError, match="incompatible with Mamba-based models"):
+            get_peft_model(model, LoraConfig(target_modules=["safe", "out_proj"]))
+
+        # A failed first injection must leave both the model structure and its registered parameters unchanged.
+        assert not hasattr(model, "peft_config")
+        assert set(model.state_dict()) == set(state_dict_before)
+        for key, value in state_dict_before.items():
+            assert torch.equal(model.state_dict()[key], value)
+
     def test_second_adapter_only_modules_to_save_raises(self):
         # A second adapter is held to the same standard as a first one: if its target_modules match nothing, it
         # raises even when modules_to_save matches.

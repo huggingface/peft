@@ -735,6 +735,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             raise ValueError("Not supported")
 
         prompt_encoder = prompt_encoder.to(self.device)
+        if config.inference_mode:
+            prompt_encoder.requires_grad_(False)
         self.prompt_encoder.update(torch.nn.ModuleDict({adapter_name: prompt_encoder}))
         self.prompt_tokens[adapter_name] = torch.arange(
             config.num_virtual_tokens * config.num_transformer_submodules
@@ -2376,9 +2378,7 @@ class PeftModelForCausalLM(PeftModel):
 
         # Delegate to custom CPT loss (computes weighted cross-entropy per demonstration and type-specific gradients)
         cpt_embedding = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
-        base_model_output = cpt_embedding.calculate_loss(
-            base_model_output, cpt_labels, cpt_type_mask, self.peft_config["default"]
-        )
+        base_model_output = cpt_embedding.calculate_loss(base_model_output, cpt_labels, cpt_type_mask, peft_config)
         return base_model_output
 
     def generate(self, *args, **kwargs):

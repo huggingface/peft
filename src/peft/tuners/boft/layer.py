@@ -839,6 +839,11 @@ class Conv2d(nn.Module, BOFTLayer):
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
                     )
 
+                    if not torch.isfinite(orig_weight).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
+
                     self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
                 else:
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
