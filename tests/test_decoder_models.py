@@ -487,7 +487,7 @@ def _skip_osf_disable_adapter_test(config_cls):
 
 
 def check_beft_config(config_cls, model_id, config_kwargs):
-    if not config_cls == BeftConfig:
+    if config_cls != BeftConfig:
         return
 
     if "gptj" in model_id.lower():
