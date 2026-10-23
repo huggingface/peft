@@ -58,6 +58,13 @@ class PacaConfig(PeftConfig):
             Seed used to select the partial connections. Each layer uses a different selection derived from this seed
             and the layer name. If `None`, the global torch random number generator is used. The selected indices are
             always stored in the adapter checkpoint, so the seed is not needed to load a trained adapter.
+        paca_indices_pattern (`dict`, *optional*):
+            Optional mapping from layer names or regexp expressions to the input column indices that are fine-tuned in
+            the matching layers instead of `r` randomly selected ones, for example
+            `{'^model.layers.0.self_attn.q_proj': [0, 2, 4]}`. This also allows a different number of columns per
+            layer. The indices of a layer must be unique and smaller than `in_features`. The scaling is
+            `paca_alpha / r` with the `r` of this config in all layers, independent of the number of given indices.
+            Targeted layers that match no key use `r` randomly selected columns.
         init_weights (`bool`, *optional*, defaults to `True`):
             If `True`, the update of the selected columns is initialized to zero, i.e. the adapted model is identical
             to the base model at initialization. Set to `False` to initialize with random values; this is only intended
@@ -138,6 +145,19 @@ class PacaConfig(PeftConfig):
             )
         },
     )
+    paca_indices_pattern: Optional[dict] = field(
+        default_factory=dict,
+        metadata={
+            "help": (
+                "Optional mapping from layer names or regexp expressions to the input column indices that are "
+                "fine-tuned in the matching layers instead of `r` randomly selected ones, for example "
+                "`{'^model.layers.0.self_attn.q_proj': [0, 2, 4]}`. This also allows a different number of columns per "
+                "layer. The indices of a layer must be unique and smaller than `in_features`. The scaling is "
+                "`paca_alpha / r` with the `r` of this config in all layers, independent of the number of given "
+                "indices. Targeted layers that match no key use `r` randomly selected columns."
+            )
+        },
+    )
     init_weights: bool = field(
         default=True,
         metadata={
@@ -172,3 +192,16 @@ class PacaConfig(PeftConfig):
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
         if self.r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {self.r}")
+        for key, indices in self.paca_indices_pattern.items():
+            # the upper bound (in_features) is checked when the layer is created
+            if not isinstance(indices, (list, tuple)) or not all(isinstance(i, int) for i in indices):
+                raise ValueError(
+                    f"The indices in `paca_indices_pattern` must be a list of int (e.g. `tensor.tolist()`), got {key!r}: "
+                    f"{indices!r}"
+                )
+            if not indices:
+                raise ValueError(f"`paca_indices_pattern` must not contain an empty list of indices, got {key!r}: []")
+            if len(set(indices)) != len(indices):
+                raise ValueError(f"The indices in `paca_indices_pattern` must be unique, got {key!r}: {indices}")
+            if min(indices) < 0:
+                raise ValueError(f"The indices in `paca_indices_pattern` must not be negative, got {key!r}: {indices}")

@@ -207,23 +207,36 @@ class PacaLayer(BaseTunerLayer):
         paca_alpha: int,
         config: PacaConfig,
         random_seed: Optional[int] = None,
+        indices: Optional[list[int]] = None,
         **kwargs,
     ) -> None:
-        # random_seed is the per-layer seed derived from config.random_seed and the module name (see PacaModel)
+        # random_seed is the per-layer seed derived from config.random_seed and the module name, indices are the columns
+        # given for this layer in config.paca_indices_pattern, if any (see PacaModel)
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
-        if r > self.in_features:
-            raise ValueError(f"`r` ({r}) cannot be larger than in_features ({self.in_features}) of the base layer.")
+        if indices is None:
+            if r > self.in_features:
+                raise ValueError(
+                    f"`r` ({r}) cannot be larger than in_features ({self.in_features}) of the base layer."
+                )
+            generator = torch.Generator().manual_seed(random_seed) if random_seed is not None else None
+            selected = torch.randperm(self.in_features, generator=generator)[:r]
+        else:
+            if max(indices) >= self.in_features:
+                raise ValueError(
+                    f"The indices in `paca_indices_pattern` must be smaller than in_features ({self.in_features}) of "
+                    f"the base layer, got {indices}."
+                )
+            selected = torch.tensor(indices, dtype=torch.int64)
 
-        self.r[adapter_name] = r
+        num_columns = len(selected)
+        self.r[adapter_name] = num_columns
         self.paca_alpha[adapter_name] = paca_alpha
+        # always r from the config, also when paca_indices_pattern gives this layer a different number of columns
         self.scaling[adapter_name] = paca_alpha / r
-
-        generator = torch.Generator().manual_seed(random_seed) if random_seed is not None else None
-        indices = torch.randperm(self.in_features, generator=generator)[:r]
         # Sorting does not change which connections are trained, but gives a more regular memory access pattern.
-        self.paca_indices[adapter_name] = torch.sort(indices).values
-        self.paca_delta[adapter_name] = nn.Parameter(torch.empty(self.out_features, r))
+        self.paca_indices[adapter_name] = torch.sort(selected).values
+        self.paca_delta[adapter_name] = nn.Parameter(torch.empty(self.out_features, num_columns))
         self.reset_paca_parameters(adapter_name, config.init_weights)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
@@ -259,6 +272,7 @@ class Linear(nn.Module, PacaLayer):
         paca_alpha: int,
         config: PacaConfig,
         random_seed: Optional[int] = None,
+        indices: Optional[list[int]] = None,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -267,7 +281,7 @@ class Linear(nn.Module, PacaLayer):
             raise ValueError("PaCA does not support nested base layers")
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, paca_alpha, config=config, random_seed=random_seed)
+        self.update_layer(adapter_name, r, paca_alpha, config=config, random_seed=random_seed, indices=indices)
 
     def _adapted_columns(self, weight: torch.Tensor, adapter: str, sign: int) -> torch.Tensor:
         idx = self.paca_indices[adapter].to(weight.device)

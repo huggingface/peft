@@ -62,6 +62,23 @@ model = get_peft_model(model, config)
 model.print_trainable_parameters()
 ```
 
+By default, every targeted layer fine-tunes `r` randomly selected columns; in the paper, this performed on par with
+selecting the columns by weight norm or by accumulated gradients. To choose the columns yourself, for example to try
+another selection strategy or to use a different number of columns per layer, pass `paca_indices_pattern`. Its keys are
+layer names or regular expressions, as in LoRA's `rank_pattern`:
+
+```python
+config = PacaConfig(
+    r=16,
+    paca_alpha=16,
+    target_modules=["q_proj", "v_proj"],
+    paca_indices_pattern={"layers.0.self_attn.q_proj": [0, 2, 4, 6], "layers.1.self_attn.v_proj": list(range(32))},
+)
+```
+
+Layers that match a key fine-tune the given columns, all other targeted layers select `r` random columns. The scaling
+is `paca_alpha / r` with the `r` of the config in every layer, so `paca_alpha` means the same for all layers.
+
 The abstract from the paper is:
 
 > Prior parameter-efficient fine-tuning (PEFT) algorithms reduce memory usage and computational costs of fine-tuning

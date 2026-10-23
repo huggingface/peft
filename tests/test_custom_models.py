@@ -778,6 +778,13 @@ TEST_CASES = [
     ("Vanilla MLP 4 PaCA", "MLP", PacaConfig, {"r": 2, "target_modules": ["lin0", "lin1"], "random_seed": 1}),
     ("Vanilla MLP 5 PaCA", "MLP", PacaConfig, {"r": 2, "target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
     ("Vanilla MLP 6 PaCA", "MLP", PacaConfig, {"r": 4, "paca_alpha": 8, "target_modules": ["lin0", "lin1"]}),
+    # lin0 fine-tunes the 3 given columns, lin1 2 random ones (selected as in Vanilla MLP 4 PaCA)
+    (
+        "Vanilla MLP 7 PaCA",
+        "MLP",
+        PacaConfig,
+        {"r": 2, "target_modules": ["lin0", "lin1"], "random_seed": 1, "paca_indices_pattern": {"lin0": [0, 3, 7]}},
+    ),
     ###############
     # Supertuning #
     ###############

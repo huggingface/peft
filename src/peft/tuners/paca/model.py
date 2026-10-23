@@ -22,6 +22,7 @@ from peft.utils import (
     get_quantization_kwargs,
     resolve_quantization_backend,
 )
+from peft.utils.other import get_pattern_key
 
 from .layer import Linear, PacaLayer
 
@@ -85,11 +86,22 @@ class PacaModel(BaseTuner):
         r = paca_config.r
         paca_alpha = paca_config.paca_alpha
         random_seed = _get_layer_seed(paca_config.random_seed, current_key)
+        # Regexp matching - find the key in paca_indices_pattern that matches the current module, if any
+        indices_key = get_pattern_key(paca_config.paca_indices_pattern.keys(), current_key)
+        indices = paca_config.paca_indices_pattern.get(indices_key)
 
         if isinstance(target, PacaLayer):
-            target.update_layer(adapter_name, r, paca_alpha, config=paca_config, random_seed=random_seed)
+            target.update_layer(
+                adapter_name, r, paca_alpha, config=paca_config, random_seed=random_seed, indices=indices
+            )
         else:
-            kwargs = {"r": r, "paca_alpha": paca_alpha, "random_seed": random_seed, **get_quantization_kwargs(self)}
+            kwargs = {
+                "r": r,
+                "paca_alpha": paca_alpha,
+                "random_seed": random_seed,
+                "indices": indices,
+                **get_quantization_kwargs(self),
+            }
             new_module = self._create_new_module(paca_config, adapter_name, target, **kwargs)
             if adapter_name not in self.active_adapter:
                 # adding an additional adapter: it is not automatically trainable
