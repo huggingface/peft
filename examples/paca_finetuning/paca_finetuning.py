@@ -78,7 +78,7 @@ def train_model(
         max_steps=max_steps,
         per_device_train_batch_size=batch_size,
         per_device_eval_batch_size=batch_size,
-        warmup_ratio=0.1,
+        warmup_steps=0.1,
         weight_decay=0.0,
         logging_steps=eval_step,
         save_steps=save_step,

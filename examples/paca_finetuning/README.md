@@ -57,8 +57,9 @@ weights with `merge_and_unload()`. Since the update is non-zero in `r` columns o
 loss into a LoRA adapter of rank `r`:
 
 ```python
-from peft.tuners.lora.conversion import convert_to_lora
+from peft import convert_to_lora
 
+# use the `r` of the PaCA adapter as rank: the update has at most this rank, so the conversion is exact
 lora_config, lora_state_dict = convert_to_lora(paca_model, rank=16)
 ```
 

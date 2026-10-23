@@ -64,7 +64,9 @@ def paca_linear_forward(
     return [result, *x_parts, *originals, *adapted]
 
 
-@paca_linear_forward.register_fake
+# Registered by op name rather than through the op object, so that importing works with the mocked torch that is
+# used to build the docs (there, custom_op returns the plain function).
+@torch.library.register_fake("peft::paca_linear_forward")
 def _(x, weight, bias, indices, scalings, deltas):
     lead = x.shape[:-1]
     out = [x.new_empty((*lead, weight.shape[0]))]
@@ -112,7 +114,7 @@ def paca_linear_backward(
     return [grad_x, *grad_deltas]
 
 
-@paca_linear_backward.register_fake
+@torch.library.register_fake("peft::paca_linear_backward")
 def _(grad_output, weight, indices, scalings, x_parts, originals, adapted, need_grad_x):
     if need_grad_x:
         grad_x = grad_output.new_empty((*grad_output.shape[:-1], weight.shape[1]))
