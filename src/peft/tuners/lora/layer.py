@@ -2012,6 +2012,11 @@ class MultiheadAttention(nn.Module, LoraLayer):
             raise ValueError(f"{self.__class__.__name__} does not support KaSA, please set `kasa_config=None`.")
         if kwargs.get("use_alora", False):
             raise ValueError(f"{self.__class__.__name__} does not support aLoRA (yet), please set use_alora to False")
+        if config.init_lora_weights == "loftq":
+            raise ValueError(
+                f"{self.__class__.__name__} does not support init_lora_weights='loftq', please use a different "
+                "init_lora_weights"
+            )
         super().__init__()
         LoraLayer.__init__(self, base_layer, **kwargs)
 
@@ -2096,6 +2101,11 @@ class MultiheadAttention(nn.Module, LoraLayer):
         if config.lora_bias:
             raise ValueError(
                 f"{self.__class__.__name__} does not support lora_bias=True, please set lora_bias to False"
+            )
+        if config.init_lora_weights == "loftq":
+            raise ValueError(
+                f"{self.__class__.__name__} does not support init_lora_weights='loftq', please use a different "
+                "init_lora_weights"
             )
         super().update_layer(*args, config=config, **kwargs)
         # Note: LoRA is applied to both in_proj and out_proj. There is currently no way to only specify one of them.

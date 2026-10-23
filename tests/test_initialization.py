@@ -1613,6 +1613,21 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match=msg):
             model.add_adapter("other", LoraConfig(target_modules=["mha"], lora_bias=True))
 
+    def test_mha_with_loftq_raises(self, mha_cls):
+        # LoftQ is not supported for MHA. Test both creating the layer and adding a second adapter.
+        msg = re.escape("MultiheadAttention does not support init_lora_weights='loftq'")
+        config = LoraConfig(target_modules=["mha"], init_lora_weights="loftq", loftq_config=LoftQConfig(loftq_bits=4))
+        model = mha_cls()
+        weight = model.mha.out_proj.weight.detach().clone()
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+        # the error is raised before LoftQ can modify the base weights
+        assert torch.equal(model.mha.out_proj.weight, weight)
+
+        model = get_peft_model(mha_cls(), LoraConfig(target_modules=["mha"]))
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", config)
+
     def test_mha_exposes_attributes(self, mha_cls):
         # MHA requires a bunch of attributes to be exposed, try to check them exhaustively here
         model = mha_cls()

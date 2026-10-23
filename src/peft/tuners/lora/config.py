@@ -610,7 +610,8 @@ class LoraConfig(PeftConfig):
             and initialize Lora layers. Also pass `init_lora_weights='loftq'`. Note that you should not pass a
             quantized model in this case, as LoftQ will quantize the model itself. LoftQ is only applied to linear
             layers, including those targeted via `target_parameters`. Embedding and convolutional layers are not
-            supported and use the default LoRA initialization instead.
+            supported and use the default LoRA initialization instead. `nn.MultiheadAttention` layers are not supported
+            and raise an error.
         eva_config (`Optional[EvaConfig]`):
             The configuration of EVA. At a minimum the dataset argument needs to be set (use the same dataset as for
             finetuning).
@@ -871,7 +872,8 @@ class LoraConfig(PeftConfig):
                 "The configuration of LoftQ. If this is passed, then LoftQ will be used to quantize the backbone "
                 "weights and initialize Lora layers. Also set `init_lora_weights='loftq'` in this case. "
                 "LoftQ is only applied to linear layers, including those targeted via `target_parameters`. Embedding "
-                "and convolutional layers are not supported and use the default LoRA initialization instead."
+                "and convolutional layers are not supported and use the default LoRA initialization instead. "
+                "`nn.MultiheadAttention` layers are not supported and raise an error."
             )
         },
     )
