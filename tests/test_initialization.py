@@ -5394,6 +5394,50 @@ def test_prepare_model_for_compiled_hotswap_preserves_conv2d_attributes():
     assert torch.allclose(output_before, output_after, atol=1e-6, rtol=1e-5)
 
 
+class TestInactiveAdapterHotSwapping:
+    @pytest.mark.parametrize(
+        "config_key, value, compatible",
+        [
+            ("lora_dropout", 0.5, False),
+            ("lora_dropout", 0.5, True),
+            ("use_dora", True, False),
+            ("use_rslora", True, False),
+            ("use_rslora", True, True),
+        ],
+    )
+    def test_hotswap_checks_target_config_of_correct_adapter(self, config_key, value, compatible, tmp_path):
+        # Regression for #3821: validate the requested adapter, not the active default adapter.
+        # Hotswap-load an inactive adapter. Compatible configs should swap successfully without changing the active
+        # adapter; incompatible configs should raise without changing any model parameters.
+        base_model = nn.Sequential(nn.Linear(10, 5))
+        current_config = LoraConfig(target_modules=["0"], r=2, init_lora_weights=False, **{config_key: value})
+        incoming_config = deepcopy(current_config) if compatible else LoraConfig(target_modules=["0"], r=2)
+        model = get_peft_model(deepcopy(base_model), LoraConfig(target_modules=["0"], r=2)).eval()
+        model.add_adapter("other", current_config)
+        model.eval()
+        incoming = get_peft_model(deepcopy(base_model), incoming_config).eval()
+        incoming.save_pretrained(tmp_path)
+        inputs = torch.randn(3, 10)
+        with torch.inference_mode():
+            active_output = model(inputs)
+            incoming_output = incoming(inputs)
+
+        if compatible:
+            hotswap_adapter(model, tmp_path, adapter_name="other", torch_device="cpu")
+            assert model.active_adapters == ["default"]
+            with torch.inference_mode():
+                torch.testing.assert_close(model(inputs), active_output)
+                model.set_adapter("other")
+                torch.testing.assert_close(model(inputs), incoming_output)
+        else:
+            before = {name: parameter.detach().clone() for name, parameter in model.named_parameters()}
+            with pytest.raises(ValueError, match=f"Configs are incompatible: for {config_key}"):
+                hotswap_adapter(model, tmp_path, adapter_name="other", torch_device="cpu")
+            assert model.active_adapters == ["default"]
+            for name, parameter in model.named_parameters():
+                torch.testing.assert_close(parameter, before[name])
+
+
 @pytest.mark.skipif(
     platform.system() != "Linux", reason="Out of the box, torch.compile does not work on Windows or MacOS"
 )
