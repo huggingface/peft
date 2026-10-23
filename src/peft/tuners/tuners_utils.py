@@ -358,6 +358,23 @@ class BaseTuner(nn.Module, ABC):
     def forward(self, *args: Any, **kwargs: Any):
         return self.model(*args, **kwargs)
 
+    def get_peft_loss(
+        self, adapter_names: Optional[Union[str, list[str]]] = None, **kwargs: Any
+    ) -> torch.Tensor | float:
+        """
+        Return additional PEFT training loss, or `0.0` when no additional loss is required.
+
+        Unused keyword arguments are ignored. Overrides must retain `**kwargs` to accept additional training context.
+        """
+        return 0.0
+
+    def on_peft_optimizer_step(self, global_step: int, **kwargs: Any) -> None:
+        """
+        Update PEFT state after an optimizer update, before gradients are cleared. Defaults to a no-op.
+
+        Unused keyword arguments are ignored. Overrides must retain `**kwargs` to accept additional training context.
+        """
+
     def _pre_injection_hook(self, model: nn.Module, config: PeftConfig, adapter_name: str) -> None:
         r"""
         A hook to be called before the adapter is injected into the model. This method can be overridden by child

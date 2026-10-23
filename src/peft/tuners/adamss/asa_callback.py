@@ -28,11 +28,15 @@ Important:
     ```
 """
 
+import warnings
+
 from transformers import TrainerCallback, TrainerControl, TrainerState, TrainingArguments
 
 
 class AdamssAsaCallback(TrainerCallback):
     """
+    Deprecated in favor of [`helpers.PeftTrainerMixin`].
+
     Trainer callback for Adaptive Subspace Allocation (ASA).
 
     This callback delegates to [`AdamssModel.update_and_allocate`] on every optimizer step so that ASA "just works"
@@ -72,6 +76,14 @@ class AdamssAsaCallback(TrainerCallback):
     ```
     """
 
+    def __init__(self):
+        # TODO: remove the callback after Oct 2027
+        warnings.warn(
+            "AdamssAsaCallback is deprecated. Use peft.helpers.PeftTrainerMixin instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+
     def on_optimizer_step(
         self,
         args: TrainingArguments,
@@ -80,6 +92,8 @@ class AdamssAsaCallback(TrainerCallback):
         **kwargs,
     ):
         """Called after optimizer.step() – delegates to model.update_and_allocate()."""
+        if getattr(kwargs.get("optimizer"), "step_was_skipped", False):
+            return control
         model = kwargs.get("model")
         if model is not None:
             # Resolve to the AdamssModel (works for both PeftModel and raw base_model)

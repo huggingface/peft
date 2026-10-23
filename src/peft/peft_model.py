@@ -999,6 +999,63 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             f"trainable params: {trainable_params:,d} || all params: {all_param:,d} || trainable%: {100 * trainable_params / all_param:.4f}"
         )
 
+    def get_peft_loss(
+        self, adapter_names: Optional[Union[str, list[str]]] = None, **kwargs: Any
+    ) -> torch.Tensor | float:
+        """
+        Return additional PEFT loss to add to the task loss before backward.
+
+        The returned loss includes the coefficients configured for each adapter. Losses already added by the model's
+        forward are excluded. Returns `0.0` in evaluation mode, while adapters are disabled, or when the selected PEFT
+        method does not require an additional loss.
+
+        Call this after the corresponding forward pass and before backward. When accumulating gradients, normalize the
+        additional loss consistently with the task loss. With AMP, scale the combined loss once.
+
+        Args:
+            adapter_names (`str` or `list[str]`, *optional*):
+                Adapters to include. Defaults to the currently active adapters.
+            **kwargs:
+                Additional training context forwarded unchanged to the tuner. Implementations may ignore arguments they
+                do not use. Algorithm settings should be configured through the PEFT config.
+        """
+        # Note: we return 0.0 here so that this loss can be added to the main loss without additional checking for None,
+        # device, etc. It means, however, that a get_peft_loss().item() call would fail for instance.
+        if not self.training or self._adapters_disabled:
+            return 0.0
+
+        if not hasattr(self.base_model, "on_peft_optimizer_step"):
+            return 0.0
+
+        return self.base_model.get_peft_loss(adapter_names=adapter_names, **kwargs)
+
+    def on_peft_optimizer_step(self, global_step: int, **kwargs: Any) -> None:
+        """
+        Update PEFT training state after a successful optimizer update and before clearing gradients.
+
+        Call once per optimizer update, after all gradient accumulation, unscaling, and gradient clipping. Gradients
+        must remain available and be unscaled. With AMP, skip this call when GradScaler skips the optimizer update due
+        to nonfinite gradients. This hook does not unscale gradients or detect skipped updates itself.
+
+        Does nothing in evaluation mode, while adapters are disabled, or for methods without an optimizer-step update.
+        Other training phases are outside this hook's contract.
+
+        Args:
+            global_step (`int`):
+                The training loop's optimizer-step index, using the same convention as the method's training schedule.
+                Skipped optimizer updates may leave gaps in the indices.
+            **kwargs:
+                Additional training context forwarded unchanged to the tuner. Implementations may ignore arguments they
+                do not use. Algorithm settings should be configured through the PEFT config.
+        """
+        if not self.training or self._adapters_disabled:
+            return
+
+        if not hasattr(self.base_model, "on_peft_optimizer_step"):
+            return
+
+        self.base_model.on_peft_optimizer_step(global_step, **kwargs)
+
     def __getattr__(self, name: str) -> Any:
         """Forward missing attributes to the wrapped module."""
         try:
@@ -2365,7 +2422,9 @@ class PeftModelForCausalLM(PeftModel):
         else:
             # Calculate the loss using the custom CPT loss function
             cpt_embedding = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
-            base_model_output = cpt_embedding.calculate_loss(base_model_output, cpt_labels, cpt_type_mask, peft_config)
+            base_model_output = cpt_embedding.calculate_loss(
+                base_model_output, cpt_labels, cpt_type_mask, self.peft_config["default"]
+            )
             return base_model_output
 
     def generate(self, *args, **kwargs):
