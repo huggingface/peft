@@ -127,38 +127,16 @@ def get_tp_plan_and_mesh(model, current_key: str):
     return plan_name, tp_mesh
 
 
-def add_lora_tp_hooks_dtensor(
-    tp_module: nn.Module, tp_plan_name: str, device_mesh, *, base_layer: nn.Module, module_name: str
-) -> None:
-    from torch.distributed.tensor import DTensor, Shard
+def add_lora_tp_hooks_dtensor(tp_module: nn.Module, tp_plan_name: str, device_mesh, *, module_name: str) -> None:
     from transformers.distributed.tensor_parallel import ALL_PARALLEL_STYLES
 
     style = ALL_PARALLEL_STYLES[tp_plan_name]
     if tp_plan_name not in ("colwise", "rowwise"):
         raise ValueError(f"Unsupported TP plan {tp_plan_name} for LoRA: only colwise and rowwise are supported.")
 
-    shard_dim = 0 if tp_plan_name == "colwise" else 1
-    for p_name, param in list(tp_module.named_parameters(recurse=False)):
+    for p_name, _ in list(tp_module.named_parameters(recurse=False)):
         style.validate_param(tp_module, p_name, device_mesh, parameter_name=f"{module_name}.{p_name}")
-        global_shape = list(param.shape)
-        global_shape[shard_dim] = base_layer.weight.shape[shard_dim]
-        if param.shape == torch.Size(global_shape):
-            # The adapter was initialized with global dimensions, so we can shard it directly.
-            style.shard_param(tp_module, p_name, device_mesh)
-        else:
-            # The adapter was initialized with local dimensions, so wrap it without sharding a second time.
-            global_stride = torch.empty(global_shape, device="meta").stride()
-            tp_module._parameters[p_name] = nn.Parameter(
-                DTensor.from_local(
-                    param,
-                    device_mesh,
-                    [Shard(shard_dim)],
-                    run_check=False,
-                    shape=torch.Size(global_shape),
-                    stride=global_stride,
-                ),
-                requires_grad=param.requires_grad,
-            )
+        style.shard_param(tp_module, p_name, device_mesh)
     style.install_forward(tp_module, device_mesh)
 
 
@@ -395,6 +373,11 @@ class LoraModel(BaseTuner):
             base_layer = target
             lora_module = new_module
 
+        if isinstance(lora_module, ParamWrapper):
+            if getattr(lora_module.lora_A[adapter_name].weight, "device_mesh", None) is not None:
+                # Parameter wrappers shard their low-rank factors to match the expert weight, not a Linear TP plan.
+                return
+
         tp_plan = getattr(base_layer, "_hf_tp_plan", None)
         device_mesh = getattr(base_layer, "_hf_device_mesh", None)
 
@@ -437,7 +420,6 @@ class LoraModel(BaseTuner):
                             tp_module,
                             tp_plan,
                             device_mesh,
-                            base_layer=base_layer,
                             module_name=tp_layer_name[0],
                         )
                     else:
@@ -1138,6 +1120,11 @@ class LoraModel(BaseTuner):
     def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
         to_return = super()._get_adapter_state_dict(model, config, adapter_name, state_dict, unwanted_adapter_names)
 
+        if config.target_parameters:
+            to_return = {
+                k: v.full_tensor() if getattr(v, "device_mesh", None) is not None else v for k, v in to_return.items()
+            }
+
         if config.use_dora:
             # Here we take care of a refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a
             # ModuleDict with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer. Since
@@ -1165,6 +1152,19 @@ class LoraModel(BaseTuner):
 
         state_dict = {renamed_dora_weights(k): v for k, v in state_dict.items()}
         peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
+
+        if config.target_parameters:
+            parameters = dict(model.named_parameters())
+            for key, value in peft_model_state_dict.items():
+                reference = parameters.get(key)
+                if getattr(reference, "device_mesh", None) is not None and getattr(value, "device_mesh", None) is None:
+                    from torch.distributed.tensor import distribute_tensor
+
+                    peft_model_state_dict[key] = distribute_tensor(
+                        value.to(reference.device_mesh.device_type if reference.is_meta else reference.device),
+                        reference.device_mesh,
+                        reference.placements,
+                    )
 
         # Before PEFT 0.22.0, the out_proj delta weight of MultiheadAttention was applied twice (#3774). To keep the
         # outputs of these adapters unchanged, lora_B is doubled and the version is updated so this happens only once.
