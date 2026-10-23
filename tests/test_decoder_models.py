@@ -52,6 +52,7 @@ from peft import (
     MultitaskPromptTuningConfig,
     OFTConfig,
     OSFConfig,
+    PacaConfig,
     PeftModel,
     PrefixTuningConfig,
     PromptEmbedding,
@@ -338,6 +339,14 @@ ALL_CONFIGS = [
         },
     ),
     (
+        PacaConfig,
+        {
+            "r": 2,
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+        },
+    ),
+    (
         ShiraConfig,
         {
             "r": 1,
@@ -461,6 +470,7 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         HRAConfig,
         OFTConfig,
         OSFConfig,
+        PacaConfig,
         RoadConfig,
         ShiraConfig,
         SupertuningConfig,
@@ -470,7 +480,7 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         PsoftConfig,
     ]:
         pytest.skip(
-            "Skipping Beft/BOFT/GLoRA/HRA/OFT/Road/SHiRA/Supertuning/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel"
+            "Skipping Beft/BOFT/GLoRA/HRA/OFT/PaCA/Road/SHiRA/Supertuning/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel"
         )
 
 

@@ -60,6 +60,7 @@ from peft import (
     LoraConfig,
     MissConfig,
     OFTConfig,
+    PacaConfig,
     PeanutConfig,
     PeftMixedModel,
     PeftModel,
@@ -95,6 +96,7 @@ from peft.tuners.lora.config import AstraConfig, CordaConfig, LoraGAConfig
 from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.lora.loraga import preprocess_loraga
+from peft.tuners.paca.layer import PacaLayer
 from peft.utils import infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 from peft.utils.other import ModulesToSaveWrapper
@@ -3638,6 +3640,78 @@ class TestHraInitialization:
             output_merged = model(x)
 
         assert torch.allclose(output, output_merged, atol=1e-5, rtol=1e-5)
+
+
+class TestPacaInitialization:
+    """Test class to check the initialization of PaCA adapters."""
+
+    torch_device = infer_device()
+
+    def test_random_seed_is_reproducible_and_differs_per_layer(self):
+        indices = []
+        for global_seed in (0, 1):
+            # different global RNG states: the selections can only match because of random_seed
+            torch.manual_seed(global_seed)
+            model = nn.Sequential(nn.Linear(64, 64), nn.Linear(64, 64)).to(self.torch_device)
+            model = get_peft_model(model, PacaConfig(r=8, target_modules=["0", "1"], random_seed=42))
+            indices.append(
+                [module.paca_indices["default"].clone() for module in model.modules() if isinstance(module, PacaLayer)]
+            )
+
+        assert all(torch.equal(i0, i1) for i0, i1 in zip(*indices))
+        # layers of the same shape get different selections
+        assert not torch.equal(indices[0][0], indices[0][1])
+
+    def test_indices_are_unique(self):
+        model = nn.Sequential(nn.Linear(64, 64), nn.Linear(64, 64)).to(self.torch_device)
+        model = get_peft_model(model, PacaConfig(r=8, target_modules=["0", "1"]))
+        for module in model.modules():
+            if isinstance(module, PacaLayer):
+                idx = module.paca_indices["default"]
+                assert len(idx) == 8
+                assert len(torch.unique(idx)) == 8
+
+    def test_r_larger_than_in_features_raises(self):
+        model = nn.Sequential(nn.Linear(16, 32)).to(self.torch_device)
+        with pytest.raises(ValueError, match="cannot be larger than in_features"):
+            get_peft_model(model, PacaConfig(r=17, target_modules=["0"]))
+
+    def test_indices_pattern_selects_given_columns(self):
+        model = nn.Sequential(nn.Linear(64, 64), nn.Linear(64, 64)).to(self.torch_device)
+        config = PacaConfig(
+            r=8, paca_alpha=16, target_modules=["0", "1"], paca_indices_pattern={"0": [5, 1, 3]}, init_weights=False
+        )
+        model = get_peft_model(model, config)
+        layer0, layer1 = model.base_model.model[0], model.base_model.model[1]
+
+        assert layer0.paca_indices["default"].tolist() == [1, 3, 5]
+        assert layer0.paca_delta["default"].shape == (64, 3)
+        # the scaling uses the r of the config, not the number of given indices
+        assert layer0.scaling["default"] == 16 / 8
+        # only the given columns are updated
+        delta_weight = layer0.get_delta_weight("default")
+        assert torch.nonzero(delta_weight.abs().sum(0)).flatten().tolist() == [1, 3, 5]
+        # targeted layers that match no key select r random columns
+        assert len(layer1.paca_indices["default"]) == 8
+
+    def test_indices_pattern_allows_r_larger_than_in_features(self):
+        # r of the config only sets the scaling of a layer with given indices
+        model = nn.Sequential(nn.Linear(16, 32)).to(self.torch_device)
+        model = get_peft_model(model, PacaConfig(r=32, target_modules=["0"], paca_indices_pattern={"0": [0, 15]}))
+        assert model.base_model.model[0].paca_indices["default"].tolist() == [0, 15]
+
+    @pytest.mark.parametrize(
+        "indices, msg",
+        [([], "empty"), ([1, 1], "unique"), ([-1, 2], "negative"), (torch.tensor([1, 2]), "list of int")],
+    )
+    def test_indices_pattern_invalid_raises(self, indices, msg):
+        with pytest.raises(ValueError, match=msg):
+            PacaConfig(r=8, target_modules=["0"], paca_indices_pattern={"0": indices})
+
+    def test_indices_pattern_out_of_range_raises(self):
+        model = nn.Sequential(nn.Linear(16, 32)).to(self.torch_device)
+        with pytest.raises(ValueError, match="must be smaller than in_features"):
+            get_peft_model(model, PacaConfig(r=4, target_modules=["0"], paca_indices_pattern={"0": [3, 16]}))
 
 
 class TestNoInfiniteRecursionDeepspeed:
