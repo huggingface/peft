@@ -487,9 +487,10 @@ def _skip_osf_disable_adapter_test(config_cls):
 
 
 def check_beft_config(config_cls, model_id, config_kwargs):
-    if isinstance(config_cls, BeftConfig):
+    if config_cls != BeftConfig:
         return
-    elif "gptj" in model_id.lower():
+
+    if "gptj" in model_id.lower():
         config_kwargs["target_modules"] = ["fc_out"]
     elif "llama" in model_id.lower():
         pytest.skip("Skip tests for Llama models because layers have no bias term")
