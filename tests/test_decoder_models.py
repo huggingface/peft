@@ -40,6 +40,7 @@ from peft import (
     CPTConfig,
     DeftConfig,
     DeloraConfig,
+    FineGatesConfig,
     FourierFTConfig,
     FrodConfig,
     GloraConfig,
@@ -153,6 +154,13 @@ ALL_CONFIGS = [
             "task_type": "CAUSAL_LM",
             "target_modules": None,
             "r": 2,
+        },
+    ),
+    (
+        FineGatesConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
         },
     ),
     (
@@ -457,6 +465,7 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
     if "GPT2LMHeadModel" in model_id and config_cls in [
         BeftConfig,
         BOFTConfig,
+        FineGatesConfig,
         GloraConfig,
         HRAConfig,
         OFTConfig,

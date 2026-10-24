@@ -40,6 +40,7 @@ class PeftType(str, enum.Enum):  # noqa: UP042
     - VERA
     - FROD
     - FOURIERFT
+    - FINEGATES
     - HRA
     - BONE
     - MISS
@@ -75,6 +76,7 @@ class PeftType(str, enum.Enum):  # noqa: UP042
     LN_TUNING = "LN_TUNING"
     VERA = "VERA"
     FROD = "FROD"
+    FINEGATES = "FINEGATES"
     PVERA = "PVERA"
     FOURIERFT = "FOURIERFT"
     GLORA = "GLORA"
