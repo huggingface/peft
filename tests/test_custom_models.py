@@ -88,6 +88,7 @@ from peft.tuners.lora.monteclora import MontecloraSampler
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
+from . import testing_common
 from .testing_common import (
     PeftCommonTester,
     _skip_if_merging_not_supported,
@@ -2466,6 +2467,12 @@ class TestPeftCustomModel(PeftCommonTester):
 
     transformers_class = MockTransformerWrapper
 
+    @pytest.fixture(autouse=True)
+    def allow_custom_models(self, monkeypatch):
+        # hub_online_once has logic to skip non-"tiny" models on MacOS, but we don't want to skip the custom models
+        # here, which are also tiny but don't contain "tiny" in their name. For this, set is_custom_model=True
+        monkeypatch.setattr(testing_common, "hub_online_once", partial(hub_online_once, is_custom_model=True))
+
     def prepare_inputs_for_testing(self):
         X = torch.arange(90).view(9, 10).to(self.torch_device)
         return {"X": X}
@@ -2648,7 +2655,7 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip("Merging with target_parameters is not supported for all PEFT methods.")
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
 
-        with hub_online_once(model_id):
+        with hub_online_once(model_id, is_custom_model=True):
             base = self.transformers_class.from_pretrained(model_id)
             config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
             # Best-effort enable dropout for the various PEFT methods to check for deterministic merging.
@@ -4419,7 +4426,8 @@ class TestPeftCustomModel(PeftCommonTester):
         # the default adapter.
         config0 = LoraConfig(task_type=TaskType.SEQ_CLS)
         config1 = LoraConfig(task_type=TaskType.SEQ_CLS)
-        model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
+        with hub_online_once("bert-base-uncased"):
+            model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
         model = get_peft_model(model, config0)
         # sanity check
         assert model.modules_to_save
@@ -4567,7 +4575,8 @@ class TestPeftCustomModel(PeftCommonTester):
         # module is implicitly targeted by modules_to_save twice.
         config0 = LoraConfig(task_type=TaskType.SEQ_CLS)
         config1 = LoraConfig(task_type=TaskType.SEQ_CLS)
-        model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
+        with hub_online_once("bert-base-uncased"):
+            model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
         model = get_peft_model(model, config0)
         model.add_adapter("other", config1)
 
@@ -5039,7 +5048,8 @@ class TestPeftCustomModel(PeftCommonTester):
 
     def test_gpt2_dora_merge_and_unload(self):
         # see https://github.com/huggingface/peft/pull/1588#discussion_r1537914207
-        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        with hub_online_once("gpt2"):
+            model = AutoModelForCausalLM.from_pretrained("gpt2")
         config = LoraConfig(task_type="CAUSAL_LM", use_dora=True)
         model = get_peft_model(model, config)
         # should not raise an error
@@ -5047,7 +5057,8 @@ class TestPeftCustomModel(PeftCommonTester):
 
     def test_gpt2_dora_merge_and_unload_safe_merge(self):
         # see https://github.com/huggingface/peft/pull/1588#discussion_r1537914207
-        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        with hub_online_once("gpt2"):
+            model = AutoModelForCausalLM.from_pretrained("gpt2")
         config = LoraConfig(task_type="CAUSAL_LM", use_dora=True)
         model = get_peft_model(model, config)
         # should not raise an error
@@ -5065,7 +5076,8 @@ class TestPeftCustomModel(PeftCommonTester):
         # Here we test the refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a ModuleDict
         # with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer. Since we want the
         # state_dict format not to change, we ensure that the ".weight" part of the key is removed.
-        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
+        with hub_online_once("peft-internal-testing/opt-125m"):
+            model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         config = LoraConfig(task_type="CAUSAL_LM", use_dora=True)
         model = get_peft_model(model, config)
         state_dict = model.state_dict()
@@ -5083,9 +5095,10 @@ class TestPeftCustomModel(PeftCommonTester):
             assert not any("lora_magnitude_vector.weight" in k for k in state_dict_adapter)
 
             del model
-            loaded = PeftModel.from_pretrained(
-                AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m"), tmp_dirname
-            )
+            with hub_online_once("peft-internal-testing/opt-125m"):
+                loaded = PeftModel.from_pretrained(
+                    AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m"), tmp_dirname
+                )
         finally:
             try:
                 shutil.rmtree(tmp_dirname)
@@ -8315,9 +8328,10 @@ class TestMixedAdapterBatches:
             toc = time.perf_counter()
             logs.append(toc - tic)
 
-        base_model = (
-            AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m").to(self.torch_device).eval()
-        )
+        with hub_online_once("peft-internal-testing/opt-125m"):
+            base_model = (
+                AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m").to(self.torch_device).eval()
+            )
         inputs = {"input_ids": torch.randint(0, 1000, (16, 64)).to(self.torch_device)}
         with timed():
             output_base = base_model(**inputs).logits
@@ -8515,7 +8529,8 @@ class TestDynamicDispatch:
     def test_override_lora_linear(self, custom_lora_cls):
         # in this test, we check if users can override default PEFT behavior by supplying a custom lora class that is
         # being used instead of lora.Linear
-        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
+        with hub_online_once("peft-internal-testing/opt-125m"):
+            model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         config = LoraConfig(task_type=TaskType.CAUSAL_LM)
         config._register_custom_module({nn.Linear: custom_lora_cls})
         peft_model = get_peft_model(model, config)

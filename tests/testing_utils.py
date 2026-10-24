@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
+import platform
 from contextlib import contextmanager
 from functools import lru_cache, wraps
 from unittest import mock
@@ -319,7 +320,7 @@ def set_init_weights_false(config_cls, kwargs):
 
 
 @contextmanager
-def hub_online_once(model_id: str):
+def hub_online_once(model_id: str, *, is_custom_model: bool = False):
     """Set env[HF_HUB_OFFLINE]=1 (and patch transformers/hugging_face_hub to think that it was always that way)
     for model ids that were already to avoid contacting the hub twice for the same model id in the context. The global
     variable `_HUB_MODEL_ACCESSES` tracks the number of hits per model id between `hub_online_once` calls.
@@ -347,7 +348,13 @@ def hub_online_once(model_id: str):
     It is best to avoid using this context manager in *yield* fixtures (normal fixtures are fine) as this is equivalent
     to wrapping the whole test in the context manager without explicitly writing it out, leading to unexpected
     `HF_HUB_OFFLINE` behavior in the test body.
+
+    On macOS, skip Hub models without "tiny" in their cache key to limit memory usage. Set `is_custom_model=True` for
+    small, handcrafted models that do not load weights from the Hub.
     """
+    if platform.system() == "Darwin" and not is_custom_model and "tiny" not in model_id.lower():
+        pytest.skip(f"Skipping non-tiny model on macOS: {model_id}")
+
     override = {}
 
     try:

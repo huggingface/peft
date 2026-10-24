@@ -47,7 +47,10 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
-        os: ["ubuntu-latest", "windows-latest"]
+        os:
+          # - ubuntu-latest
+          # - windows-latest
+          - macos-15  # Apple Silicon (M1)
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -59,7 +62,7 @@ jobs:
         # So we remove some of the stuff we don't need (Java, .NET, etc.)
         #
         # Idea: https://dev.to/mathio/squeezing-disk-space-from-github-actions-runners-an-engineers-guide-3pjg
-        if: matrix.os != 'windows-latest'
+        if: runner.os == 'Linux'
         run: |
           df -h
 
@@ -136,7 +139,9 @@ jobs:
           TRANSFORMERS_IS_CI: 1
           CI: 1
         run: |
-          if [[ "${{ matrix.os }}" == "ubuntu-latest" && "${{ matrix.python-version }}" == "3.14" ]]; then
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            make test_macos
+          elif [[ "${{ matrix.os }}" == "ubuntu-latest" && "${{ matrix.python-version }}" == "3.14" ]]; then
             make test
           else
             PYTEST_ADDOPTS="--no-cov" make test

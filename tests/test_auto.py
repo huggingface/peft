@@ -251,7 +251,8 @@ class TestPeftAutoModel:
 
         # first create a checkpoint; it is important that the tokenizer is also saved in the same location
         model_id = "Qwen/Qwen2-0.5B"
-        model = AutoModelForCausalLM.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         model = get_peft_model(model, LoraConfig(modules_to_save=["lm_head", "embed_token"]))
         model.save_pretrained(tmp_path)
