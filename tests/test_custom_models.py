@@ -2469,8 +2469,7 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.fixture(autouse=True)
     def allow_custom_models(self, monkeypatch):
-        # hub_online_once has logic to skip non-"tiny" models on MacOS, but we don't want to skip the custom models
-        # here, which are also tiny but don't contain "tiny" in their name. For this, set is_custom_model=True
+        # Shared tests create these models locally; direct Hub loads still use the regular helper.
         monkeypatch.setattr(testing_common, "hub_online_once", partial(hub_online_once, is_custom_model=True))
 
     def prepare_inputs_for_testing(self):

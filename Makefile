@@ -1,6 +1,8 @@
 .PHONY: quality style test test_macos docs
 
 check_dirs := src tests examples docs scripts docker
+SHARDS ?= 1
+SHARD ?= 1
 
 # Check that source code meets quality standards
 
@@ -22,7 +24,8 @@ test:
 
 # Print each test name before it runs so an abrupt termination can be investigated.
 test_macos:
-	python -u -m pytest -v --no-cov -rs tests/
+	python -u -m pytest -v --no-cov -rs tests/ \
+		--splits $(SHARDS) --group $(SHARD) --splitting-algorithm least_duration
 
 tests_examples_multi_gpu:
 	python -m pytest -m multi_gpu_tests tests/test_gpu_examples.py $(if $(IS_GITHUB_CI),--report-log "multi_gpu_examples.log",)

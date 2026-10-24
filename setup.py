@@ -34,6 +34,7 @@ extras["dev"] = extras["quality"] + extras["docs_specific"]
 extras["test"] = extras["dev"] + [
     "pytest",
     "pytest-cov",
+    "pytest-split",
     "pytest-xdist",
     "parameterized",
     "datasets",
