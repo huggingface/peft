@@ -468,7 +468,9 @@ class TestSequenceClassificationModels(PeftCommonTester):
         # forward does not accept past_key_values) is implemented in PeftModelForSequenceClassification itself.
         _skip_encoder_models(model_id, config_cls)
         with hub_online_once(model_id):
-            model = self.transformers_class.from_pretrained(model_id)
+            # MPS can abort when MSE mixes bfloat16 predictions with float32 targets. Match the float32 regression
+            # labels and expected-loss calculation by explicitly loading the model in float32.
+            model = self.transformers_class.from_pretrained(model_id, dtype=torch.float32)
 
             if getattr(model.config, "pad_token_id", None) is None:
                 # needed for a batched forward pass with sequence classification models like Llama
