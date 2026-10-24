@@ -22,9 +22,9 @@ style:
 test:
 	python -m pytest -n 3 tests/ $(if $(IS_GITHUB_CI),--report-log "ci_tests.log",)
 
-# Print each test name before it runs so an abrupt termination can be investigated.
+# Run serially on macOS to limit memory usage.
 test_macos:
-	python -u -m pytest -v --no-cov -rs tests/ \
+	python -u -m pytest --no-cov -rs tests/ \
 		--splits $(SHARDS) --group $(SHARD) --splitting-algorithm least_duration
 
 tests_examples_multi_gpu:

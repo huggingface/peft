@@ -54,6 +54,12 @@ jobs:
           - {os: macos-15, python-version: "3.11", shard: 2}
           - {os: macos-15, python-version: "3.11", shard: 3}
           - {os: macos-15, python-version: "3.11", shard: 4}
+          - {os: macos-15, python-version: "3.11", shard: 5}
+          - {os: macos-15, python-version: "3.11", shard: 6}
+          - {os: macos-15, python-version: "3.11", shard: 7}
+          - {os: macos-15, python-version: "3.11", shard: 8}
+          - {os: macos-15, python-version: "3.11", shard: 9}
+          - {os: macos-15, python-version: "3.11", shard: 10}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -143,7 +149,7 @@ jobs:
           CI: 1
         run: |
           if [[ "${{ runner.os }}" == "macOS" ]]; then
-            make test_macos SHARDS=4 SHARD=${{ matrix.shard }}
+            make test_macos SHARDS=10 SHARD=${{ matrix.shard }}
           elif [[ "${{ matrix.os }}" == "ubuntu-latest" && "${{ matrix.python-version }}" == "3.14" ]]; then
             make test
           else
