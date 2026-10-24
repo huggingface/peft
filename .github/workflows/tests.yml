@@ -50,6 +50,7 @@ jobs:
         # python-version: ["3.11", "3.12", "3.13", "3.14"]
         # os: ["ubuntu-latest", "windows-latest"]
         include:
+          - {os: macos-15, python-version: "3.11", diagnostic: true}
           - {os: macos-15, python-version: "3.11", shard: 1}  # Apple Silicon (M1)
           - {os: macos-15, python-version: "3.11", shard: 2}
           - {os: macos-15, python-version: "3.11", shard: 3}
@@ -148,7 +149,9 @@ jobs:
           TRANSFORMERS_IS_CI: 1
           CI: 1
         run: |
-          if [[ "${{ runner.os }}" == "macOS" ]]; then
+          if [[ "${{ matrix.diagnostic }}" == "true" ]]; then
+            make test_macos_diagnostics
+          elif [[ "${{ runner.os }}" == "macOS" ]]; then
             make test_macos SHARDS=10 SHARD=${{ matrix.shard }}
           elif [[ "${{ matrix.os }}" == "ubuntu-latest" && "${{ matrix.python-version }}" == "3.14" ]]; then
             make test

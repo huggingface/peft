@@ -1,4 +1,4 @@
-.PHONY: quality style test test_macos docs
+.PHONY: quality style test test_macos test_macos_diagnostics docs
 
 check_dirs := src tests examples docs scripts docker
 SHARDS ?= 1
@@ -24,8 +24,13 @@ test:
 
 # Run serially on macOS to limit memory usage.
 test_macos:
-	python -u -m pytest --no-cov -rs tests/ \
+	python -u -m pytest --capture=sys --no-cov -rs tests/ \
 		--splits $(SHARDS) --group $(SHARD) --splitting-algorithm least_duration
+
+test_macos_diagnostics:
+	PEFT_MACOS_DIAGNOSTICS=1 python -u -m pytest --no-cov -vv -s -x \
+		-o faulthandler_timeout=120 \
+		tests/test_seq_classifier.py::TestSequenceClassificationModels::test_forward_with_labels
 
 tests_examples_multi_gpu:
 	python -m pytest -m multi_gpu_tests tests/test_gpu_examples.py $(if $(IS_GITHUB_CI),--report-log "multi_gpu_examples.log",)
