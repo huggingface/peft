@@ -52,8 +52,7 @@ CONFIGS = {
     ),
     "hra": HRAConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     # Cannot target multiple layers with BOFT because some convolutional kernel dimensions vary and there is no common
-    # denominator for the boft_block_size except 1, but using 1 results in an error in the fbd_cuda kernel:
-    # > Error in forward_fast_block_diag_cuda_kernel: an illegal memory access was encountered
+    # denominator for the boft_block_size except 1, which would result in trivial 1x1 rotation "blocks" (identity)
     "boft": BOFTConfig(
         target_modules=["0.layer.0.convolution"], modules_to_save=["classifier", "normalization"], boft_block_size=2
     ),
