@@ -88,7 +88,9 @@ def _run_lorafa_weight_decay_step(config: LoraConfig, lr: float, weight_decay: f
 
     # Save initial lora_A weights. Only from one model since both models params are identical
     initial_lora_A_weights = {
-        name: param.clone() for name, param in model_no_wd.named_parameters() if "lora_A" in name
+        name: param.clone()
+        for name, param in model_no_wd.named_parameters()
+        if "lora_A" in name
     }
 
     # Generate random input and label using different seeds
@@ -141,12 +143,23 @@ def test_lorafa_init(use_rslora):
         bias="none",
     )
     model = get_peft_model(model, config)
-    optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr)
+    optimizer = create_lorafa_optimizer(
+        model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr
+    )
 
-    expected_scaling = lora_alpha / math.sqrt(lora_rank) if use_rslora else lora_alpha / lora_rank
-    scaling_factors = [factor for factor in optimizer.param_groups[0]["scaling_factors"] if factor is not None]
+    expected_scaling = (
+        lora_alpha / math.sqrt(lora_rank) if use_rslora else lora_alpha / lora_rank
+    )
+    scaling_factors = [
+        factor
+        for factor in optimizer.param_groups[0]["scaling_factors"]
+        if factor is not None
+    ]
     assert scaling_factors
-    assert all(math.isclose(factor, expected_scaling, rel_tol=1e-9, abs_tol=0.0) for factor in scaling_factors)
+    assert all(
+        math.isclose(factor, expected_scaling, rel_tol=1e-9, abs_tol=0.0)
+        for factor in scaling_factors
+    )
 
     all_A_fixed = True
     all_B_trainable = True
@@ -182,7 +195,13 @@ def test_lorafa_rslora_flag_mismatch_raises(use_rslora):
     model = get_peft_model(model, config)
 
     with pytest.raises(ValueError, match="was passed to create_lorafa_optimizer"):
-        create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr, use_rslora=use_rslora)
+        create_lorafa_optimizer(
+            model=model,
+            r=lora_rank,
+            lora_alpha=lora_alpha,
+            lr=lr,
+            use_rslora=use_rslora,
+        )
 
 
 def test_lorafa_init_embedding_target_module():
@@ -201,12 +220,15 @@ def test_lorafa_init_embedding_target_module():
         bias="none",
     )
     model = get_peft_model(model, config).to(torch_device)
-    optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr)
+    optimizer = create_lorafa_optimizer(
+        model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr
+    )
 
     lora_scaling_factors = [
         scaling_factor
         for name, scaling_factor in zip(
-            optimizer.param_groups[0]["names"], optimizer.param_groups[0]["scaling_factors"]
+            optimizer.param_groups[0]["names"],
+            optimizer.param_groups[0]["scaling_factors"],
         )
         if "lora" in name
     ]
@@ -252,7 +274,8 @@ def test_lorafa_scaling_factor_deprecation_warning():
         optimizer.step()
 
     assert any(
-        isinstance(warning.message, FutureWarning) and "`scaling_factor` is deprecated" in str(warning.message)
+        isinstance(warning.message, FutureWarning)
+        and "`scaling_factor` is deprecated" in str(warning.message)
         for warning in caught_warnings
     )
 
@@ -275,15 +298,21 @@ def test_LoraFAOptimizer_step():
         bias="none",
     )
     model = get_peft_model(model, config).to(torch_device)
-    optimizer = create_lorafa_optimizer(model=model, r=16, lora_alpha=32, lr=7e-5)
+    optimizer = create_lorafa_optimizer(model=model, r=16, lora_alpha=32, lr=lr)
     loss = torch.nn.CrossEntropyLoss()
 
     # Save initial weights of lora_A
-    initial_lora_A_weights = {name: param.clone() for name, param in model.named_parameters() if "lora_A" in name}
+    initial_lora_A_weights = {
+        name: param.clone()
+        for name, param in model.named_parameters()
+        if "lora_A" in name
+    }
     # Ensure lora_B is initialized to zero
     for name, param in model.named_parameters():
         if "lora_B" in name:
-            assert torch.all(param == 0), f"lora_B weights not initialized to zero for {name}"
+            assert torch.all(param == 0), (
+                f"lora_B weights not initialized to zero for {name}"
+            )
 
     for _ in range(num_steps):  # Run the optimizer step multiple times
         # Generate random input and label for each step
@@ -304,7 +333,9 @@ def test_LoraFAOptimizer_step():
     # Check if lora_A weights have not changed
     for name, param in model.named_parameters():
         if "lora_A" in name:
-            assert torch.equal(param, initial_lora_A_weights[name]), f"lora_A weights changed for {name}"
+            assert torch.equal(param, initial_lora_A_weights[name]), (
+                f"lora_A weights changed for {name}"
+            )
 
     # Check if lora_B weights are non-zero
     for name, param in model.named_parameters():
@@ -327,7 +358,9 @@ def test_lorafa_weight_decay_decoupled_update_lora_b():
         target_modules=["lin0", "lin1"],
         bias="none",
     )
-    params_no_wd, params_wd, initial_lora_A_weights, _ = _run_lorafa_weight_decay_step(config, lr, weight_decay)
+    params_no_wd, params_wd, initial_lora_A_weights, _ = _run_lorafa_weight_decay_step(
+        config, lr, weight_decay
+    )
 
     # Compute the scaling factor for the expected relation of with and without weight decay
     scale = 1.0 - lr * weight_decay
@@ -335,15 +368,19 @@ def test_lorafa_weight_decay_decoupled_update_lora_b():
     # Check if lora_A weights have not changed
     for name, param in params_no_wd.items():
         if "lora_A" in name:
-            assert torch.equal(param, initial_lora_A_weights[name]), f"lora_A weights changed for {name}"
+            assert torch.equal(param, initial_lora_A_weights[name]), (
+                f"lora_A weights changed for {name}"
+            )
 
     # Check if lora_B weights are non-zero and if they follow the expected relation
     for name, param_no_wd in params_no_wd.items():
         if "lora_B" in name:
-            assert torch.any(param_no_wd != 0), f"lora_B weights are still zero for {name}"
-            assert torch.allclose(params_wd[name], param_no_wd * scale, rtol=1e-5, atol=1e-6), (
-                f"lora_B weights for {name} do not match decoupled weight decay scaling"
+            assert torch.any(param_no_wd != 0), (
+                f"lora_B weights are still zero for {name}"
             )
+            assert torch.allclose(
+                params_wd[name], param_no_wd * scale, rtol=1e-5, atol=1e-6
+            ), f"lora_B weights for {name} do not match decoupled weight decay scaling"
 
 
 def test_lorafa_weight_decay_decoupled_update_non_lora_params():
@@ -361,13 +398,17 @@ def test_lorafa_weight_decay_decoupled_update_non_lora_params():
         target_modules=["lin0", "lin1"],
         bias="all",  # Include bias to check non-LoRA trainable parameters
     )
-    params_no_wd, params_wd, _, non_lora_trainable_names = _run_lorafa_weight_decay_step(config, lr, weight_decay)
+    params_no_wd, params_wd, _, non_lora_trainable_names = (
+        _run_lorafa_weight_decay_step(config, lr, weight_decay)
+    )
 
     # Compute the scaling factor for the expected relation of with and without weight decay
     scale = 1.0 - lr * weight_decay
 
     # Sanity check: non-LoRA trainable parameters
-    assert non_lora_trainable_names, "Expected at least one non-LoRA trainable parameter with gradients"
+    assert non_lora_trainable_names, (
+        "Expected at least one non-LoRA trainable parameter with gradients"
+    )
 
     # Check if all non-LoRA params also follow the expected relation
     for name in non_lora_trainable_names:
@@ -402,7 +443,9 @@ def test_lorafa_respects_layer_specific_scaling_patterns(monkeypatch):
         bias="none",
     )
     model = get_peft_model(SimpleNet(), config).to(torch_device)
-    optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr)
+    optimizer = create_lorafa_optimizer(
+        model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr
+    )
 
     lin0 = model.base_model.model.lin0
     lin1 = model.base_model.model.lin1
@@ -428,7 +471,9 @@ def test_lorafa_respects_layer_specific_scaling_patterns(monkeypatch):
 
         # computing the inverse matrix
         aa_T = a_weight @ a_weight.T
-        aa_T_inv = torch.linalg.pinv(aa_T + delta * torch.eye(a_weight.shape[0]).to(a_weight.device))
+        aa_T_inv = torch.linalg.pinv(
+            aa_T + delta * torch.eye(a_weight.shape[0]).to(a_weight.device)
+        )
 
         projected_grad_B = (1.0 / scale**2) * (grad @ aa_T_inv)
 
@@ -444,12 +489,18 @@ def test_lorafa_respects_layer_specific_scaling_patterns(monkeypatch):
     lin1_state = optimizer.state["base_model.model.lin1.lora"]
 
     # Check that the exp_avg_B values in the optimizer's state match the expected values based on the manually set gradients and the layer-specific scaling
-    assert torch.allclose(lin1_state["exp_avg_B"], expected_exp_avg_B(lin1, lin1_grad), rtol=1e-5, atol=1e-6), (
-        "lin1 exp_avg_B does not match the expected layer-specific scaling"
-    )
-    assert torch.allclose(lin0_state["exp_avg_B"], expected_exp_avg_B(lin0, lin0_grad), rtol=1e-5, atol=1e-6), (
-        "lin0 exp_avg_B does not match the expected layer-specific scaling"
-    )
+    assert torch.allclose(
+        lin1_state["exp_avg_B"],
+        expected_exp_avg_B(lin1, lin1_grad),
+        rtol=1e-5,
+        atol=1e-6,
+    ), "lin1 exp_avg_B does not match the expected layer-specific scaling"
+    assert torch.allclose(
+        lin0_state["exp_avg_B"],
+        expected_exp_avg_B(lin0, lin0_grad),
+        rtol=1e-5,
+        atol=1e-6,
+    ), "lin0 exp_avg_B does not match the expected layer-specific scaling"
 
 
 @pytest.mark.parametrize("layerdrop", [0.0, 1.0])
@@ -482,16 +533,28 @@ def test_lorafa_bart_layerdrop(layerdrop):
     )
     model = (
         get_peft_model(
-            base, LoraConfig(r=2, lora_alpha=2, target_modules=["q_proj", "v_proj"], task_type="SEQ_2_SEQ_LM")
+            base,
+            LoraConfig(
+                r=2,
+                lora_alpha=2,
+                target_modules=["q_proj", "v_proj"],
+                task_type="SEQ_2_SEQ_LM",
+            ),
         )
         .to(torch_device)
         .train()
     )
-    optimizer = create_lorafa_optimizer(model, r=2, lora_alpha=2, lr=0.001, weight_decay=0.1)
+    optimizer = create_lorafa_optimizer(
+        model, r=2, lora_alpha=2, lr=0.001, weight_decay=0.1
+    )
     ids = torch.tensor([[3, 4, 5, 2]], device=torch_device)
     loss = model(input_ids=ids, attention_mask=torch.ones_like(ids), labels=ids).loss
     loss.backward()
-    missing = [name for name, p in model.named_parameters() if "lora_B" in name and p.grad is None]
+    missing = [
+        name
+        for name, p in model.named_parameters()
+        if "lora_B" in name and p.grad is None
+    ]
     assert len(missing) == (2 if layerdrop else 0)
     optimizer.step()
 
@@ -516,3 +579,243 @@ def test_lorafa_step_with_closure():
     grad = model.get_base_model()[0].lora_B["default"].weight.grad
     assert grad is not None
     assert torch.count_nonzero(grad) > 0
+
+
+def test_lorafa_multi_adapter_inactive_adapter_does_not_block_active():
+    """
+    Test that having an inactive second adapter present does not skip updates to the active adapter (#4039).
+    """
+    torch.manual_seed(42)
+    lora_kwargs = {
+        "r": 2,
+        "lora_alpha": 4,
+        "target_modules": ["0"],
+        "lora_dropout": 0.0,
+    }
+
+    # 1. Single adapter baseline
+    model_single = get_peft_model(
+        nn.Sequential(nn.Linear(4, 3, bias=False)), LoraConfig(**lora_kwargs)
+    ).to(torch_device)
+    opt_single = create_lorafa_optimizer(model_single, r=2, lora_alpha=4, lr=0.01)
+    b_single = model_single.base_model.model[0].lora_B["default"].weight
+    before_single = b_single.detach().clone()
+
+    x = torch.tensor([[1.0, 2.0, 3.0, 4.0], [-2.0, 0.5, 1.5, 3.0]], device=torch_device)
+    model_single(x).square().mean().backward()
+    opt_single.step()
+    update_single = (b_single.detach() - before_single).abs()
+
+    # 2. Model with second inactive adapter
+    torch.manual_seed(42)
+    model_multi = get_peft_model(
+        nn.Sequential(nn.Linear(4, 3, bias=False)), LoraConfig(**lora_kwargs)
+    ).to(torch_device)
+    model_multi.add_adapter("spare", LoraConfig(**lora_kwargs))
+    model_multi.set_adapter("default")
+    opt_multi = create_lorafa_optimizer(model_multi, r=2, lora_alpha=4, lr=0.01)
+
+    b_active = model_multi.base_model.model[0].lora_B["default"].weight
+    b_inactive = model_multi.base_model.model[0].lora_B["spare"].weight
+    before_active = b_active.detach().clone()
+    before_inactive = b_inactive.detach().clone()
+
+    model_multi(x).square().mean().backward()
+    assert b_active.grad is not None
+    assert b_inactive.grad is None
+    opt_multi.step()
+    update_active = (b_active.detach() - before_active).abs()
+
+    # Active adapter updates match the single adapter model exactly
+    assert torch.allclose(update_active, update_single, rtol=1e-6, atol=1e-7)
+    assert (update_active > 0).any()
+    # Inactive adapter remains untouched
+    assert torch.equal(b_inactive, before_inactive)
+
+
+def test_lorafa_multi_adapter_sequential_training():
+    """
+    Test switching between adapters during LoRA-FA training preserves separate optimizer states.
+    """
+    torch.manual_seed(42)
+    lora_kwargs = {
+        "r": 2,
+        "lora_alpha": 4,
+        "target_modules": ["0"],
+        "lora_dropout": 0.0,
+    }
+    model = get_peft_model(
+        nn.Sequential(nn.Linear(4, 3, bias=False)), LoraConfig(**lora_kwargs)
+    ).to(torch_device)
+    model.add_adapter("task2", LoraConfig(**lora_kwargs))
+    optimizer = create_lorafa_optimizer(model, r=2, lora_alpha=4, lr=0.01)
+
+    b_default = model.base_model.model[0].lora_B["default"].weight
+    b_task2 = model.base_model.model[0].lora_B["task2"].weight
+    before_default = b_default.detach().clone()
+    before_task2 = b_task2.detach().clone()
+
+    x = torch.tensor([[1.0, 2.0, 3.0, 4.0], [-2.0, 0.5, 1.5, 3.0]], device=torch_device)
+
+    # Train default adapter first
+    model.set_adapter("default")
+    model(x).square().mean().backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+    assert not torch.equal(b_default, before_default)
+    assert torch.equal(b_task2, before_task2)
+
+    # Switch and train task2 adapter
+    model.set_adapter("task2")
+    before_step2_default = b_default.detach().clone()
+    model(x).square().mean().backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+    # task2 updated, default untouched in step 2
+    assert not torch.equal(b_task2, before_task2)
+    assert torch.equal(b_default, before_step2_default)
+
+
+def test_lorafa_dora_magnitude_vector_handled_as_auxiliary():
+    """
+    Ensure DoRA magnitude vectors are optimized using standard AdamW and not mistaken for LoRA-FA pairs.
+    """
+    torch.manual_seed(42)
+    model = get_peft_model(
+        nn.Sequential(nn.Linear(6, 4, bias=False)),
+        LoraConfig(r=2, lora_alpha=4, target_modules=["0"], use_dora=True),
+    ).to(torch_device)
+    optimizer = create_lorafa_optimizer(model, r=2, lora_alpha=4, lr=0.01)
+
+    layer = model.base_model.model[0]
+    assert not layer.lora_A["default"].weight.requires_grad
+    assert layer.lora_B["default"].weight.requires_grad
+    assert layer.lora_magnitude_vector["default"].weight.requires_grad
+
+    b_before = layer.lora_B["default"].weight.detach().clone()
+    mag_before = layer.lora_magnitude_vector["default"].weight.detach().clone()
+
+    x = torch.randn(2, 6, device=torch_device)
+    model(x).square().mean().backward()
+
+    assert layer.lora_B["default"].weight.grad is not None
+    assert layer.lora_magnitude_vector["default"].weight.grad is not None
+
+    optimizer.step()
+
+    assert not torch.equal(layer.lora_B["default"].weight, b_before)
+    assert not torch.equal(layer.lora_magnitude_vector["default"].weight, mag_before)
+    assert "base_model.model.0.lora" in optimizer.state
+    assert "base_model.model.0.lora_magnitude_vector.default.weight" in optimizer.state
+
+
+def test_lorafa_standalone_lora_b_without_matching_lora_a():
+    """
+    Ensure standalone lora_B parameters with missing lora_A fall back to standard AdamW without failure.
+    """
+    p_b = nn.Parameter(torch.randn(4, 2, device=torch_device))
+    p_b.grad = torch.randn_like(p_b)
+    before = p_b.detach().clone()
+
+    param_group = {
+        "params": [p_b],
+        "names": ["module.lora_B.default.weight"],
+        "scaling_factors": [1.0],
+        "lr": 0.01,
+        "betas": (0.9, 0.999),
+        "eps": 1e-6,
+        "weight_decay": 0.0,
+        "correct_bias": True,
+    }
+    opt = lorafa_module.LoraFAOptimizer([param_group])
+    opt.step()
+
+    assert not torch.equal(p_b, before)
+    assert "module.lora_B.default.weight" in opt.state
+
+
+def test_lorafa_state_dict_roundtrip_multi_adapter():
+    """
+    Verify optimizer state serialization and loading preserve per-adapter state tracking.
+    """
+    torch.manual_seed(42)
+    model = get_peft_model(
+        nn.Sequential(nn.Linear(4, 3, bias=False)),
+        LoraConfig(r=2, lora_alpha=4, target_modules=["0"]),
+    ).to(torch_device)
+    model.add_adapter(
+        "task-2_special", LoraConfig(r=2, lora_alpha=4, target_modules=["0"])
+    )
+    optimizer = create_lorafa_optimizer(model, r=2, lora_alpha=4, lr=0.01)
+
+    x = torch.randn(2, 4, device=torch_device)
+
+    model.set_adapter("default")
+    model(x).square().mean().backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+    model.set_adapter("task-2_special")
+    model(x).square().mean().backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+    state_dict = optimizer.state_dict()
+    assert "base_model.model.0.lora" in state_dict["state"]
+    assert "base_model.model.0.lora.task-2_special" in state_dict["state"]
+
+    new_optimizer = create_lorafa_optimizer(model, r=2, lora_alpha=4, lr=0.01)
+    new_optimizer.load_state_dict(state_dict)
+
+    for k in optimizer.state:
+        assert k in new_optimizer.state
+        assert optimizer.state[k]["step"] == new_optimizer.state[k]["step"]
+        assert torch.equal(
+            optimizer.state[k]["exp_avg_B"], new_optimizer.state[k]["exp_avg_B"]
+        )
+        assert torch.equal(
+            optimizer.state[k]["exp_avg_sq_B"], new_optimizer.state[k]["exp_avg_sq_B"]
+        )
+
+
+def test_lorafa_embedding_multi_adapter():
+    """
+    Verify multi-adapter training on embedding layers updates active adapter weights.
+    """
+    torch.manual_seed(42)
+    model = get_peft_model(
+        nn.Sequential(nn.Embedding(10, 6)),
+        LoraConfig(r=2, lora_alpha=4, target_modules=["0"]),
+    ).to(torch_device)
+    model.base_model.model[0].lora_embedding_A["default"].data.normal_()
+    model.add_adapter("task2", LoraConfig(r=2, lora_alpha=4, target_modules=["0"]))
+    model.base_model.model[0].lora_embedding_A["task2"].data.normal_()
+    optimizer = create_lorafa_optimizer(model, r=2, lora_alpha=4, lr=0.01)
+
+    emb_default = model.base_model.model[0].lora_embedding_B["default"]
+    emb_task2 = model.base_model.model[0].lora_embedding_B["task2"]
+    before_default = emb_default.detach().clone()
+    before_task2 = emb_task2.detach().clone()
+
+    x = torch.tensor([[1, 2, 3]], device=torch_device)
+    model.set_adapter("default")
+    model(x).square().mean().backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+    assert not torch.equal(emb_default, before_default)
+    assert torch.equal(emb_task2, before_task2)
+    assert "base_model.model.0.lora" in optimizer.state
+
+    model.set_adapter("task2")
+    before_step2_default = emb_default.detach().clone()
+    model(x).square().mean().backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+    assert not torch.equal(emb_task2, before_task2)
+    assert torch.equal(emb_default, before_step2_default)
+    assert "base_model.model.0.lora.task2" in optimizer.state
+

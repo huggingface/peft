@@ -31,6 +31,50 @@ from ..peft_model import PeftModel
 from ..utils.other import infer_device
 
 
+def _is_lora_a(name: str) -> bool:
+    return "lora_A" in name or "lora_embedding_A" in name
+
+
+def _is_lora_b(name: str) -> bool:
+    return "lora_B" in name or "lora_embedding_B" in name
+
+
+def _to_b_name(a_name: str) -> str:
+    if "lora_embedding_A" in a_name:
+        parts = a_name.rsplit("lora_embedding_A", 1)
+        return "lora_embedding_B".join(parts)
+    elif "lora_A" in a_name:
+        parts = a_name.rsplit("lora_A", 1)
+        return "lora_B".join(parts)
+    return a_name
+
+
+def _get_lora_state_name(b_name: str) -> str:
+    lora_idx = b_name.find("lora")
+    prefix = b_name[:lora_idx] if lora_idx != -1 else ""
+    adapter_name = None
+    if ".lora_B." in b_name:
+        parts = b_name.split(".lora_B.")[1].split(".")
+        if parts:
+            adapter_name = parts[0]
+    elif ".lora_embedding_B." in b_name:
+        parts = b_name.split(".lora_embedding_B.")[1].split(".")
+        if parts:
+            adapter_name = parts[0]
+    elif b_name.startswith("lora_B."):
+        parts = b_name.split("lora_B.")[1].split(".")
+        if parts:
+            adapter_name = parts[0]
+    elif b_name.startswith("lora_embedding_B."):
+        parts = b_name.split("lora_embedding_B.")[1].split(".")
+        if parts:
+            adapter_name = parts[0]
+
+    if adapter_name and adapter_name != "default":
+        return f"{prefix}lora.{adapter_name}"
+    return f"{prefix}lora"
+
+
 class LoraFAOptimizer(Optimizer):
     """
     Implements the LoRA-FA optimizer designed specifically for training Low-Rank Adaptation (LoRA) parameters
@@ -65,9 +109,13 @@ class LoraFAOptimizer(Optimizer):
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr} - should be >= 0.0")
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError(f"Invalid beta parameter: {betas[0]} - should be in [0.0, 1.0)")
+            raise ValueError(
+                f"Invalid beta parameter: {betas[0]} - should be in [0.0, 1.0)"
+            )
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError(f"Invalid beta parameter: {betas[1]} - should be in [0.0, 1.0)")
+            raise ValueError(
+                f"Invalid beta parameter: {betas[1]} - should be in [0.0, 1.0)"
+            )
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps} - should be >= 0.0")
         defaults = {
@@ -95,9 +143,6 @@ class LoraFAOptimizer(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            param_list = []
-            name_list = []
-
             # TODO remove after 2026-11-01 and default to `group["scaling_factors"]
             if "scaling_factors" in group:
                 scaling_factors = group["scaling_factors"]
@@ -111,56 +156,36 @@ class LoraFAOptimizer(Optimizer):
                     self._legacy_scaling_factor_warned = True
                 scaling_factors = [group["scaling_factor"]] * len(group["params"])
             else:
-                raise KeyError("Expected optimizer param group to define `scaling_factors`.")
+                raise KeyError(
+                    "Expected optimizer param group to define `scaling_factors`."
+                )
 
-            for p, n, scaling_factor in zip(group["params"], group["names"], scaling_factors):
-                # Skip non-lora no-grad module, since we need lora_A which is no-grad.
-                if "lora" not in n and p.grad is None:
+            # Map matching lora_B names to their corresponding lora_A parameters
+            lora_a_by_b_name = {}
+            for p, n in zip(group["params"], group["names"]):
+                if _is_lora_a(n):
+                    lora_a_by_b_name[_to_b_name(n)] = p
+
+            for p, n, scaling_factor in zip(
+                group["params"], group["names"], scaling_factors
+            ):
+                # lora_A parameters are frozen projections; their updates occur through lora_B
+                if _is_lora_a(n):
                     continue
-                grad = p.grad
 
-                if "lora" in n:
-                    param_list.append(p)
-                    name_list.append(n)
-                    if len(param_list) == 2:
-                        # Skip the whole unused pair before touching its state or applying weight decay.
-                        if param_list[1].grad is None:
-                            param_list = []
-                            name_list = []
-                            continue
-                        name = n[: n.find("lora")] + "lora"
-                    elif len(param_list) == 1:
+                if _is_lora_b(n) and n in lora_a_by_b_name:
+                    B = p
+                    if B.grad is None:
                         continue
-                else:
-                    name = n
-                # param_list contains a pair of A and B adapters
-                # i.e., param_list -> [A,B]
 
-                state = self.state[name]
-                # State initialization
-                if len(state) == 0:
-                    if len(param_list) == 2:
+                    A = lora_a_by_b_name[n]
+                    name = _get_lora_state_name(n)
+                    state = self.state[name]
+                    if len(state) == 0:
                         state["step"] = 0
-                        # Exponential moving average of gradient values
-                        state["exp_avg_B"] = torch.zeros_like(param_list[1])
-                        # Exponential moving average of squared gradient values
-                        state["exp_avg_sq_B"] = torch.zeros_like(param_list[1])
-                    else:
-                        state["step"] = 0
-                        # Exponential moving average of gradient values
-                        state["exp_avg"] = torch.zeros_like(p)
-                        # Exponential moving average of squared gradient values
-                        state["exp_avg_sq"] = torch.zeros_like(p)
+                        state["exp_avg_B"] = torch.zeros_like(B)
+                        state["exp_avg_sq_B"] = torch.zeros_like(B)
 
-                # Below is the LoRA-FA part
-                # 1. In this part, we optimize the gradient of B as:
-                #    g^B = \left(\frac{r}{\alpha}\right)^2 (A^\top A)^{-1} g_{\text{LoRA-FA}}^B
-                #    to min the func as described below:
-                #    \min_{g^B} \|\hat{g}_\text{LoRA-FA} - g\|_F^2
-                # 2. After the gradient of B is ready, update the optimizer state
-                if len(param_list) == 2:
-                    A = param_list[0]
-                    B = param_list[1]
                     grad_B_orin = B.grad
 
                     # projection
@@ -168,7 +193,9 @@ class LoraFAOptimizer(Optimizer):
 
                     # computing the inverse matrix
                     AA_T = A @ A.T
-                    AA_T_inv = torch.linalg.pinv(AA_T + delta * torch.eye(A.shape[0]).to(A.device))
+                    AA_T_inv = torch.linalg.pinv(
+                        AA_T + delta * torch.eye(A.shape[0]).to(A.device)
+                    )
 
                     device_type = infer_device()
 
@@ -192,15 +219,25 @@ class LoraFAOptimizer(Optimizer):
                     if group["correct_bias"]:  # No bias correction for Bert
                         bias_correction1 = 1.0 - beta1 ** state["step"]
                         bias_correction2 = 1.0 - beta2 ** state["step"]
-                        step_size = step_size * math.sqrt(bias_correction2) / bias_correction1
+                        step_size = (
+                            step_size * math.sqrt(bias_correction2) / bias_correction1
+                        )
                     B.addcdiv_(exp_avg_B, denom_B, value=-step_size)
                     if group["weight_decay"] > 0.0:
                         B.add_(B, alpha=(-group["lr"] * group["weight_decay"]))
-                    param_list = []
-                    name_list = []
 
-                # Below is the original AdamW
                 else:
+                    # Non-LoRA parameters (or standalone parameters) use original AdamW
+                    if p.grad is None:
+                        continue
+                    grad = p.grad
+                    name = n
+                    state = self.state[name]
+                    if len(state) == 0:
+                        state["step"] = 0
+                        state["exp_avg"] = torch.zeros_like(p)
+                        state["exp_avg_sq"] = torch.zeros_like(p)
+
                     exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
                     beta1, beta2 = group["betas"]
 
@@ -216,7 +253,9 @@ class LoraFAOptimizer(Optimizer):
                     if group["correct_bias"]:  # No bias correction for Bert
                         bias_correction1 = 1.0 - beta1 ** state["step"]
                         bias_correction2 = 1.0 - beta2 ** state["step"]
-                        step_size = step_size * math.sqrt(bias_correction2) / bias_correction1
+                        step_size = (
+                            step_size * math.sqrt(bias_correction2) / bias_correction1
+                        )
 
                     p.addcdiv_(exp_avg, denom, value=-step_size)
 
@@ -268,14 +307,19 @@ def create_lorafa_optimizer(
     Returns:
         Optimizer: Configured lorafa optimizer instance ready for training.
     """
-    active_adapters = [adapter for adapter in model.active_adapters if adapter in model.peft_config]
+    active_adapters = [
+        adapter for adapter in model.active_adapters if adapter in model.peft_config
+    ]
     active_adapter_use_rslora = {
-        adapter: bool(getattr(model.peft_config[adapter], "use_rslora", False)) for adapter in active_adapters
+        adapter: bool(getattr(model.peft_config[adapter], "use_rslora", False))
+        for adapter in active_adapters
     }
     # TODO remove after 2026-11-01
     if use_rslora is not None:
         mismatched_adapters = [
-            adapter for adapter, is_rslora in active_adapter_use_rslora.items() if is_rslora != use_rslora
+            adapter
+            for adapter, is_rslora in active_adapter_use_rslora.items()
+            if is_rslora != use_rslora
         ]
         if mismatched_adapters:
             raise ValueError(
@@ -290,10 +334,14 @@ def create_lorafa_optimizer(
         )
         model_use_rslora = use_rslora
     else:
-        model_use_rslora = all(active_adapter_use_rslora.values()) if active_adapter_use_rslora else False
+        model_use_rslora = (
+            all(active_adapter_use_rslora.values())
+            if active_adapter_use_rslora
+            else False
+        )
 
     for name, param in model.named_parameters():
-        if "lora_A" in name:
+        if _is_lora_a(name):
             param.requires_grad_(False)
     lora_scaling = lora_alpha / math.sqrt(r) if model_use_rslora else lora_alpha / r
 
@@ -324,7 +372,9 @@ def create_lorafa_optimizer(
             "params": [param for _, param in named_parameters],
             "lr": lr,
             "names": [name for name, _ in named_parameters],
-            "scaling_factors": [get_scaling_factor(name) for name, _ in named_parameters],
+            "scaling_factors": [
+                get_scaling_factor(name) for name, _ in named_parameters
+            ],
             "scaling_factor": lora_scaling,  # TODO remove after 2026-11-01
             "betas": (0.9, 0.999),
             "weight_decay": weight_decay,
