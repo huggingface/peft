@@ -319,6 +319,7 @@ class LoraLayer(BaseTunerLayer):
 
         # call this before init of the lora variants
         self._move_adapter_to_device_of_base_layer(adapter_name)
+        self._sync_tp_replicated_lora_weights(adapter_name)
 
         if adapter_name in self.lora_variant:
             self.lora_variant[adapter_name].init(self, adapter_name=adapter_name, config=config, **kwargs)
@@ -379,34 +380,52 @@ class LoraLayer(BaseTunerLayer):
                     # embeddings are not supported at the moment, but still adding this for consistency
                     nn.init.zeros_(self.lora_embedding_B[adapter_name].bias)
 
+    def _sync_tp_replicated_lora_weights(self, adapter_name):
         # Always synchronize non-sharded LoRA weights across TP ranks, regardless of
         # init_lora_weights, since each rank initializes weights independently.
         # We could skip some broadcast, for instance when the lora weights are initialized to zero,
         # but this is a minor optimization and would add extra complexity to the code.
-        if dist.is_available() and dist.is_initialized():
-            base_layer = self.get_base_layer()
-            tp_plan = getattr(base_layer, "_hf_tp_plan", None)
-            device_mesh = getattr(base_layer, "_hf_device_mesh", None)
-            if device_mesh is not None:
-                if tp_plan not in ["colwise", "rowwise", "embedding_rowwise"]:
-                    warnings.warn(
-                        f'tp_plan "{tp_plan}" found on the base layer is not supported for LoRA weight '
-                        'synchronization. Expected one of "colwise", "rowwise", "embedding_rowwise". '
-                        "LoRA weights may not be synchronized across ranks."
-                    )
-                pg = device_mesh.get_group()
-                src = dist.get_global_rank(pg, 0)
-                if tp_plan == "colwise" and adapter_name in self.lora_A:
-                    # The adapter weights need to be on device for broadcasting
-                    self._move_adapter_to_device_of_base_layer(adapter_name)
-                    dist.broadcast(self.lora_A[adapter_name].weight.data, src=src, group=pg)
-                elif tp_plan == "rowwise" and adapter_name in self.lora_B:
-                    # The adapter weights need to be on device for broadcasting
-                    self._move_adapter_to_device_of_base_layer(adapter_name)
-                    dist.broadcast(self.lora_B[adapter_name].weight.data, src=src, group=pg)
-                elif tp_plan == "embedding_rowwise" and adapter_name in self.lora_embedding_B:
-                    self._move_adapter_to_device_of_base_layer(adapter_name)
-                    dist.broadcast(self.lora_embedding_B[adapter_name].data, src=src, group=pg)
+        if not dist.is_available() or not dist.is_initialized():
+            return
+
+        base_layer = self.get_base_layer()
+        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+        device_mesh = getattr(base_layer, "_hf_device_mesh", None)
+
+        if device_mesh is None:
+            return
+
+        if tp_plan not in ["colwise", "rowwise", "embedding_rowwise", "colwise_gather_output"]:
+            warnings.warn(
+                f'tp_plan "{tp_plan}" found on the base layer is not supported for LoRA weight '
+                'synchronization. Expected one of "colwise", "rowwise", "embedding_rowwise", '
+                '"colwise_gather_output". LoRA weights may not be synchronized across ranks.'
+            )
+            return
+
+        pg = device_mesh.get_group()
+        src = dist.get_global_rank(pg, 0)
+        if tp_plan == "colwise" and adapter_name in self.lora_A:
+            # The adapter weights need to be on device for broadcasting
+            self._move_adapter_to_device_of_base_layer(adapter_name)
+            dist.broadcast(self.lora_A[adapter_name].weight.data, src=src, group=pg)
+        elif tp_plan == "rowwise" and adapter_name in self.lora_B:
+            # The adapter weights need to be on device for broadcasting
+            self._move_adapter_to_device_of_base_layer(adapter_name)
+            dist.broadcast(self.lora_B[adapter_name].weight.data, src=src, group=pg)
+            if self.lora_B[adapter_name].bias is not None:
+                dist.broadcast(self.lora_B[adapter_name].bias.data, src=src, group=pg)
+        elif tp_plan == "embedding_rowwise" and adapter_name in self.lora_embedding_B:
+            self._move_adapter_to_device_of_base_layer(adapter_name)
+            dist.broadcast(self.lora_embedding_B[adapter_name].data, src=src, group=pg)
+        elif tp_plan == "colwise_gather_output" and adapter_name in self.lora_A:
+            # No TP hooks are added to the LoRA layers of such a base layer (e.g. lm_head), so both are
+            # replicated
+            self._move_adapter_to_device_of_base_layer(adapter_name)
+            dist.broadcast(self.lora_A[adapter_name].weight.data, src=src, group=pg)
+            dist.broadcast(self.lora_B[adapter_name].weight.data, src=src, group=pg)
+            if self.lora_B[adapter_name].bias is not None:
+                dist.broadcast(self.lora_B[adapter_name].bias.data, src=src, group=pg)
 
     def olora_init(self, adapter_name):
         base_layer = self.get_base_layer()
@@ -1358,6 +1377,7 @@ class Embedding(nn.Module, LoraLayer):
 
         # call this before init of the lora variants
         self._move_adapter_to_device_of_base_layer(adapter_name)
+        self._sync_tp_replicated_lora_weights(adapter_name)
 
         if adapter_name in self.lora_variant:
             self.lora_variant[adapter_name].init(self, adapter_name=adapter_name, config=config, **kwargs)
@@ -1748,6 +1768,7 @@ class _ConvNd(nn.Module, LoraLayer):
 
         # call this before init of the lora variants
         self._move_adapter_to_device_of_base_layer(adapter_name)
+        self._sync_tp_replicated_lora_weights(adapter_name)
 
         if adapter_name in self.lora_variant:
             self.lora_variant[adapter_name].init(self, adapter_name=adapter_name, config=config, **kwargs)
@@ -2614,6 +2635,7 @@ class ParamWrapper(nn.Module, LoraLayer):
             self.reset_lora_parameters(adapter_name, init_lora_weights)
         # call this before init of the lora variants
         self._move_adapter_to_device_of_base_layer(adapter_name)
+        self._sync_tp_replicated_lora_weights(adapter_name)
 
         if adapter_name in self.lora_variant:
             self.lora_variant[adapter_name].init(self, config=config, **kwargs)
