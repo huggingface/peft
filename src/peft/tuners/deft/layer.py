@@ -249,6 +249,16 @@ class DeftLinear(nn.Module, DeftLayer):
         """
         return self._delta_from_factor(adapter_name, self._merge_factor(adapter_name))
 
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        return True
+
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        # `get_delta_weight` returns the delta in the base weight's dtype, but this method returns the delta in the
+        # dtype of the adapter weights, which is the dtype the converted LoRA adapter will use. `deft_P` is the
+        # trainable matrix that DEFT creates for every adapter, including in PaRa mode.
+        delta = self.get_delta_weight(adapter_name)
+        return delta.to(self.deft_P[adapter_name].dtype)
+
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights.
