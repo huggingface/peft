@@ -170,7 +170,7 @@ class TestAdamssAsa:
         x = torch.randn(4, 20)
         model(x).sum().backward()
         optimizer.step()
-        model.base_model.update_and_allocate(1)
+        model.on_peft_optimizer_step(global_step=1)
         optimizer.zero_grad()
 
         layers = _get_adamss_layers(model)
