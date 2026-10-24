@@ -71,8 +71,8 @@ Tip: A recently merged PR that adds a new PEFT method is the best template. Chec
 - `require_*` decorators (`require_torch_gpu`, `require_bitsandbytes`, `require_multi_accelerator`, ...): skip tests when the hardware or optional package is missing. Use these rather than ad hoc skips.
 - Cached data loaders (`load_dataset_english_quotes`, `load_cat_image`) for tests that need real inputs; `temp_seed` for local determinism.
 - Most PEFT methods like LoRA are initialzed in a way that they don't have an effect before training them. This can be a hindrance for testing, as many tests require the adapter to affect the output to work properly. Therefore, most PEFT methods offer a config option `init_weights=False` which initializes their weights to have a non-zero effect. The name of the argument is not fully consistent, e.g. for LoRA we need to pass `init_lora_weights=False`. There is a helper function, `set_init_weights_false`, which updates the `kwargs` accordingly. Always prefer this approach to manually overriding weights.
-- Normal CI is tested on Ubuntu and Windows and with the four oldest Python versions that are still maintained (i.e. not EOL).
-- Normal CI tests will generally run with the latest release of PyTorch, Transformers, Diffusers, Accelerate, etc. Nightly tests run on the main branch of Transformers and Accelerate.
+- Normal CI covers Ubuntu and Windows with the four oldest Python versions that are still maintained (i.e. not EOL). Apple Silicon macOS runs nightly, each without pytest-xdist to limit memory usage. `hub_online_once` skips models without `tiny` in their cache key on macOS; small custom models are exempt. Wrap Hub model loading in this helper so that the memory restriction applies. Passing MacOS tests are not required for a change to be merged.
+- Normal CI and macOS nightly tests will generally run with the latest release of PyTorch, Transformers, Diffusers, Accelerate, etc. GPU nightly tests run on the main branch of Transformers and Accelerate.
 
 Conventions to follow:
 

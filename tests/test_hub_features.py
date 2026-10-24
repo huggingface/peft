@@ -52,7 +52,8 @@ class TestLocalModel:
         # This test makes sure that the local `config.json` is checked as well.
         # If `save_pretrained` could not find the file, it will issue a warning.
         model_id = "peft-internal-testing/opt-125m"
-        model = AutoModelForCausalLM.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
         local_dir = tmp_path / model_id
         model.save_pretrained(local_dir)
         del model
@@ -140,7 +141,8 @@ class TestBaseModelRevision:
         model_id = "peft-internal-testing/opt-tokenizer-revision"
         revision = "my-revision"
 
-        model = AutoPeftModelForCausalLM.from_pretrained(model_id, revision=revision)
+        with hub_online_once(model_id):
+            model = AutoPeftModelForCausalLM.from_pretrained(model_id, revision=revision)
         tokenizer = AutoTokenizer.from_pretrained(model_id, revision=revision)
         assert model.get_input_embeddings().weight.shape[0] == len(tokenizer)
 
