@@ -349,10 +349,16 @@ def hub_online_once(model_id: str, *, is_custom_model: bool = False):
     to wrapping the whole test in the context manager without explicitly writing it out, leading to unexpected
     `HF_HUB_OFFLINE` behavior in the test body.
 
-    On macOS, skip Hub models without "tiny" in their cache key to limit memory usage. Set `is_custom_model=True` for
-    small, handcrafted models that do not load weights from the Hub.
+    In the nightly MacOS CI run, we set `PEFT_TEST_TINY_MODELS_ONLY=1`, which allows the CI to skip Hub models without
+    "tiny" in their cache key to limit memory usage (only 7 GB). Set `is_custom_model=True` for small, handcrafted
+    models that do not load weights from the Hub.
     """
-    if platform.system() == "Darwin" and not is_custom_model and "tiny" not in model_id.lower():
+    if (
+        os.environ.get("PEFT_TEST_TINY_MODELS_ONLY") == "1"
+        and platform.system() == "Darwin"
+        and not is_custom_model
+        and "tiny" not in model_id.lower()
+    ):
         pytest.skip(f"Skipping non-tiny model on macOS: {model_id}")
 
     override = {}

@@ -2469,7 +2469,7 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.fixture(autouse=True)
     def allow_custom_models(self, monkeypatch):
-        # Shared tests create these models locally; direct Hub loads still use the regular helper.
+        # hub_online_once skips non-tiny models on MacOS runners unless is_custom_model=True is set.
         monkeypatch.setattr(testing_common, "hub_online_once", partial(hub_online_once, is_custom_model=True))
 
     def prepare_inputs_for_testing(self):
@@ -2654,7 +2654,7 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip("Merging with target_parameters is not supported for all PEFT methods.")
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
 
-        with hub_online_once(model_id, is_custom_model=True):
+        with hub_online_once(model_id, is_custom_model=True):  # allow this test to run on MacOS nightly
             base = self.transformers_class.from_pretrained(model_id)
             config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
             # Best-effort enable dropout for the various PEFT methods to check for deterministic merging.
