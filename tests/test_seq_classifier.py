@@ -12,12 +12,9 @@
 #  See the License governing permissions and limitations under the License.
 
 import inspect
-import os
-import platform
 
 import pytest
 import torch
-import transformers
 from transformers import AutoModelForSequenceClassification
 
 from peft import (
@@ -462,7 +459,7 @@ class TestSequenceClassificationModels(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
-    def test_forward_with_labels(self, model_id, config_cls, config_kwargs, monkeypatch):
+    def test_forward_with_labels(self, model_id, config_cls, config_kwargs):
         # Check the full forward pass including the loss computation. This is especially relevant for prompt learning
         # methods, whose sequence classification forward (including the _prefix_tuning_forward fallback for models whose
         # forward does not accept past_key_values) is implemented in PeftModelForSequenceClassification itself.
@@ -491,32 +488,6 @@ class TestSequenceClassificationModels(PeftCommonTester):
                 labels = torch.tensor([0.5, -0.5]).to(self.torch_device)
             else:
                 labels = torch.tensor([0, num_labels - 1]).to(self.torch_device)
-
-            if os.environ.get("PEFT_MACOS_DIAGNOSTICS") == "1":
-                print(
-                    f"torch={torch.__version__}, transformers={transformers.__version__}, "
-                    f"macOS={platform.mac_ver()[0]}, arch={platform.machine()}, "
-                    f"mps_available={torch.backends.mps.is_available()}, threads={torch.get_num_threads()}",
-                    flush=True,
-                )
-                print(
-                    f"model={model_id}, adapter={config_cls.__name__}, device={self.torch_device}, "
-                    f"model_dtype={model.dtype}, default_dtype={torch.get_default_dtype()}, "
-                    f"num_labels={num_labels}, labels_dtype={labels.dtype}, labels_device={labels.device}",
-                    flush=True,
-                )
-                mse_loss = torch.nn.functional.mse_loss
-
-                def diagnostic_mse_loss(input, target, *args, **kwargs):
-                    # Flush before entering native code, which may abort without a Python exception.
-                    print(
-                        f"mse_loss: input(shape={tuple(input.shape)}, dtype={input.dtype}, device={input.device}), "
-                        f"target(shape={tuple(target.shape)}, dtype={target.dtype}, device={target.device})",
-                        flush=True,
-                    )
-                    return mse_loss(input, target, *args, **kwargs)
-
-                monkeypatch.setattr(torch.nn.functional, "mse_loss", diagnostic_mse_loss)
 
             with torch.no_grad():
                 output = model(**inputs, labels=labels)

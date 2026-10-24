@@ -46,21 +46,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Temporarily disable the other platforms while testing macOS.
-        # python-version: ["3.11", "3.12", "3.13", "3.14"]
-        # os: ["ubuntu-latest", "windows-latest"]
-        include:
-          - {os: macos-15, python-version: "3.11", diagnostic: true}
-          - {os: macos-15, python-version: "3.11", shard: 1}  # Apple Silicon (M1)
-          - {os: macos-15, python-version: "3.11", shard: 2}
-          - {os: macos-15, python-version: "3.11", shard: 3}
-          - {os: macos-15, python-version: "3.11", shard: 4}
-          - {os: macos-15, python-version: "3.11", shard: 5}
-          - {os: macos-15, python-version: "3.11", shard: 6}
-          - {os: macos-15, python-version: "3.11", shard: 7}
-          - {os: macos-15, python-version: "3.11", shard: 8}
-          - {os: macos-15, python-version: "3.11", shard: 9}
-          - {os: macos-15, python-version: "3.11", shard: 10}
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        os: ["ubuntu-latest", "windows-latest"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -72,7 +59,7 @@ jobs:
         # So we remove some of the stuff we don't need (Java, .NET, etc.)
         #
         # Idea: https://dev.to/mathio/squeezing-disk-space-from-github-actions-runners-an-engineers-guide-3pjg
-        if: runner.os == 'Linux'
+        if: matrix.os != 'windows-latest'
         run: |
           df -h
 
@@ -149,11 +136,7 @@ jobs:
           TRANSFORMERS_IS_CI: 1
           CI: 1
         run: |
-          if [[ "${{ matrix.diagnostic }}" == "true" ]]; then
-            make test_macos_diagnostics
-          elif [[ "${{ runner.os }}" == "macOS" ]]; then
-            make test_macos SHARDS=10 SHARD=${{ matrix.shard }}
-          elif [[ "${{ matrix.os }}" == "ubuntu-latest" && "${{ matrix.python-version }}" == "3.14" ]]; then
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" && "${{ matrix.python-version }}" == "3.14" ]]; then
             make test
           else
             PYTEST_ADDOPTS="--no-cov" make test

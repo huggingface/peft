@@ -1,0 +1,50 @@
+name: macOS tests
+
+on:
+  schedule:
+    - cron: "37 23 * * *"
+  workflow_dispatch:
+
+env:
+  HF_HOME: .cache/huggingface
+
+permissions: {}
+
+jobs:
+  macos_tests:
+    if: github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    runs-on: macos-15  # Apple Silicon (M1)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Model cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: |
+            ${{ env.HF_HOME }}/hub/**
+            !${{ env.HF_HOME }}/**/*.pyc
+          key: model-cache-${{ github.run_id }}
+          restore-keys: model-cache-
+          enableCrossOsArchive: true
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: "pip"
+          cache-dependency-path: "setup.py"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install setuptools
+          pip install -e .[test] pytest-split
+      - name: Test with pytest
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          TRANSFORMERS_IS_CI: 1
+          CI: 1
+        run: make test_macos SHARDS=10 SHARD=${{ matrix.shard }}
