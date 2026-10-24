@@ -40,7 +40,7 @@ This approach has a number of advantages:
 
 In principle, LoRA can be applied to any subset of weight matrices in a neural network to reduce the number of trainable parameters. However, for simplicity and further parameter efficiency, LoRA is typically only applied to the attention blocks in Transformer models - it may be worth targeting other layers as well. The resulting number of trainable parameters in a LoRA model depends on the size of the update matrices, which is determined mainly by the rank `r` and the shape of the original weight matrix.
 
-You can initialize the low-rank matrices with different use-cases in mind - task awareness (CoRDA, EVA), faster convergence (PiSSA), mitigating quantizations (LoftQ) - just to name a few use-cases. Read about the different initializations [below](#initialization). The default initialization is for LoRA to be a no-op, to gradually learn new behavior without interfering much with the existing model.
+You can initialize the low-rank matrices with different use-cases in mind - task awareness (CorDA, EVA, Astra), faster convergence (PiSSA), mitigating quantizations (LoftQ) - just to name a few use-cases. Read about the different initializations [below](#initialization). The default initialization is for LoRA to be a no-op, to gradually learn new behavior without interfering much with the existing model.
 
 ## Usage
 
@@ -58,8 +58,7 @@ config = LoraConfig(
     modules_to_save=["classifier"],
 )
 model = get_peft_model(model, config)
-model.print_trainable_parameters()
-"trainable params: 667,493 || all params: 86,543,818 || trainable%: 0.7712775047664294"
+model.print_healthcheck()
 ```
 
 
@@ -78,6 +77,8 @@ model.print_trainable_parameters()
 
 The initialization of LoRA weights is controlled by the parameter `init_lora_weights` in [`LoraConfig`]. By default, PEFT initializes LoRA weights with Kaiming-uniform for weight A and zeros for weight B resulting in an identity transform (same as the reference [implementation](https://github.com/microsoft/LoRA)).
 
+For `transformers.Conv1D` layers, such as GPT-2's projections, use `fan_in_fan_out=True` because their weights are stored as `(in_features, out_features)` rather than the `nn.Linear` layout. Supported weight-based initializers use the Linear layout for decomposition and restore the stored layout when updating the base weights. LoRA-GA's `"stable"` scaling also uses the output dimension regardless of the storage layout.
+
 It is also possible to pass `init_lora_weights="gaussian"`. As the name suggests, this initializes weight A with a Gaussian distribution and zeros for weight B (this is how [Diffusers](https://huggingface.co/docs/diffusers/index) initializes LoRA weights).
 
 ```py
@@ -95,6 +96,53 @@ config = LoraConfig(init_lora_weights=False, ...)
 ```
 
 <hfoptions id="initializations">
+<hfoption id="NoRA">
+[Normalized Low-Rank Adaptation (NoRA)](https://huggingface.co/papers/2608.31036) normalizes the LoRA down-projection matrices. PEFT applies this normalization only at initialization through `init_lora_weights="nora"` in [`LoraConfig`]: it normalizes the columns of the randomly initialized LoRA A weight and initializes the LoRA B weight to zero. Both matrices remain trainable, and the base weights are left unchanged.
+
+For a linear layer, the adapter weight update is $\Delta W = sBA$, where $A$ has shape `(r, in_features)`, $B$ has shape `(out_features, r)`, and $s$ is the LoRA scaling factor. NoRA starts from the random A weight created by the LoRA linear layer and normalizes each column across the rank dimension:
+
+$$
+A_{:,j} \leftarrow \frac{A_{:,j}}{\max(\lVert A_{:,j} \rVert_2, 10^{-6})}, \qquad B \leftarrow 0.
+$$
+
+Since B is zero, the adapter weight update is zero before training. With `bias="none"` and `lora_bias=False`, the adapter initially preserves the base model output. NoRA does not require a calibration dataset or a weight decomposition.
+
+> [!IMPORTANT]
+> For NoRA, the recommended setting is `lora_alpha` equal to `r` (a 1:1 alpha/rank ratio), for example, `r=8, lora_alpha=8`. With the default `use_rslora=False`, this keeps a scaling factor of 1; enabling rank-stabilized LoRA changes it to `lora_alpha / sqrt(r)`.
+
+The following example applies NoRA to two linear layers in a small PyTorch model:
+
+```py
+from torch import nn
+
+from peft import LoraConfig, get_peft_model
+
+model = nn.Sequential(
+    nn.Linear(32, 32),
+    nn.ReLU(),
+    nn.Linear(32, 16),
+)
+
+config = LoraConfig(
+    r=8,
+    lora_alpha=8,
+    target_modules=["0", "2"],
+    init_lora_weights="nora",
+    bias="none",
+    lora_bias=False,
+    use_rslora=False,
+)
+model = get_peft_model(model, config)
+model.print_healthcheck()
+```
+
+For a Transformers model, set `target_modules` to the names of the linear layers you want to adapt, such as `["q_proj", "v_proj"]` when those names are present in the model.
+
+NoRA uses the existing LoRA configuration, training, saving, and loading APIs, so there is no separate `NoraConfig` or `NoraModel` class. For the shared configuration and model APIs, see [`LoraConfig`] and [`LoraModel`].
+
+NoRA supports `torch.nn.Linear` target modules or `nn.Parameter`s passed directly with `target_parameters`. It is not supported for embeddings, conv layers, etc.
+</hfoption>
+
 <hfoption id="PiSSA">
 [PiSSA](https://huggingface.co/papers/2404.02948) initializes the LoRA adapter using the principal singular values and singular vectors. This straightforward modification allows PiSSA to converge more rapidly than LoRA and ultimately attain superior performance. Moreover, PiSSA reduces the quantization error compared to QLoRA, leading to further enhancements.
 
@@ -152,6 +200,36 @@ peft_model = get_peft_model(model, lora_config)
 ```
 
 For detailed instruction on using CorDA, please follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/corda_finetuning).
+</hfoption>
+
+<hfoption id="Astra">
+[Astra](https://huggingface.co/papers/2602.19111) builds task-aware LoRA adapters from the tail eigenvectors of the covariance matrix of the module output activations, estimated from a small calibration dataset of the downstream task. The pretrained weight is projected onto the subspace spanned by the tail eigenvectors to initialize the adapter, which constrains the update to the activation subspace that is most relevant for the downstream task and speeds up convergence.
+
+You need to configure the initialization method to "astra", explicitly set `target_modules`, and provide the
+calibration dataset to collect covariance matrices.
+
+```py
+@torch.no_grad()
+def run_model():
+    # Assume `model` and `dataset` is in context...
+    model.eval()
+    for batch in dataset:
+        model(**batch)
+
+
+from peft.tuners.lora import AstraConfig, preprocess_astra
+
+astra_config = AstraConfig()
+lora_config = LoraConfig(
+    init_lora_weights="astra",
+    target_modules=["q_proj", "v_proj"],
+    astra_config=astra_config,
+)
+preprocess_astra(model, lora_config, run_model=run_model)
+peft_model = get_peft_model(model, lora_config)
+```
+
+For detailed instruction on using Astra, please follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/astra_finetuning).
 </hfoption>
 
 <hfoption id="OLoRA">
@@ -626,6 +704,9 @@ model.merge_adapter()
 # unmerge the LoRA layers from the base model
 model.unmerge_adapter()
 ```
+
+> [!TIP]
+> On a quantized model, unmerging is not exact: merging re-quantizes the base weight, and repeated merge and unmerge cycles can accumulate rounding error. See [Merging adapters into quantized weights](../developer_guides/quantization#merging-adapters-into-quantized-weights).
 
 > [!WARNING]
 > If several adapters are active and only some of them are merged, the adapters that are not merged are silently not applied. This behavior will change in PEFT v1.0. See [Merging only some of the active adapters](../developer_guides/troubleshooting#merging-only-some-of-the-active-adapters).
@@ -1140,4 +1221,3 @@ To encode general knowledge, GenKnowSub subtracts the average of the provided ge
 ## Intruder Dimension Reduction
 
 [[autodoc]] tuners.lora.intruders.reduce_intruder_dimension
-

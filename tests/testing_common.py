@@ -80,6 +80,11 @@ from peft.utils import (
 from .testing_utils import get_state_dict, hub_online_once
 
 
+def skip_non_prompt_learning(config_cls):
+    if not issubclass(config_cls, PromptLearningConfig):
+        pytest.skip("Skip tests that are not prompt learning")
+
+
 def _skip_if_merging_not_supported(model_id, config_cls, config_kwargs):
     if issubclass(config_cls, PromptLearningConfig):
         pytest.skip("Prompt learning does not support merging, skipping this test.")
@@ -362,6 +367,27 @@ class PeftCommonTester:
 
                 self.check_modelcard(tmp_dirname, model)
                 self.check_config_json(tmp_dirname, model)
+
+    def _test_save_pretrained_failure(self, model_id, config_cls, config_kwargs, tmp_path):
+        # Regression for #3854: a config-write failure must not change the live inference flag.
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+            model = get_peft_model(model, config)
+            inference_mode = object()
+            config.inference_mode = inference_mode
+            failed_save_dir = tmp_path / "failed"
+            # A directory occupying the config filename forces an actual config-write error.
+            (failed_save_dir / "adapter_config.json").mkdir(parents=True)
+            with pytest.raises(OSError):
+                model.save_pretrained(failed_save_dir)
+            assert config.inference_mode is inference_mode
+
+            successful_save_dir = tmp_path / "successful"
+            model.save_pretrained(successful_save_dir)
+            assert config.inference_mode is inference_mode
+            with open(successful_save_dir / "adapter_config.json", encoding="utf-8") as file:
+                assert json.load(file)["inference_mode"] is True
 
     def _test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs, safe_serialization=True):
         if issubclass(config_cls, AdaLoraConfig):
@@ -973,6 +999,99 @@ class PeftCommonTester:
             # sanity check
             if no_tuner_layer_found:
                 raise ValueError("This test could not identify any tuner layers")
+
+    def _get_mergeable_tuner_layers(self, model):
+        layers = []
+        for module in model.modules():
+            if not isinstance(module, BaseTunerLayer):
+                continue
+            # skip base layers that keep their weights under other names, such as nn.MultiheadAttention with its
+            # in_proj_weight, since there is no single weight tensor to compare before and after the merge
+            base_layer = module.get_base_layer()
+            if not isinstance(getattr(base_layer, "weight", None), torch.Tensor):
+                continue
+            layers.append(module)
+        return layers
+
+    def _assert_base_layer_unchanged(self, layer, orig_weight, orig_bias):
+        base_layer = layer.get_base_layer()
+        assert torch.equal(base_layer.weight, orig_weight)
+        if orig_bias is not None:
+            assert torch.equal(base_layer.bias, orig_bias)
+        assert not layer.merged
+
+    def _test_safe_merge_broken_adapter_leaves_base_layer_unchanged(self, model_id, config_cls, config_kwargs):
+        # A non-finite adapter must make safe_merge raise before anything is written to the base layer.
+        if issubclass(config_cls, LNTuningConfig):
+            pytest.skip("LN tuning swaps the layer on merge, so there is no merged tensor to validate.")
+        torch.manual_seed(0)
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(**config_kwargs)
+            model = get_peft_model(model.to(self.torch_device), config)
+
+        layers = [
+            layer
+            for layer in self._get_mergeable_tuner_layers(model)
+            if any(param.requires_grad for param in layer.parameters())
+        ]
+        if not layers:
+            pytest.skip("No mergeable tuner layers in this model.")
+
+        # Only the first layer that merge_adapter visits is poisoned, by setting one value in each of that layer's
+        # adapter parameters to NaN, so the merge fails before any layer is merged. This only covers the layer that
+        # fails the check: if a later layer failed instead, the layers before it would already be merged, since
+        # merge_adapter does not roll them back.
+        layer = layers[0]
+        with torch.no_grad():
+            for param in layer.parameters():
+                if param.requires_grad:
+                    param.view(-1)[0] = float("nan")
+        base_layer = layer.get_base_layer()
+        orig_weight = base_layer.weight.detach().clone()
+        orig_bias = base_layer.bias.detach().clone() if getattr(base_layer, "bias", None) is not None else None
+
+        with pytest.raises(ValueError, match="NaNs detected"):
+            model.merge_adapter(safe_merge=True)
+        self._assert_base_layer_unchanged(layer, orig_weight, orig_bias)
+
+    def _test_safe_merge_non_finite_bias_leaves_base_layer_unchanged(self, model_id, config_cls, config_kwargs):
+        # A non-finite merged bias must be caught before the merged weight is written. The bias is poisoned in the
+        # base layer so the weight stays finite and passes its own check first, which is exactly the situation where
+        # an implementation that commits the weight before validating the bias leaves the layer half merged.
+        if issubclass(config_cls, LNTuningConfig):
+            pytest.skip("LN tuning swaps the layer on merge, so there is no merged tensor to validate.")
+        torch.manual_seed(0)
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(**config_kwargs)
+            model = get_peft_model(model.to(self.torch_device), config)
+
+        layers = [
+            layer
+            for layer in self._get_mergeable_tuner_layers(model)
+            if getattr(layer.get_base_layer(), "bias", None) is not None
+        ]
+        if not layers:
+            pytest.skip("No mergeable tuner layers with a bias in this model.")
+
+        layer = layers[0]
+        base_layer = layer.get_base_layer()
+        with torch.no_grad():
+            base_layer.bias.view(-1)[0] = float("inf")
+        orig_weight = base_layer.weight.detach().clone()
+        orig_bias = base_layer.bias.detach().clone()
+
+        try:
+            model.merge_adapter(safe_merge=True)
+        except ValueError as exc:
+            assert "NaNs detected" in str(exc)
+            self._assert_base_layer_unchanged(layer, orig_weight, orig_bias)
+        else:
+            # no error is only acceptable if this method does not merge the bias at all
+            assert torch.equal(base_layer.bias, orig_bias)
 
     def _test_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
         # Test for mixing different adapters in a single batch by passing the adapter_names argument

@@ -326,7 +326,7 @@ def build_app(df):
         with gr.Row():
             filter_textbox = gr.Textbox(
                 label="Filter DataFrame",
-                placeholder="Enter filter (e.g.: peft_type=='LORA')",
+                placeholder="Enter filter (e.g.: experiment_name=='lora/*')",
                 interactive=True,
             )
             apply_filter_button = gr.Button("Apply Filter")

@@ -264,8 +264,7 @@ class Linear(nn.Module, RoadLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weight.contiguous().to(orig_dtype)
-
+                    orig_bias = None
                     if base_layer.bias is not None:
                         orig_bias = base_layer.bias.clone()
                         orig_bias = torch.matmul(road_R.to(orig_dtype), orig_bias)
@@ -275,6 +274,9 @@ class Linear(nn.Module, RoadLayer):
                                 f"NaNs detected in the merged bias. The adapter {active_adapter} seems to be broken"
                             )
 
+                    # write only after both checks passed, so a failed safe merge leaves the base layer untouched
+                    base_layer.weight.data = orig_weight.contiguous().to(orig_dtype)
+                    if orig_bias is not None:
                         base_layer.bias.data = orig_bias.contiguous().to(orig_dtype)
                 else:
                     orig_weight = base_layer.weight.data

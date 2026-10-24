@@ -49,8 +49,10 @@ from peft import (
     IA3Config,
     LoraConfig,
     MissConfig,
+    MultitaskPromptTuningConfig,
     OFTConfig,
     OSFConfig,
+    PeftModel,
     PrefixTuningConfig,
     PromptEmbedding,
     PromptEncoderConfig,
@@ -72,7 +74,7 @@ from peft import (
     get_peft_model,
 )
 
-from .testing_common import PeftCommonTester, _skip_if_merging_not_supported
+from .testing_common import PeftCommonTester, _skip_if_merging_not_supported, skip_non_prompt_learning
 from .testing_utils import device_count, hub_online_once, load_dataset_english_quotes, set_init_weights_false
 
 
@@ -689,6 +691,79 @@ class TestDecoderModels(PeftCommonTester):
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize(
+        "config_cls,config_kwargs",
+        ALL_CONFIGS + [(MultitaskPromptTuningConfig, {"task_type": "CAUSAL_LM", "num_virtual_tokens": 10})],
+    )
+    @pytest.mark.parametrize("adapter_name", ["default", "experiment"])
+    def test_prompt_learning_inference_mode(self, model_id, config_cls, config_kwargs, adapter_name):
+        skip_non_prompt_learning(config_cls)
+        with hub_online_once(model_id):
+            config = config_cls(**config_kwargs)
+            model = get_peft_model(self.transformers_class.from_pretrained(model_id), config)
+            # CPT keeps its original prompt embedding frozen and trains only its delta.
+            assert any(param.requires_grad for param in model.prompt_encoder["default"].parameters())
+
+            frozen_config = config_cls(**{**config_kwargs, "inference_mode": True})
+            model.add_adapter("frozen", frozen_config)
+            assert not any(param.requires_grad for param in model.prompt_encoder["frozen"].parameters())
+            # Adding the inactive inference-only adapter leaves the default adapter trainable.
+            assert any(param.requires_grad for param in model.prompt_encoder["default"].parameters())
+
+            # Create a separate inference-only model with its own config instance.
+            frozen_model = get_peft_model(
+                self.transformers_class.from_pretrained(model_id),
+                config_cls(**{**config_kwargs, "inference_mode": True}),
+                adapter_name=adapter_name,
+            )
+            assert not any(param.requires_grad for param in frozen_model.parameters())
+
+            inputs = {"input_ids": torch.tensor([[1, 2, 3]]), "task_ids": torch.tensor([0])}
+            if config_cls != MultitaskPromptTuningConfig:
+                inputs.pop("task_ids")
+            model.eval()
+            output = model(**inputs)
+            output.logits.sum().backward()
+            assert any(param.grad is not None for param in model.prompt_encoder["default"].parameters())
+            assert not frozen_model(**inputs).logits.requires_grad
+
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize(
+        "config_cls,config_kwargs",
+        ALL_CONFIGS + [(MultitaskPromptTuningConfig, {"task_type": "CAUSAL_LM", "num_virtual_tokens": 10})],
+    )
+    @pytest.mark.parametrize("adapter_name", ["default", "experiment"])
+    def test_prompt_learning_inference_mode_from_pretrained(
+        self, model_id, config_cls, config_kwargs, adapter_name, tmp_path
+    ):
+        skip_non_prompt_learning(config_cls)
+        with hub_online_once(model_id):
+            config = config_cls(**config_kwargs)
+            model = get_peft_model(self.transformers_class.from_pretrained(model_id), config)
+            assert any(param.requires_grad for param in model.prompt_encoder["default"].parameters())
+            model.save_pretrained(tmp_path)
+
+            model.load_adapter(tmp_path, adapter_name="frozen")
+            assert not any(param.requires_grad for param in model.prompt_encoder["frozen"].parameters())
+            assert any(param.requires_grad for param in model.prompt_encoder["default"].parameters())
+
+            # Loading the checkpoint freezes this separate model, not model's original default adapter.
+            frozen_model = PeftModel.from_pretrained(
+                self.transformers_class.from_pretrained(model_id), tmp_path, adapter_name=adapter_name
+            )
+            assert not any(param.requires_grad for param in frozen_model.parameters())
+
+            inputs = {"input_ids": torch.tensor([[1, 2, 3]]), "task_ids": torch.tensor([0])}
+            if config_cls != MultitaskPromptTuningConfig:
+                inputs.pop("task_ids")
+            model.eval()
+            output = model(**inputs)
+            output.logits.sum().backward()
+            assert any(param.grad is not None for param in model.prompt_encoder["default"].parameters())
+            assert not frozen_model(**inputs).logits.requires_grad
+            torch.testing.assert_close(frozen_model(**inputs).logits, output.logits)
+
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_merge_layers(self, model_id, config_cls, config_kwargs):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
@@ -1026,6 +1101,23 @@ class TestDecoderModels(PeftCommonTester):
         with pytest.warns(UserWarning, match="Position ids are not supported"):
             _ = model(input_ids=input_ids, position_ids=position_ids)
         assert captured["position_ids"] is None
+
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_prompt_learning_generate_does_not_warn_about_position_ids(
+        self, model_id, config_cls, config_kwargs, recwarn
+    ):
+        # See 3911: generate builds position_ids itself, so dropping them must not warn at every decoding step
+        config = config_cls(**config_kwargs)
+        if not config.is_prompt_learning:
+            pytest.skip("Only checking prompt learning models")
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            input = self.prepare_inputs_for_testing()
+            model = get_peft_model(model, config)
+            model.generate(**input)
+            assert not any("Position ids are not supported" in str(w.message) for w in recwarn)
 
     def test_prompt_learning_token_type_ids_warns_and_drops(self, monkeypatch):
         # For causal LM, token_type_ids are not supported for prompt learning methods, PEFT warns and removes them.

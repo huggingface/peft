@@ -242,6 +242,15 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     return in_features, out_features
 
 
+def _raise_target_parameter_target_module_collision(module_name: str, module: nn.Module) -> None:
+    raise ValueError(
+        f"Trying to wrap an `nn.Parameter` of layer '{module_name}' of type "
+        f"{type(module).__name__}, which is not a valid target. Make sure that this layer is not "
+        "also targeted with `target_modules`. For some models, PEFT will do this automatically, "
+        "try setting `target_modules=[]` to prevent it."
+    )
+
+
 def _extend_unique(existing: list[str], new_names: list[str]) -> None:
     """
     Append the entries of new_names that are missing from existing, preserving order.
@@ -541,6 +550,34 @@ class BaseTuner(nn.Module, ABC):
         for module in model.modules():
             if isinstance(module, self.tuner_layer_cls):
                 module._freeze_non_trainable_peft_weights()
+
+    def _get_adapter_modules_training(self, model: nn.Module) -> list[tuple[nn.Module, bool]]:
+        """Return `(adapter_module, training)` pairs for adapter-owned module roots in `model`.
+
+        The saved state is only the root module's state. Restoring it with `Module.train` also updates all descendants,
+        so a subtree with manually mixed training states is normalized to the root state.
+        """
+        adapter_modules_training = []
+        for module in model.modules():
+            if not isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
+                continue
+
+            for name in module.adapter_layer_names + module.other_param_names:
+                try:
+                    module_dict = module.get_submodule(name)
+                except AttributeError:
+                    continue
+                if not isinstance(module_dict, nn.ModuleDict):
+                    continue
+                adapter_modules_training.extend(
+                    (adapter_module, adapter_module.training) for adapter_module in module_dict.values()
+                )
+        return adapter_modules_training
+
+    @staticmethod
+    def _restore_adapter_modules_training(adapter_modules_training: list[tuple[nn.Module, bool]]) -> None:
+        for adapter_module, training in adapter_modules_training:
+            adapter_module.train(training)
 
     def _enable_adapter_layers(self, enabled: bool = True) -> None:
         for module in self.model.modules():
@@ -883,6 +920,9 @@ class BaseTuner(nn.Module, ABC):
         # create their new adapter parameters before calling this method, so exclude those from the snapshot.
         existing_adapter_prefixes = []
         mapping_existing_parameter_requires_grad = []
+        # Adapter creation calls set_adapter as part of its housekeeping. Preserve existing adapter module modes
+        # because the new adapter's inference_mode must not change the behavior of adapters that were already present.
+        existing_adapter_modules_training = self._get_adapter_modules_training(model)
         seen_parameters = set()
         for key, module in named_modules:
             if isinstance(module, BaseTunerLayer):
@@ -945,6 +985,9 @@ class BaseTuner(nn.Module, ABC):
             # the model was torch.compiled beforehand
             module_names = {k.rsplit("." + prefix, 1)[0].removeprefix("_orig_mod.") for k in state_dict}
 
+        # Discover all targets before mutating the model. This ensures that a late validation error, such as an
+        # incompatible target module, cannot leave earlier targets partially injected.
+        module_names_to_inject: list[str] = []
         for key, module in named_modules:
             if not key:
                 continue
@@ -971,13 +1014,7 @@ class BaseTuner(nn.Module, ABC):
                     unmatched_modules.append(key)
                 else:
                     targeted_module_names.append(key)
-                    parent, target, target_name = _get_submodules(model, key)
-                    self._check_target_module_compatiblity(peft_config, model, target_name)
-                    ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
-                    with ctx():
-                        self._create_and_replace(
-                            peft_config, adapter_name, target, target_name, parent, current_key=key
-                        )
+                    module_names_to_inject.append(key)
             else:
                 # defensively remove _orig_mod prefix in case the model is compiled
                 key = key.removeprefix("_orig_mod.")
@@ -993,17 +1030,29 @@ class BaseTuner(nn.Module, ABC):
                         targets_to_tie.append(key)
                         continue
                     targeted_module_names.append(key)
-                    parent, target, target_name = _get_submodules(model, key)
-                    self._check_target_module_compatiblity(peft_config, model, target_name)
-                    ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
-                    with ctx():
-                        self._create_and_replace(
-                            peft_config, adapter_name, target, target_name, parent, current_key=key
-                        )
+                    module_names_to_inject.append(key)
 
                 # still record what would have been matched via the config so that the two results can be compared
                 if self._check_target_module_exists(peft_config, key):
                     targeted_modules_from_peft_config.append(key)
+
+        # Validate every discovered target while the model is still untouched. In particular, this catches
+        # architecture-specific incompatibilities before any adapter layer is created.
+        for key in module_names_to_inject + targets_to_tie:
+            _, _, target_name = _get_submodules(model, key)
+            self._check_target_module_compatiblity(peft_config, model, target_name)
+
+        if getattr(peft_config, "target_parameters", []):
+            # Validate potential collisions between targeted parameter names and targeted module names.
+            target_parameter_names = set(peft_config.target_parameters)
+            for module_name in module_names_to_inject + targets_to_tie:
+                module = model.get_submodule(module_name)
+                for parameter_name, _ in module.named_parameters(recurse=False):
+                    key = f"{module_name}.{parameter_name}"
+                    if (key in target_parameter_names) or any(
+                        key.endswith(f".{target_name}") for target_name in target_parameter_names
+                    ):
+                        _raise_target_parameter_target_module_collision(module_name, module)
 
         if getattr(peft_config, "target_parameters", []):
             # Note: We don't need to check for no state_dict being passed, since we already checked this earlier.
@@ -1011,15 +1060,8 @@ class BaseTuner(nn.Module, ABC):
                 peft_config=peft_config, model=model, adapter_name=adapter_name, low_cpu_mem_usage=low_cpu_mem_usage
             )
 
-        # Here we inject tied adapters for all the layers which were tied
-        # Only applicable if `ensure_weight_tying = True` for LoraConfig
-        for key in targets_to_tie:
-            targeted_module_names.append(key)
-            parent, target, target_name = _get_submodules(model, key)
-            self._check_target_module_compatiblity(peft_config, model, target_name)
-            ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
-            with ctx():
-                self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
+        # Keep tied targets after regular targets.
+        targeted_module_names.extend(targets_to_tie)
 
         ####################
         # CHECK FOR ERRORS #
@@ -1107,8 +1149,9 @@ class BaseTuner(nn.Module, ABC):
                     RuntimeWarning,
                 )
 
-        # Warn about rank_pattern / alpha_pattern entries that matched no targeted module. The
+        # Warn about rank_pattern / alpha_pattern entries that matched no targeted module or parameter. The
         # matching semantics are identical to `get_pattern_key`.
+        targeted_names = targeted_module_names + targeted_parameter_names
         for pattern_attr in ("rank_pattern", "alpha_pattern"):
             patterns = getattr(peft_config, pattern_attr, None)
             if not patterns:
@@ -1116,13 +1159,13 @@ class BaseTuner(nn.Module, ABC):
             matched = {
                 pattern_key
                 for pattern_key in patterns
-                if any(re.match(rf"(.*\.)?({pattern_key})$", module_name) for module_name in targeted_module_names)
+                if any(re.match(rf"(.*\.)?({pattern_key})$", name) for name in targeted_names)
             }
             unmatched = sorted(set(patterns) - matched)
             if unmatched:
                 warnings.warn(
-                    f"The following {pattern_attr} keys did not match any targeted module and were ignored: "
-                    f"{unmatched}.",
+                    f"The following {pattern_attr} keys did not match any targeted module or parameter and were "
+                    f"ignored: {unmatched}.",
                     RuntimeWarning,
                 )
 
@@ -1130,6 +1173,20 @@ class BaseTuner(nn.Module, ABC):
         # are skipped so that names stay unique when several adapters target the same modules.
         _extend_unique(self.targeted_module_names, targeted_module_names)
         _extend_unique(self.targeted_parameter_names, targeted_parameter_names)
+
+        # Only mutate the model after all target discovery and validation has completed. The module names were
+        # collected from the pre-injection module tree, so newly created adapter modules cannot be targeted recursively.
+        for key in module_names_to_inject:
+            parent, target, target_name = _get_submodules(model, key)
+            ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
+            with ctx():
+                self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
+
+        for key in targets_to_tie:
+            parent, target, target_name = _get_submodules(model, key)
+            ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
+            with ctx():
+                self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
 
         ################
         # HOUSEKEEPING #
@@ -1148,6 +1205,12 @@ class BaseTuner(nn.Module, ABC):
             adapter_name=adapter_name,
             activate_adapter=adapter_name in self.active_adapters,
         )
+
+        # Restore existing adapter training state after housekeeping, then initialize the newly added adapter from its config.
+        self._restore_adapter_modules_training(existing_adapter_modules_training)
+        for module in model.modules():
+            if isinstance(module, BaseTunerLayer):
+                module.set_training(adapter_name, not peft_config.inference_mode)
 
         for parameter, requires_grad in mapping_existing_parameter_requires_grad:
             parameter.requires_grad = requires_grad
@@ -1195,12 +1258,7 @@ class BaseTuner(nn.Module, ABC):
             unwrapped_module = model.get_submodule(unwrapped_module_name)
             # use the class name for checking to avoid circular import
             if isinstance(unwrapped_module, BaseTunerLayer) and unwrapped_module.__class__.__name__ != "ParamWrapper":
-                raise ValueError(
-                    f"Trying to wrap an `nn.Parameter` of layer '{unwrapped_module_name}' of type "
-                    f"{type(target).__name__}, which is not a valid target. Make sure that this layer is not "
-                    "also targeted with `target_modules`. For some models, PEFT will do this automatically, "
-                    "try setting `target_modules=[]` to prevent it."
-                )
+                _raise_target_parameter_target_module_collision(unwrapped_module_name, target)
 
             short_param_name = param_name.rpartition(".")[-1]  # "foo.bar.gate_up_proj" -> "gate_up_proj"
             # If a previous adapter already wraps this parameter, reuse that wrapper instead of nesting a new one.
@@ -1275,6 +1333,13 @@ class BaseTuner(nn.Module, ABC):
         setattr(parent, child_name, new_module)
         # It's not necessary to set requires_grad here, as that is handled by
         # _mark_only_adapters_as_trainable
+
+        if isinstance(child, AuxiliaryTrainingWrapper):
+            # When unloading an auxiliary wrapper like ModulesToSaveWrapper, new_module is the module returned by the
+            # wrapper and there is nothing to copy over. The wrapper forwards attribute access to the active adapter's
+            # copy, so copying the weight would overwrite the weight of the original module with the trained one, or
+            # fail if the module has no weight, e.g. RobertaClassificationHead.
+            return
 
         # child layer wraps the original module, unpack it
         if hasattr(child, "base_layer"):
@@ -2003,6 +2068,25 @@ class BaseTunerLayer(ABC):
         # is already a list of str
         return self.active_adapter
 
+    def set_training(self, adapter_names: str | Sequence[str], training: bool = True) -> None:
+        """
+        Enable or disable training mode on the given adapter modules.
+
+        Args:
+            adapter_names (`str` or `Sequence[str]`):
+                The name of the adapter(s) whose training mode should be updated.
+            training (`bool`, *optional*) :
+                Whether to enable (`True`, default) or disable (`False`) training mode.
+        """
+        if isinstance(adapter_names, str):
+            adapter_names = [adapter_names]
+
+        for adapter_name in adapter_names:
+            for name in self.adapter_layer_names + self.other_param_names:
+                module_dict = getattr(self, name, None)
+                if isinstance(module_dict, nn.ModuleDict) and adapter_name in module_dict:
+                    module_dict[adapter_name].train(training)
+
     def enable_adapters(self, enabled: bool) -> None:
         """Toggle the enabling and disabling of adapters
 
@@ -2069,6 +2153,11 @@ class BaseTunerLayer(ABC):
             for key, layer in module_dict.items():
                 should_require_grad = (key in adapter_names) and (not inference_mode)
                 _set_layer_requires_grad(layer, should_require_grad)
+
+        # Inference mode freezes both the adapter parameters and all adapter-specific submodules. The parent tuner
+        # layer remains in its existing training/eval mode because it can host multiple adapters.
+        for adapter_name in adapter_names:
+            self.set_training(adapter_name, self.training and not inference_mode)
 
         self._freeze_non_trainable_peft_weights(adapter_names)
         self._active_adapter = adapter_names
@@ -2822,6 +2911,23 @@ def set_requires_grad(model, adapter_names: str | Sequence[str], requires_grad: 
     for module in model.modules():
         if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
             module.set_requires_grad(adapter_names=adapter_names, requires_grad=requires_grad)
+
+
+def set_training(model, adapter_names: str | Sequence[str], training: bool = True) -> None:
+    """
+    Enable or disable training mode on the given adapter modules.
+
+    Args:
+        model (`nn.Module`):
+            The model whose adapter module training modes should be updated.
+        adapter_names (`str` or `Sequence[str]`):
+            The name of the adapter(s) whose training mode should be updated.
+        training (`bool`, *optional*) :
+            Whether to enable (`True`, default) or disable (`False`) training mode.
+    """
+    for module in model.modules():
+        if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
+            module.set_training(adapter_names=adapter_names, training=training)
 
 
 def get_device_map(model) -> dict:
