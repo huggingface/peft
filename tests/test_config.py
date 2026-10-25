@@ -728,10 +728,14 @@ class TestPeftConfig:
             config.save_pretrained(tmp_path)
             config_dict = json.loads((tmp_path / "adapter_config.json").read_text())
 
-            assert list(config_dict["n_frequency_pattern"]) == ["model.layers.1.attn.k_proj", "model.layers.0.attn.k_proj"]
+            assert list(config_dict["n_frequency_pattern"]) == [
+                "model.layers.1.attn.k_proj",
+                "model.layers.0.attn.k_proj",
+            ]
 
             # Clean up for next iteration
             import shutil
+
             shutil.rmtree(tmp_path)
             tmp_path.mkdir()
 
