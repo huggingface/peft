@@ -50,6 +50,7 @@ from peft import (
     OSFConfig,
     PeanutConfig,
     PeftConfig,
+    PeftModel,
     PeftType,
     PolyConfig,
     PrefixTuningConfig,
@@ -70,6 +71,7 @@ from peft import (
     VeraConfig,
     WaveFTConfig,
     XLoraConfig,
+    get_peft_model,
 )
 from peft.tuners.lora.config import (
     ArrowConfig,
@@ -715,6 +717,189 @@ class TestPeftConfig:
         for key in ("rank_pattern", "alpha_pattern"):
             config_dict[key] = dict(sorted(config_dict[key].items()))
         assert json.dumps(config_dict, indent=2) == json.dumps(config_dict, indent=2, sort_keys=True)
+
+    def test_save_pretrained_preserves_n_frequency_pattern_order(self, tmp_path):
+        # Test that n_frequency_pattern order is preserved for FourierFT and WaveFT
+        for config_class in (FourierFTConfig, WaveFTConfig):
+            config = config_class(
+                n_frequency_pattern={"model.layers.1.attn.k_proj": 100, "model.layers.0.attn.k_proj": 200},
+                target_modules=["k_proj"],
+            )
+            config.save_pretrained(tmp_path)
+            config_dict = json.loads((tmp_path / "adapter_config.json").read_text())
+
+            assert list(config_dict["n_frequency_pattern"]) == ["model.layers.1.attn.k_proj", "model.layers.0.attn.k_proj"]
+
+            # Clean up for next iteration
+            import shutil
+            shutil.rmtree(tmp_path)
+            tmp_path.mkdir()
+
+    def test_save_pretrained_preserves_block_size_pattern_order(self, tmp_path):
+        # Test that block_size_pattern order is preserved for C3A
+        config = C3AConfig(
+            block_size_pattern={"model.layers.1.attn.k_proj": 128, "model.layers.0.attn.k_proj": 256},
+            target_modules=["k_proj"],
+        )
+        config.save_pretrained(tmp_path)
+        config_dict = json.loads((tmp_path / "adapter_config.json").read_text())
+
+        assert list(config_dict["block_size_pattern"]) == ["model.layers.1.attn.k_proj", "model.layers.0.attn.k_proj"]
+
+    def test_save_pretrained_preserves_lambda_pattern_order(self, tmp_path):
+        # Test that lambda_pattern order is preserved for DeLoRA
+        config = DeloraConfig(
+            lambda_pattern={"model.layers.1.attn.k_proj": 16, "model.layers.0.attn.k_proj": 32},
+            target_modules=["k_proj"],
+        )
+        config.save_pretrained(tmp_path)
+        config_dict = json.loads((tmp_path / "adapter_config.json").read_text())
+
+        assert list(config_dict["lambda_pattern"]) == ["model.layers.1.attn.k_proj", "model.layers.0.attn.k_proj"]
+
+    def test_fourierft_save_load_roundtrip_with_n_frequency_pattern(self, tmp_path):
+        # Regression test for https://github.com/huggingface/peft/issues/3985
+        # Test that FourierFT config with n_frequency_pattern saves and loads correctly
+        # when specific key comes before general key
+        from torch import nn
+
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(16, 16)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.decoder = nn.Module()
+                self.decoder.layers = nn.ModuleList([Block() for _ in range(2)])
+
+        config = FourierFTConfig(
+            target_modules=["fc"],
+            n_frequency=20,
+            n_frequency_pattern={"layers.0.fc": 10, "fc": 30},
+        )
+        model = get_peft_model(Model(), config)
+        model.save_pretrained(tmp_path)
+
+        loaded_model = PeftModel.from_pretrained(Model(), tmp_path)
+        loaded_config = loaded_model.peft_config["default"]
+
+        # Check that the pattern order is preserved
+        assert list(loaded_config.n_frequency_pattern.keys()) == ["layers.0.fc", "fc"]
+        # Check that the specific key value is correct
+        assert loaded_config.n_frequency_pattern["layers.0.fc"] == 10
+        assert loaded_config.n_frequency_pattern["fc"] == 30
+
+    def test_waveft_save_load_roundtrip_with_n_frequency_pattern(self, tmp_path):
+        # Regression test for https://github.com/huggingface/peft/issues/3985
+        # Test that WaveFT config with n_frequency_pattern saves and loads correctly
+        # when specific key comes before general key
+        from torch import nn
+
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(16, 16)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.decoder = nn.Module()
+                self.decoder.layers = nn.ModuleList([Block() for _ in range(2)])
+
+        config = WaveFTConfig(
+            target_modules=["fc"],
+            n_frequency=20,
+            n_frequency_pattern={"layers.0.fc": 10, "fc": 30},
+        )
+        model = get_peft_model(Model(), config)
+        model.save_pretrained(tmp_path)
+
+        loaded_model = PeftModel.from_pretrained(Model(), tmp_path)
+        loaded_config = loaded_model.peft_config["default"]
+
+        # Check that the pattern order is preserved
+        assert list(loaded_config.n_frequency_pattern.keys()) == ["layers.0.fc", "fc"]
+        # Check that the specific key value is correct
+        assert loaded_config.n_frequency_pattern["layers.0.fc"] == 10
+        assert loaded_config.n_frequency_pattern["fc"] == 30
+
+    def test_c3a_save_load_roundtrip_with_block_size_pattern(self, tmp_path):
+        # Regression test for https://github.com/huggingface/peft/issues/3985
+        # Test that C3A config with block_size_pattern saves and loads correctly
+        # when specific key comes before general key
+        from torch import nn
+
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(16, 16)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.decoder = nn.Module()
+                self.decoder.layers = nn.ModuleList([Block() for _ in range(2)])
+
+        config = C3AConfig(
+            target_modules=["fc"],
+            block_size=8,
+            block_size_pattern={"layers.0.fc": 2, "fc": 4},
+        )
+        model = get_peft_model(Model(), config)
+        model.save_pretrained(tmp_path)
+
+        loaded_model = PeftModel.from_pretrained(Model(), tmp_path)
+        loaded_config = loaded_model.peft_config["default"]
+
+        # Check that the pattern order is preserved
+        assert list(loaded_config.block_size_pattern.keys()) == ["layers.0.fc", "fc"]
+        # Check that the specific key value is correct
+        assert loaded_config.block_size_pattern["layers.0.fc"] == 2
+        assert loaded_config.block_size_pattern["fc"] == 4
+
+    def test_delora_save_load_roundtrip_with_lambda_pattern(self, tmp_path):
+        # Regression test for https://github.com/huggingface/peft/issues/3985
+        # Test that DeLoRA config with lambda_pattern saves and loads correctly
+        # when specific key comes before general key
+        from torch import nn
+
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(16, 16)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.decoder = nn.Module()
+                self.decoder.layers = nn.ModuleList([Block() for _ in range(2)])
+
+        config = DeloraConfig(
+            target_modules=["fc"],
+            r=8,
+            delora_lambda=15,
+            lambda_pattern={"layers.0.fc": 5, "fc": 50},
+        )
+        model = get_peft_model(Model(), config)
+        model.save_pretrained(tmp_path)
+
+        loaded_model = PeftModel.from_pretrained(Model(), tmp_path)
+        loaded_config = loaded_model.peft_config["default"]
+
+        # Check that the pattern order is preserved
+        assert list(loaded_config.lambda_pattern.keys()) == ["layers.0.fc", "fc"]
+        # Check that the specific key value is correct
+        assert loaded_config.lambda_pattern["layers.0.fc"] == 5
+        assert loaded_config.lambda_pattern["fc"] == 50
+
+        # Check that the actual lambda values in the model are correct
+        # layers.0.fc should have lambda=5 (specific), layers.1.fc should have lambda=50 (general)
+        lambda_0 = loaded_model.get_base_model().decoder.layers[0].fc.delora_lambda["default"].item()
+        lambda_1 = loaded_model.get_base_model().decoder.layers[1].fc.delora_lambda["default"].item()
+        assert lambda_0 == 5
+        assert lambda_1 == 50
 
 
 class TestLoraNestedConfigRoundTrip:
