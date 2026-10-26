@@ -63,6 +63,19 @@ TP_PLAN = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _force_cpu_mesh(monkeypatch):
+    """
+    Build the TP device mesh on CPU, also on machines that have a GPU.
+
+    `from_pretrained(distributed_config=...)` builds the mesh on the accelerator that PyTorch detects and moves the
+    model there, but the process groups in this file use `gloo`, which cannot handle accelerator tensors. Hiding the
+    accelerator makes transformers fall back to a CPU mesh, so these tests behave the same way everywhere. The variable
+    is inherited by the spawned processes.
+    """
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
+
+
 def _init_process_group(rank, world_size, init_method):
     os.environ["LOCAL_RANK"] = str(rank)
     os.environ["RANK"] = str(rank)
