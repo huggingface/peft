@@ -14,6 +14,7 @@
 import copy
 import platform
 import re
+import warnings
 
 import pytest
 import torch
@@ -978,3 +979,12 @@ class TestStateDictFsdpShapeValidation:
         peft_model = get_peft_model(DummyModel(), LoraConfig(target_modules=["linear"], r=4))
         peft_model.save_pretrained(tmp_path / "ok-adapter")
         assert (tmp_path / "ok-adapter" / "adapter_config.json").exists()
+
+    def test_save_pretrained_with_lora_bias_does_not_warn(self, tmp_path):
+        # Regression test for #4053: lora_B.bias is a legitimate 1-D parameter, not an
+        # unsharded lora_A / lora_B weight matrix.
+        peft_model = get_peft_model(DummyModel(), LoraConfig(target_modules=["linear"], r=4, lora_bias=True))
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", PeftWarning)
+            peft_model.save_pretrained(tmp_path / "lora-bias-adapter")
+        assert (tmp_path / "lora-bias-adapter" / "adapter_config.json").exists()

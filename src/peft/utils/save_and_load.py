@@ -58,21 +58,24 @@ def _validate_lora_adapter_state_dict(
     downstream loaders fail due to the tensor being incomplete.
 
     Raise a warning so the failure surfaces at write time, with an actionable hint, instead of corrupting the artifact
-    and deferring the crash to whatever later loads it. Only the ``lora_A`` / ``lora_B`` keys are inspected;
-    legitimately 1-D parameters such as DoRA's ``lora_magnitude_vector`` and AdaLoRA's ``lora_E`` are not affected.
+    and deferring the crash to whatever later loads it. Only the ``lora_A`` / ``lora_B`` weight matrices are inspected;
+    legitimately 1-D parameters such as DoRA's ``lora_magnitude_vector``, AdaLoRA's ``lora_E``, and LoRA's
+    ``lora_B.bias`` are not affected.
 
     Args:
         state_dict: LoRA-only state dict that will be written to disk.
         adapter_name: Adapter name being saved, used in the error message only.
 
     Warns:
-        PeftWarning: When at least one ``lora_A`` / ``lora_B`` tensor is empty or has fewer than 2 dimensions.
+        PeftWarning: When at least one ``lora_A`` / ``lora_B`` weight matrix is empty or has fewer than 2 dimensions.
     """
     bad: list[tuple[str, tuple[int, ...]]] = []
     for name, tensor in state_dict.items():
         if not isinstance(tensor, torch.Tensor):
             continue
         if ".lora_A" not in name and ".lora_B" not in name:
+            continue
+        if not name.endswith(".weight"):
             continue
         shape = tuple(tensor.shape)
         if len(shape) < 2 or any(d == 0 for d in shape):
