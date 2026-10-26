@@ -22,8 +22,6 @@ scenarios that genuinely require accelerators stay in `test_gpu_examples.py` and
 
 import os
 import platform
-from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import pytest
 import torch
@@ -63,142 +61,144 @@ TP_PLAN = {
 }
 
 
-@pytest.fixture(autouse=True)
-def _force_cpu_mesh(monkeypatch):
-    """
-    Build the TP device mesh on CPU, also on machines that have a GPU.
-
-    `from_pretrained(distributed_config=...)` builds the mesh on the accelerator that PyTorch detects and moves the
-    model there, but the process groups in this file use `gloo`, which cannot handle accelerator tensors. Hiding the
-    accelerator makes transformers fall back to a CPU mesh, so these tests behave the same way everywhere. The variable
-    is inherited by the spawned processes.
-    """
-    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
-
-
-def _init_process_group(rank, world_size, init_method):
-    os.environ["LOCAL_RANK"] = str(rank)
-    os.environ["RANK"] = str(rank)
-    os.environ["WORLD_SIZE"] = str(world_size)
-    dist.init_process_group(backend="gloo", init_method=init_method, rank=rank, world_size=world_size)
-
-
-def _run_in_processes(rank, fn, world_size, init_method, *args):
-    _init_process_group(rank, world_size, init_method)
-    try:
-        fn(rank, world_size, *args)
-    finally:
-        dist.destroy_process_group()
-
-
-def _spawn(fn, *args):
-    """Run `fn` in `WORLD_SIZE` processes, each of which creates its own process group."""
-    with TemporaryDirectory(prefix="peft-parallel-") as rendezvous_dir:
-        init_method = (Path(rendezvous_dir) / "rendezvous").as_uri()
-        mp.spawn(_run_in_processes, args=(fn, WORLD_SIZE, init_method) + args, nprocs=WORLD_SIZE, join=True)
-
-
-def _load_model_with_lora(target_modules, **lora_kwargs):
-    """Load the tiny model sharded over the ranks with tensor parallelism and add LoRA adapters to it."""
-    # imported here because PEFT supports transformers versions that don't have the DTensor TP API
-    from transformers.distributed import DistributedConfig
-
-    with hub_online_once(MODEL_ID):
-        model = AutoModelForCausalLM.from_pretrained(
-            MODEL_ID, distributed_config=DistributedConfig(tp_plan=TP_PLAN, tp_size=dist.get_world_size())
-        )
-    return get_peft_model(model, LoraConfig(r=4, target_modules=target_modules, **lora_kwargs))
-
-
-def _test_sharded_adapters_report_global_features(rank, world_size):
-    """
-    The adapters of a TP-sharded base layer have to report the global, unsharded dimensions of that layer.
-
-    The adapters are initialized with the *local* shard dimensions of the base layer and only afterwards wrapped in a
-    DTensor that spans the whole layer. The TP styles, however, reconstruct the global shape of the activations they
-    wrap from the module attributes (`RowwiseParallel` reads `in_features`, `ColwiseParallel` reads `out_features`), so
-    those attributes have to describe the global layer as well. If they don't, the activations are wrapped with too
-    small a global shape, which makes DTensor disagree with the size of this rank's tensor and raises on the first
-    forward pass.
-    """
-    from torch.distributed.tensor import DTensor
-
-    # sharded colwise and rowwise, so both sharding styles are covered
-    model = _load_model_with_lora(target_modules=["q_proj", "o_proj"])
-
-    checked = 0
-    for name, module in model.named_modules():
-        if not isinstance(module, LoraLayer):
-            continue
-        base_layer = module.get_base_layer()
-        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
-        if tp_plan not in ("colwise", "rowwise"):
-            continue
-        checked += 1
-
-        if tp_plan == "colwise":
-            # the output dim is sharded, so `lora_B` is sharded and `lora_A` stays replicated
-            adapter, shard_dim, attr = module.lora_B["default"], 0, "out_features"
-        else:
-            # the input dim is sharded, so `lora_A` is sharded and `lora_B` stays replicated
-            adapter, shard_dim, attr = module.lora_A["default"], 1, "in_features"
-
-        # the base layer's weight is a DTensor, so its shape is the global (unsharded) one
-        global_value = base_layer.weight.shape[shard_dim]
-        assert isinstance(adapter.weight, DTensor), f"{name}: sharded adapter weight should be a DTensor"
-        assert adapter.weight.shape[shard_dim] == global_value, f"{name}: unexpected global {attr}"
-        assert adapter.weight.to_local().shape[shard_dim] == global_value // world_size, (
-            f"{name}: unexpected shard size"
-        )
-
-        reported = getattr(adapter, attr)
-        assert reported == global_value, (
-            f"{name}: adapter reports {attr}={reported}, but the base layer is sharded with a global {attr} of "
-            f"{global_value}"
-        )
-
-    assert checked > 0, "no LoRA adapter on a TP-sharded layer was found"
-
-
-def _test_forward_backward(rank, world_size):
-    """A forward and backward pass through adapters that are sharded along either dimension must work."""
-    from torch.distributed.tensor import DTensor
-
-    # `embed_tokens` is included to also cover the embedding adapter, the other layers cover both sharding styles
-    model = _load_model_with_lora(
-        target_modules=["embed_tokens", "q_proj", "k_proj", "v_proj", "o_proj"], init_lora_weights=False
-    )
-    model.train()
-
-    input_ids = torch.randint(0, model.config.vocab_size, (2, 8))
-    loss = model(input_ids=input_ids, labels=input_ids).loss
-    assert torch.isfinite(loss), f"loss is not finite: {loss}"
-    loss.backward()
-
-    checked = 0
-    for name, module in model.named_modules():
-        if not isinstance(module, LoraLayer):
-            continue
-        if getattr(module.get_base_layer(), "_hf_tp_plan", None) is None:
-            continue
-        # `lora_A`/`lora_B` only exist for linear layers; the adapter of `embed_tokens` is stored in
-        # `lora_embedding_A`/`lora_embedding_B` as plain parameters instead, its gradients are covered by
-        # `TestLoraTensorParallel::test_lora_gradient_synchronization` in `test_gpu_examples.py`
-        for adapter in (*module.lora_A.values(), *module.lora_B.values()):
-            checked += 1
-            grad = adapter.weight.grad
-            assert grad is not None, f"{name}: adapter did not receive a gradient"
-            grad = grad.to_local() if isinstance(grad, DTensor) else grad
-            assert torch.count_nonzero(grad) > 0, f"{name}: adapter gradient is all zeros"
-
-    assert checked > 0, "no LoRA adapter on a TP-sharded layer was found"
-
-
 class TestLoraTensorParallel:
-    """Tests for LoRA on a tensor-parallel model that don't need a GPU, see `test_gpu_examples.py` for the rest."""
+    """Tests for LoRA on a tensor-parallel model that don't need a GPU, see `test_gpu_examples.py` for the rest.
 
-    def test_sharded_adapters_report_global_features(self):
-        _spawn(_test_sharded_adapters_report_global_features)
+    The helpers that do the actual work run in the spawned processes, so they are static methods: `mp.spawn` passes
+    them to the children by reference, and a bound method would drag the test instance along with it.
+    """
 
-    def test_forward_backward(self):
-        _spawn(_test_forward_backward)
+    @pytest.fixture(autouse=True)
+    def cpu_device_mesh(self, monkeypatch):
+        """
+        Build the TP device mesh on CPU, also on machines that have a GPU.
+
+        `from_pretrained(distributed_config=...)` builds the mesh on the accelerator that PyTorch detects and moves the
+        model there, but the process groups in this class use `gloo`, which cannot handle accelerator tensors. Hiding
+        the accelerator makes transformers fall back to a CPU mesh, so these tests behave the same way everywhere. The
+        variable is inherited by the spawned processes.
+        """
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
+
+    @pytest.fixture
+    def init_method(self, tmp_path):
+        """Rendezvous file for the spawned processes. `tmp_path` is unique per test and removed afterwards."""
+        return (tmp_path / "rendezvous").as_uri()
+
+    @staticmethod
+    def _run_in_processes(rank, fn, world_size, init_method, *args):
+        """Create this rank's process group, run `fn` in it, and tear the group down again."""
+        os.environ["LOCAL_RANK"] = str(rank)
+        os.environ["RANK"] = str(rank)
+        os.environ["WORLD_SIZE"] = str(world_size)
+        dist.init_process_group(backend="gloo", init_method=init_method, rank=rank, world_size=world_size)
+        try:
+            fn(rank, world_size, *args)
+        finally:
+            dist.destroy_process_group()
+
+    @staticmethod
+    def _load_model_with_lora(target_modules, **lora_kwargs):
+        """Load the tiny model sharded over the ranks with tensor parallelism and add LoRA adapters to it."""
+        # imported here because PEFT supports transformers versions that don't have the DTensor TP API
+        from transformers.distributed import DistributedConfig
+
+        with hub_online_once(MODEL_ID):
+            model = AutoModelForCausalLM.from_pretrained(
+                MODEL_ID, distributed_config=DistributedConfig(tp_plan=TP_PLAN, tp_size=dist.get_world_size())
+            )
+        return get_peft_model(model, LoraConfig(r=4, target_modules=target_modules, **lora_kwargs))
+
+    @staticmethod
+    def _test_sharded_adapters_report_global_features(rank, world_size):
+        """
+        The adapters of a TP-sharded base layer have to report the global, unsharded dimensions of that layer.
+
+        The adapters are initialized with the *local* shard dimensions of the base layer and only afterwards wrapped in
+        a DTensor that spans the whole layer. The TP styles, however, reconstruct the global shape of the activations
+        they wrap from the module attributes (`RowwiseParallel` reads `in_features`, `ColwiseParallel` reads
+        `out_features`), so those attributes have to describe the global layer as well. If they don't, the activations
+        are wrapped with too small a global shape, which makes DTensor disagree with the size of this rank's tensor and
+        raises on the first forward pass.
+        """
+        from torch.distributed.tensor import DTensor
+
+        # sharded colwise and rowwise, so both sharding styles are covered
+        model = TestLoraTensorParallel._load_model_with_lora(target_modules=["q_proj", "o_proj"])
+
+        checked = 0
+        for name, module in model.named_modules():
+            if not isinstance(module, LoraLayer):
+                continue
+            base_layer = module.get_base_layer()
+            tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+            if tp_plan not in ("colwise", "rowwise"):
+                continue
+            checked += 1
+
+            if tp_plan == "colwise":
+                # the output dim is sharded, so `lora_B` is sharded and `lora_A` stays replicated
+                adapter, shard_dim, attr = module.lora_B["default"], 0, "out_features"
+            else:
+                # the input dim is sharded, so `lora_A` is sharded and `lora_B` stays replicated
+                adapter, shard_dim, attr = module.lora_A["default"], 1, "in_features"
+
+            # the base layer's weight is a DTensor, so its shape is the global (unsharded) one
+            global_value = base_layer.weight.shape[shard_dim]
+            assert isinstance(adapter.weight, DTensor), f"{name}: sharded adapter weight should be a DTensor"
+            assert adapter.weight.shape[shard_dim] == global_value, f"{name}: unexpected global {attr}"
+            assert adapter.weight.to_local().shape[shard_dim] == global_value // world_size, (
+                f"{name}: unexpected shard size"
+            )
+
+            reported = getattr(adapter, attr)
+            assert reported == global_value, (
+                f"{name}: adapter reports {attr}={reported}, but the base layer is sharded with a global {attr} of "
+                f"{global_value}"
+            )
+
+        assert checked > 0, "no LoRA adapter on a TP-sharded layer was found"
+
+    @staticmethod
+    def _test_forward_backward(rank, world_size):
+        """A forward and backward pass through adapters that are sharded along either dimension must work."""
+        from torch.distributed.tensor import DTensor
+
+        # `embed_tokens` is included to also cover the embedding adapter, the other layers cover both sharding styles
+        model = TestLoraTensorParallel._load_model_with_lora(
+            target_modules=["embed_tokens", "q_proj", "k_proj", "v_proj", "o_proj"], init_lora_weights=False
+        )
+        model.train()
+
+        input_ids = torch.randint(0, model.config.vocab_size, (2, 8))
+        loss = model(input_ids=input_ids, labels=input_ids).loss
+        assert torch.isfinite(loss), f"loss is not finite: {loss}"
+        loss.backward()
+
+        checked = 0
+        for name, module in model.named_modules():
+            if not isinstance(module, LoraLayer):
+                continue
+            if getattr(module.get_base_layer(), "_hf_tp_plan", None) is None:
+                continue
+            # `lora_A`/`lora_B` only exist for linear layers; the adapter of `embed_tokens` is stored in
+            # `lora_embedding_A`/`lora_embedding_B` as plain parameters instead, its gradients are covered by
+            # `TestLoraTensorParallel::test_lora_gradient_synchronization` in `test_gpu_examples.py`
+            for adapter in (*module.lora_A.values(), *module.lora_B.values()):
+                checked += 1
+                grad = adapter.weight.grad
+                assert grad is not None, f"{name}: adapter did not receive a gradient"
+                grad = grad.to_local() if isinstance(grad, DTensor) else grad
+                assert torch.count_nonzero(grad) > 0, f"{name}: adapter gradient is all zeros"
+
+        assert checked > 0, "no LoRA adapter on a TP-sharded layer was found"
+
+    def _spawn(self, fn, init_method, *args):
+        """Run `fn` in `WORLD_SIZE` processes, each of which creates its own process group."""
+        mp.spawn(self._run_in_processes, args=(fn, WORLD_SIZE, init_method) + args, nprocs=WORLD_SIZE, join=True)
+
+    def test_sharded_adapters_report_global_features(self, init_method):
+        self._spawn(self._test_sharded_adapters_report_global_features, init_method)
+
+    def test_forward_backward(self, init_method):
+        self._spawn(self._test_forward_backward, init_method)
