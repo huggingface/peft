@@ -62,9 +62,9 @@ class PacaConfig(PeftConfig):
             Optional mapping from layer names or regexp expressions to the input column indices that are fine-tuned in
             the matching layers instead of `r` randomly selected ones, for example
             `{'^model.layers.0.self_attn.q_proj': [0, 2, 4]}`. This also allows a different number of columns per
-            layer. The indices of a layer must be unique and smaller than `in_features`. The scaling is
-            `paca_alpha / r` with the `r` of this config in all layers, independent of the number of given indices.
-            Targeted layers that match no key use `r` randomly selected columns.
+            layer. The indices of a layer must be unique and smaller than `in_features`. The scaling is `paca_alpha /
+            r` with the `r` of this config in all layers, independent of the number of given indices. Targeted layers
+            that match no key use `r` randomly selected columns.
         init_weights (`bool`, *optional*, defaults to `True`):
             If `True`, the update of the selected columns is initialized to zero, i.e. the adapted model is identical
             to the base model at initialization. Set to `False` to initialize with random values; this is only intended
