@@ -1079,7 +1079,7 @@ def main():
             drop_last_batch=True,
         )
         dataset_valid = ds.take(num_valid_samples).map(
-            partial(tokenize_wiki, tokenizer=tokenizer, chunk_size=args.seq_len, min_len=min_len),
+            partial(mapping_fn, tokenizer=tokenizer, chunk_size=args.seq_len, min_len=min_len),
             batched=True,
             remove_columns=ds.column_names,
         )
