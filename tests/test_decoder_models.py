@@ -84,7 +84,7 @@ PEFT_DECODER_MODELS_TO_TEST = [
     "peft-internal-testing/tiny-random-OPTForCausalLM",
     "peft-internal-testing/tiny-random-GPT2LMHeadModel",
     "peft-internal-testing/tiny-random-GPTJForCausalLM",
-    "trl-internal-testing/tiny-random-LlamaForCausalLM",
+    "peft-internal-testing/tiny-random-LlamaForCausalLM",
     "peft-internal-testing/tiny-dummy-qwen2",
     "hf-internal-testing/tiny-random-Gemma3ForCausalLM",
 ]
@@ -94,7 +94,7 @@ SMALL_GRID_MODELS = [
     "peft-internal-testing/tiny-random-OPTForCausalLM",
     "hf-internal-testing/tiny-random-MistralForCausalLM",
     "peft-internal-testing/tiny-dummy-qwen2",
-    "trl-internal-testing/tiny-random-LlamaForCausalLM",
+    "peft-internal-testing/tiny-random-LlamaForCausalLM",
 ]
 
 
@@ -985,7 +985,7 @@ class TestDecoderModels(PeftCommonTester):
         self._test_passing_input_embeds_works("", model_id, config_cls, config_kwargs.copy())
 
     def test_lora_layer_replication(self):
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         config_kwargs = {
             "target_modules": ["down_proj", "up_proj"],
             "task_type": "CAUSAL_LM",
@@ -1046,7 +1046,7 @@ class TestDecoderModels(PeftCommonTester):
 
     def test_prefix_tuning_offsets_position_ids_in_forward(self, monkeypatch):
         # Regression: RoPE models need position_ids offset for prefix tuning.
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             base = AutoModelForCausalLM.from_pretrained(model_id)
         peft_config = PrefixTuningConfig(num_virtual_tokens=4, task_type="CAUSAL_LM", prefix_projection=False)
@@ -1077,7 +1077,7 @@ class TestDecoderModels(PeftCommonTester):
     def test_prompt_learning_position_ids_warns_and_drops(self, monkeypatch):
         # Counterpart to test_prefix_tuning_offsets_position_ids_in_forward for prompt learning methods that extend
         # inputs_embeds instead of the KV cache: passing position_ids is not supported, PEFT warns and removes them.
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             base = AutoModelForCausalLM.from_pretrained(model_id)
         peft_config = PromptTuningConfig(num_virtual_tokens=4, task_type="CAUSAL_LM")
@@ -1463,7 +1463,7 @@ class TestDecoderModels(PeftCommonTester):
         ],
     )
     def test_save_pretrained_targeting_lora_to_embedding_layer(self, save_embedding_layers, tmp_path, peft_config):
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
 
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
@@ -1591,7 +1591,7 @@ class TestDecoderModels(PeftCommonTester):
 
     def test_merge_and_unload_fixes_tie_word_embeddings_config(self):
         # See https://github.com/huggingface/transformers/issues/45127
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id, tie_word_embeddings=True)
             assert model.config.tie_word_embeddings

@@ -93,7 +93,7 @@ class ModelWithOutputHeadBias(torch.nn.Module):
 class TestTrainableTokens:
     @pytest.fixture
     def model_id(self):
-        return "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        return "peft-internal-testing/tiny-random-LlamaForCausalLM"
 
     @pytest.fixture
     def model_multi_embedding(self):
