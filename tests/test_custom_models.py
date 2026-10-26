@@ -60,6 +60,7 @@ from peft import (
     MontecloraConfig,
     OFTConfig,
     OSFConfig,
+    PacaConfig,
     PeanutConfig,
     PeftModel,
     PeftWarning,
@@ -765,6 +766,24 @@ TEST_CASES = [
         "MLP",
         ShiraConfig,
         {"r": 1, "target_modules": ["lin0"]},
+    ),
+    ########
+    # PaCA #
+    ########
+    ("Vanilla MLP 1 PaCA", "MLP", PacaConfig, {"r": 2, "target_modules": "lin0"}),
+    ("Vanilla MLP 2 PaCA", "MLP", PacaConfig, {"r": 2, "target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 PaCA", "MLP", PacaConfig, {"r": 2, "target_modules": ["lin1"]}),
+    # PaCA only trains the selected input columns: with random_seed=0, lin1 selects two hidden units that the ReLU sets to
+    # zero for the whole test batch, so their columns receive no gradient. Seed 1 selects active units.
+    ("Vanilla MLP 4 PaCA", "MLP", PacaConfig, {"r": 2, "target_modules": ["lin0", "lin1"], "random_seed": 1}),
+    ("Vanilla MLP 5 PaCA", "MLP", PacaConfig, {"r": 2, "target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    ("Vanilla MLP 6 PaCA", "MLP", PacaConfig, {"r": 4, "paca_alpha": 8, "target_modules": ["lin0", "lin1"]}),
+    # lin0 fine-tunes the 3 given columns, lin1 2 random ones (selected as in Vanilla MLP 4 PaCA)
+    (
+        "Vanilla MLP 7 PaCA",
+        "MLP",
+        PacaConfig,
+        {"r": 2, "target_modules": ["lin0", "lin1"], "random_seed": 1, "paca_indices_pattern": {"lin0": [0, 3, 7]}},
     ),
     ###############
     # Supertuning #
@@ -1555,6 +1574,34 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         ShiraConfig,
         {"r": 1, "target_modules": ["lin0"], "init_weights": False},
         {"r": 1, "target_modules": ["lin1"], "init_weights": False},
+    ),
+    (
+        "PaCA Same",
+        "paca",
+        PacaConfig,
+        {"r": 2, "target_modules": ["lin0"], "init_weights": False},
+        {"r": 2, "target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "PaCA Different",
+        "paca",
+        PacaConfig,
+        {"r": 2, "target_modules": ["lin0"], "init_weights": False},
+        {"r": 2, "target_modules": ["lin1"], "init_weights": False},
+    ),
+    # the selected columns of the two adapters overlap (2 and 4), the updates of both are added there
+    (
+        "PaCA Overlapping",
+        "paca",
+        PacaConfig,
+        {"r": 4, "target_modules": ["lin0"], "init_weights": False, "paca_indices_pattern": {"lin0": [0, 2, 4, 6]}},
+        {
+            "r": 4,
+            "paca_alpha": 2,
+            "target_modules": ["lin0"],
+            "init_weights": False,
+            "paca_indices_pattern": {"lin0": [2, 4, 7, 9]},
+        },
     ),
     # Check Supra (r set) here: if the hybrid works with multiple adapters, pure Super does too.
     (
