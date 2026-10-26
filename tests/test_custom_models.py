@@ -96,6 +96,16 @@ from .testing_common import (
 from .testing_utils import get_state_dict, hub_online_once, require_non_cpu, set_init_weights_false
 
 
+# The base models in this file are defined locally and loaded through `MockTransformerWrapper`, so their "model ids"
+# (e.g. "MLP" or "Conv2d") are not Hub repo ids. With the default `save_embedding_layers="auto"`, saving such a model
+# makes PEFT ask the Hub whether the base model's `config.json` exists. That can never succeed for these ids, so it only
+# wastes a request (404, and rate limits when many tests save). Tests that save therefore pass
+# `save_embedding_layers=False`. Tests that save through the shared `_test_*` helpers don't have to: there,
+# `get_peft_model` has reset `base_model_name_or_path` to `None`, so `"auto"` never reaches the Hub. Saving the
+# embedding layers of custom models is covered by test_save_pretrained_targeting_lora_to_embedding_layer and its
+# variants, which pass the argument explicitly.
+
+
 def _zero_unilora_theta_d(model, adapter_name="default"):
     torch.nn.init.zeros_(model.unilora_theta_d[adapter_name])
 
@@ -2623,7 +2633,8 @@ class TestPeftCustomModel(PeftCommonTester):
         with torch.inference_mode():
             output_before = model(**X)
 
-        state_dict = get_peft_model_state_dict(model)
+        # See the note at the top of this file about `save_embedding_layers`.
+        state_dict = get_peft_model_state_dict(model, save_embedding_layers=False)
         del model
 
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
@@ -3204,7 +3215,7 @@ class TestPeftCustomModel(PeftCommonTester):
         peft_params = [p for n, p in model.named_parameters() if model.prefix in n]
         assert all(p.dtype == expected_dtype for p in peft_params)
 
-        model.save_pretrained(tmp_path)
+        model.save_pretrained(tmp_path, save_embedding_layers=False)
         del model
 
         model = self.transformers_class.from_pretrained(model_id, dtype=dtype).to(self.torch_device)
@@ -3329,7 +3340,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # sanity check
         assert not torch.allclose(output_base, output_before, atol=atol, rtol=rtol)
 
-        model.save_pretrained(tmp_path)
+        model.save_pretrained(tmp_path, save_embedding_layers=False)
         del model
 
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
@@ -3391,7 +3402,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # is already covered in the previous test
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
-            model.save_pretrained(tmp_dirname)
+            model.save_pretrained(tmp_dirname, save_embedding_layers=False)
             model_from_pretrained = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
             params_after = get_state_dict(model_from_pretrained)
@@ -4856,7 +4867,7 @@ class TestPeftCustomModel(PeftCommonTester):
             with open(os.path.join(tmp_dirname, "README.md"), "w") as f:
                 f.write(text)
 
-            model.save_pretrained(tmp_dirname)
+            model.save_pretrained(tmp_dirname, save_embedding_layers=False)
             with open(os.path.join(tmp_dirname, "README.md")) as f:
                 model_card = f.read()
 
@@ -4871,7 +4882,7 @@ class TestPeftCustomModel(PeftCommonTester):
         model = get_peft_model(model, config)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
-            model.save_pretrained(tmp_dirname)
+            model.save_pretrained(tmp_dirname, save_embedding_layers=False)
             with open(os.path.join(tmp_dirname, "README.md")) as f:
                 model_card = f.read()
 
@@ -4879,6 +4890,8 @@ class TestPeftCustomModel(PeftCommonTester):
         # rough check that the model card is pre-filled
         assert len(model_card) > 1000
 
+    # The tests below are the ones that cover `save_embedding_layers` for custom models, so unlike the other tests in
+    # this file (see the note at the top), they pass values other than `False` explicitly.
     @pytest.mark.parametrize("save_embedding_layers", ["auto", True, False])
     @pytest.mark.parametrize(
         "peft_config",
@@ -4948,7 +4961,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # note: not using the context manager here because it fails on Windows CI for some reason
         tmp_dirname = tempfile.mkdtemp()
         try:
-            model.save_pretrained(tmp_dirname)
+            model.save_pretrained(tmp_dirname, save_embedding_layers=False)
             model = ModelEmbConv1D(emb_size=105)
 
             # first check that this raises
@@ -5006,7 +5019,7 @@ class TestPeftCustomModel(PeftCommonTester):
         config = LoraConfig(target_modules=["linear"], modules_to_save=["norm"])
         model = get_peft_model(ModelWithBatchNorm(), config)
         model.base_model.model.norm.modules_to_save["default"].num_batches_tracked.fill_(7)
-        model.save_pretrained(tmp_path)
+        model.save_pretrained(tmp_path, save_embedding_layers=False)
         state_dict = safe_load_file(tmp_path / "adapter_model.safetensors")
         assert state_dict["base_model.model.norm.num_batches_tracked"].ndim == 0
 
@@ -5231,7 +5244,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # they are not adjusted.
         config = LoraConfig(target_modules=["mha"], init_lora_weights=False)
         model = get_peft_model(ModelMha(), config)
-        model.save_pretrained(tmp_path / "old")
+        model.save_pretrained(tmp_path / "old", save_embedding_layers=False)
 
         config_path = tmp_path / "old" / "adapter_config.json"
         config_dict = json.loads(config_path.read_text())
@@ -5247,7 +5260,7 @@ class TestPeftCustomModel(PeftCommonTester):
         assert torch.allclose(lora_B_loaded, factor * lora_B)
 
         # saving and loading the adapter again must not double the weight a second time
-        loaded.save_pretrained(tmp_path / "new")
+        loaded.save_pretrained(tmp_path / "new", save_embedding_layers=False)
         reloaded = PeftModel.from_pretrained(ModelMha(), tmp_path / "new")
         lora_B_reloaded = reloaded.base_model.model.mha.base_layer.out_proj.lora_B["default"].weight
         assert torch.allclose(lora_B_reloaded, lora_B_loaded)
@@ -7786,7 +7799,7 @@ class TestRequiresGrad:
             config = config_cls(target_modules=["emb"], token_indices=[0, 2, 4])
 
         model = get_peft_model(model, config)
-        model.save_pretrained(tmp_path)
+        model.save_pretrained(tmp_path, save_embedding_layers=False)
         del model
 
         model = DeepMLP(size=256)
@@ -7852,7 +7865,7 @@ class TestRequiresGrad:
     def test_loading_adapter_preserves_custom_requires_grad(self, tmp_path):
         config = LoraConfig(target_modules=["layers.0.lin0"])
         source_model = get_peft_model(DeepMLP(size=256), config)
-        source_model.save_pretrained(tmp_path)
+        source_model.save_pretrained(tmp_path, save_embedding_layers=False)
 
         model = get_peft_model(DeepMLP(size=256), config)
         # Emulate a user fine-tuning one base-model weight while intentionally freezing one adapter parameter.
@@ -7884,7 +7897,7 @@ class TestRequiresGrad:
         # targeting the different modules with modules_to_save:
         config = config_cls(target_modules=["layers.0.lin0"], modules_to_save=["layers.0.lin1"], **extra_kwargs)
         model = get_peft_model(model, config)
-        model.save_pretrained(tmp_path)
+        model.save_pretrained(tmp_path, save_embedding_layers=False)
         del model
 
         model = DeepMLP(size=256)
@@ -7926,7 +7939,7 @@ class TestRequiresGrad:
         # targeting the same modules with modules_to_save:
         config = LoraConfig(target_modules=["lin0"], trainable_token_indices={"emb": [0]})
         model = get_peft_model(model, config)
-        model.save_pretrained(tmp_path)
+        model.save_pretrained(tmp_path, save_embedding_layers=False)
         del model
 
         model = ModelEmbConv1D()
@@ -8535,7 +8548,7 @@ class TestDynamicDispatch:
         outputs_before = peft_model(inputs)  # does not raise
 
         sd_before = peft_model.state_dict()
-        peft_model.save_pretrained(tmp_path / "lora-custom-module")
+        peft_model.save_pretrained(tmp_path / "lora-custom-module", save_embedding_layers=False)
         del model, peft_model
 
         torch.manual_seed(0)  # same seed for base model
@@ -8753,7 +8766,7 @@ class TestPeftFsdpStateDict:
         with torch.no_grad():
             output_before = model(**X)
 
-        state_dict = get_peft_model_state_dict(model)
+        state_dict = get_peft_model_state_dict(model, save_embedding_layers=False)
         del model
 
         torch.manual_seed(0)
@@ -8812,7 +8825,7 @@ class TestPeftFsdpStateDict:
         with torch.no_grad():
             output_before = model(**X)
 
-        state_dict = get_peft_model_state_dict(model)
+        state_dict = get_peft_model_state_dict(model, save_embedding_layers=False)
         del model
 
         torch.manual_seed(0)
