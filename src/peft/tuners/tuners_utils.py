@@ -1404,12 +1404,30 @@ class BaseTuner(nn.Module, ABC):
         #   safe_merge, adapter_names
         # This is not so nice but this method here started with only adapter_names, thus putting safe_merge first would
         # be a backwards incompatible change.
+
         self._check_merge_allowed()
+
+        # Collect all BaseTunerLayer modules and merge them in innermost-first order
+        # to ensure correct merge order for nested mixed models (e.g., OFT(LoRA(base))).
+        # The forward pass applies adapters inner-first, so merging must also go inner-first.
+        modules_to_merge: list[BaseTunerLayer] = []
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
-                with onload_layer(module):
-                    module.merge(adapter_names=adapter_names, safe_merge=safe_merge)
+                modules_to_merge.append(module)
 
+        # Sort by nesting depth: deeper base_layer chain = more nested = merge first
+        def _nesting_depth(module: BaseTunerLayer) -> int:
+            depth = 0
+            while hasattr(module, "base_layer") and module.base_layer is not None:
+                depth += 1
+                module = module.base_layer
+            return depth
+
+        modules_to_merge.sort(key=_nesting_depth)
+
+        for module in modules_to_merge:
+            with onload_layer(module):
+                module.merge(adapter_names=adapter_names, safe_merge=safe_merge)
     def unmerge_adapter(self):
         """
         This method unmerges all merged adapter layers from the base model.
