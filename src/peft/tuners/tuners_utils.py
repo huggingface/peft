@@ -1419,6 +1419,37 @@ class BaseTuner(nn.Module, ABC):
                 with onload_layer(module):
                     module.unmerge()
 
+    @contextmanager
+    def temporarily_merge_adapter(self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False):
+        """Merge the adapter layers into the base model for the duration of the context and unmerge them on exit.
+
+        Use this instead of `merge_adapter` followed by `unmerge_adapter` when the base weights must survive the
+        round trip unchanged, e.g. when merged weights are repeatedly copied to an inference engine during training.
+        In float16/bfloat16, adding an adapter's delta and subtracting it again does not always round back to the
+        original values; layers that support it (vanilla LoRA) restore their base weights exactly on exit. This keeps
+        a record of the affected entries while merged, usually a small fraction of the weights.
+
+        Args:
+            adapter_names (`list[str]`, *optional*):
+                The list of adapter names that should be merged. If `None`, all active adapters will be merged.
+            safe_merge (`bool`, *optional*):
+                See `merge_adapter`.
+        """
+        layers = [module for module in self.model.modules() if isinstance(module, BaseTunerLayer)]
+        if any(layer.merged for layer in layers):
+            raise ValueError("temporarily_merge_adapter needs unmerged adapters; call unmerge_adapter first.")
+        for layer in layers:
+            layer._exact_unmerge = True
+        try:
+            self.merge_adapter(adapter_names=adapter_names, safe_merge=safe_merge)
+            yield
+        finally:
+            try:
+                self.unmerge_adapter()
+            finally:
+                for layer in layers:
+                    layer.__dict__.pop("_exact_unmerge", None)
+
     def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
         """Set the active adapter(s).
 
