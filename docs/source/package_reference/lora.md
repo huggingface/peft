@@ -765,7 +765,7 @@ If you apply tensor parallelism without a TP plan, e.g. with PyTorch's `parallel
 ```py
 from peft.utils.integrations import TpMeshDimRegistry
 
-TpMeshDimRegistry.register("model")
+TpMeshDimRegistry.register("tp_dim")
 ```
 
 
