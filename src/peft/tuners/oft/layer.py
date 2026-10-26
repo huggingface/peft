@@ -553,7 +553,7 @@ class Linear(nn.Module, OFTLayer):
         if not adapter_names:
             # no adapter to merge
             return
-        for active_adapter in adapter_names:
+        for active_adapter in reversed(adapter_names):
             if active_adapter in self.oft_R.keys():
                 oft_mat = self.get_delta_weight(active_adapter)
                 if safe_merge or self.quantization_backend is not None:
