@@ -14,7 +14,7 @@ on:
       - '**.md'
 
 env:
-  HF_HOME: .cache/huggingface
+  HF_HOME: "${{ github.workspace }}/.cache/huggingface"
 
 permissions: {}
 
@@ -33,6 +33,7 @@ jobs:
           cache-dependency-path: "setup.py"
       - name: Install dependencies
         run: |
+          echo "$HF_HOME"
           python -m pip install --upgrade pip
           pip install .[dev]
       - name: Check quality
