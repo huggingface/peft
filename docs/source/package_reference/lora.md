@@ -763,9 +763,9 @@ Saving and loading work as usual via `save_pretrained` / `from_pretrained`. PEFT
 If you apply tensor parallelism without a TP plan, e.g. with PyTorch's `parallelize_module`, PEFT sizes the LoRA weights of a sharded `nn.Linear` to its local shard if the weight's device mesh has a dimension named `"tp"`, and to the full layer shape otherwise (as with FSDP2). PEFT does not add TP hooks to these LoRA weights or gather them when saving. If your TP mesh dimension has a different name, add it before creating the PEFT model:
 
 ```py
-from peft.utils.constants import TP_MESH_DIM_NAMES
+from peft.utils.integrations import TpMeshDimRegistry
 
-TP_MESH_DIM_NAMES.add("model")
+TpMeshDimRegistry.register("model")
 ```
 
 

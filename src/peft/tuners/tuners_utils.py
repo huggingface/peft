@@ -42,10 +42,9 @@ from peft.utils.constants import (
     EMBEDDING_LAYER_NAMES,
     MIN_TARGET_MODULES_FOR_OPTIMIZATION,
     SEQ_CLS_HEAD_NAMES,
-    TP_MESH_DIM_NAMES,
 )
 from peft.utils.error import NoMatchingPeftModuleError
-from peft.utils.integrations import init_empty_weights
+from peft.utils.integrations import TpMeshDimRegistry, init_empty_weights
 from peft.utils.other import (
     AuxiliaryTrainingWrapper,
     _get_module_names_tied_with_embedding,
@@ -175,10 +174,12 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     """
     if isinstance(module, nn.Linear):
         if _torch_supports_distributed and isinstance(module.weight, torch.distributed.tensor.DTensor):
-            # Use the full shape: FSDP2 computes the full projection, and the LoRA TP hooks shard the adapter of a
-            # layer with a Transformers TP plan (`_hf_tp_plan`). Only TP without a plan, detected by a mesh dimension
-            # in `TP_MESH_DIM_NAMES`, needs the local shard shape.
-            has_tp_dim = any(name in TP_MESH_DIM_NAMES for name in module.weight.device_mesh.mesh_dim_names or ())
+            # Transformers TP initializes full-shaped adapters and shards them with the TP hooks afterwards.
+            # Without a Transformers TP plan, only registered TP mesh dimensions use the local shard shape.
+            # All other meshes use the full shape, as FSDP2 gathers the base weight before the projection.
+            has_tp_dim = any(
+                TpMeshDimRegistry.is_registered(name) for name in module.weight.device_mesh.mesh_dim_names or ()
+            )
             if has_tp_dim and getattr(module, "_hf_tp_plan", None) is None:
                 out_features, in_features = module.weight.to_local().shape
             else:

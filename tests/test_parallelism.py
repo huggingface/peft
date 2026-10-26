@@ -29,7 +29,7 @@ from transformers import AutoModelForCausalLM
 from peft import LoraConfig, get_peft_model
 from peft.import_utils import is_transformers_ge_v5_17_0
 from peft.utils import infer_device
-from peft.utils.constants import TP_MESH_DIM_NAMES
+from peft.utils.integrations import TpMeshDimRegistry
 
 from .testing_utils import hub_online_once
 
@@ -97,7 +97,7 @@ class TestShardedBaseLayerShapes:
     def _check_parallelize_module(mesh_dim_name, added_tp_mesh_dim_name, expected_features):
         if added_tp_mesh_dim_name is not None:
             # the spawned process only runs this check, so the change doesn't reach other tests
-            TP_MESH_DIM_NAMES.add(added_tp_mesh_dim_name)
+            TpMeshDimRegistry.register(added_tp_mesh_dim_name)
         mesh = init_device_mesh("cpu", (2,), mesh_dim_names=(mesh_dim_name,))
         # the first layer (10 -> 20) is sharded on its output dim, the second (20 -> 2) on its input dim
         model = nn.Sequential(nn.Linear(10, 20), nn.Linear(20, 2))
@@ -173,3 +173,17 @@ class TestShardedBaseLayerShapes:
     @pytest.mark.usefixtures("cache_model")
     def test_tp_plan_lora_matches_unsharded_model(self, tmp_path, mesh_dim_names):
         self._spawn(tmp_path, self._check_tp_plan, self.model_id, mesh_dim_names)
+
+
+def test_tp_mesh_dim_registry(monkeypatch):
+    # Restore the registry after the test so custom names do not affect other tests.
+    monkeypatch.setattr(TpMeshDimRegistry, "_names", frozenset({"tp"}))
+    assert TpMeshDimRegistry.is_registered("tp")
+    assert not TpMeshDimRegistry.is_registered("model")
+    assert not TpMeshDimRegistry.is_registered("fsdp")
+
+    TpMeshDimRegistry.register("model")
+    TpMeshDimRegistry.register("model")
+    assert TpMeshDimRegistry.is_registered("model")
+    assert TpMeshDimRegistry.is_registered("tp")
+    assert not TpMeshDimRegistry.is_registered("fsdp")
