@@ -116,6 +116,7 @@ class TestShardedBaseLayerShapes:
 
     @staticmethod
     def tp_plan_lora_matches_unsharded_model(model_id, mesh_dim_names, init_lora_weights):
+        # Older Transformers versions do not provide DistributedConfig.
         from transformers.distributed import DistributedConfig
 
         def full(tensor):
