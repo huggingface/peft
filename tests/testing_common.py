@@ -734,7 +734,7 @@ class PeftCommonTester:
                 atol, rtol = 0.3, 0.01
             if (config.peft_type == "OFT") and not is_decoder:
                 atol, rtol = 0.3, 0.01
-            if model_id == "trl-internal-testing/tiny-Llama4ForCausalLM":
+            if model_id == "peft-internal-testing/tiny-Llama4ForCausalLM":
                 # also getting larger errors here, not exactly sure why
                 atol, rtol = 0.3, 0.01
             assert torch.allclose(logits, logits_merged, atol=atol, rtol=rtol)
@@ -2037,7 +2037,7 @@ class PeftCommonTester:
                 assert (output_before != output_peft_disabled).float().mean() < 1e-4
             else:
                 atol, rtol = 1e-6, 1e-6
-                if (platform.system() == "Windows") and (model_id == "trl-internal-testing/tiny-Llama4ForCausalLM"):
+                if (platform.system() == "Windows") and (model_id == "peft-internal-testing/tiny-Llama4ForCausalLM"):
                     # for some reason, Windows CI fails with stricter tolerance
                     atol, rtol = 1e-5, 1e-5
 
