@@ -159,6 +159,15 @@ def add_lora_tp_hooks_dtensor(
                 ),
                 requires_grad=param.requires_grad,
             )
+
+        if p_name == "weight":
+            # The adapter now spans the whole, unsharded base layer, so the module has to report the global
+            # dimensions, not the local shard that the weight was initialized with. The TP styles reconstruct the
+            # global shape of activations from these attributes (`RowwiseParallel` reads `in_features`,
+            # `ColwiseParallel` reads `out_features`), so a local value here makes them wrap the activations with
+            # the wrong global shape.
+            tp_module.out_features, tp_module.in_features = global_shape
+
     style.install_forward(tp_module, device_mesh)
 
 
