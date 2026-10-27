@@ -68,6 +68,7 @@ from transformers.pytorch_utils import Conv1D
 from peft import (
     AdaLoraConfig,
     ArrowConfig,
+    CortexConfig,
     EvaConfig,
     FrodConfig,
     HiraConfig,
@@ -111,6 +112,7 @@ from tests.testing_utils import hub_online_once
 
 from .testing_utils import (
     DEVICE_MAP_MAP,
+    CudaTestFixtures,
     device_count,
     load_dataset_english_quotes,
     require_aqlm,
@@ -128,6 +130,7 @@ from .testing_utils import (
     require_torchao,
     torch_device,
 )
+from .testing_utils import create_tiny_causal_lm as tiny_model
 
 
 device, _, _ = get_backend()
@@ -7476,3 +7479,90 @@ class TestKappaTune:
         # loose bound. Without dequantization, the condition numbers would be off by a much larger factor.
         for name, kappa_fp in kappas_fp.items():
             assert 0.5 < kappas_8bit[name] / kappa_fp < 2
+
+
+@pytest.mark.single_gpu_tests
+class TestCortexTraining(CudaTestFixtures):
+    @pytest.mark.parametrize(
+        "kind,mode,weighting",
+        [
+            ("llama", "routed", "unweighted"),
+            ("qwen3_moe", "shared", "routing"),
+            ("qwen3_moe", "routed", "unweighted"),
+            ("gpt_oss", "shared", "unweighted"),
+        ],
+    )
+    @pytest.mark.parametrize("init", ["random", "sample"])
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16], ids=["fp32", "bf16"])
+    def test_cortex_trainer_save_reload_and_export(self, kind, mode, weighting, init, dtype, tmp_path):
+        if dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported(including_emulation=False):
+            pytest.skip("This CUDA GPU does not support native BF16.")
+        device = infer_device()
+        torch.manual_seed(42)
+        base = tiny_model(kind).to(device=device, dtype=dtype).eval()
+        clean = deepcopy(base)
+        config = CortexConfig(
+            k=3,
+            moe_target=mode,
+            public_weighting=weighting,
+            init_weights=init,
+            task_type="CAUSAL_LM",
+        )
+        model = get_peft_model(base, config)
+        trainable = {name: p for name, p in model.named_parameters() if p.requires_grad}
+        assert trainable and all("cortex_" in name for name in trainable)
+        assert all(p.dtype == torch.float32 for p in trainable.values())
+        initial = {name: p.detach().clone() for name, p in trainable.items()}
+        tokens = torch.tensor([[1, 4, 7, 3, 2], [1, 5, 8, 4, 2]], device=device)
+        dataset = Dataset.from_dict({"input_ids": tokens.cpu().tolist(), "labels": tokens.cpu().tolist()})
+        trainer = Trainer(
+            model=model,
+            args=TrainingArguments(
+                output_dir=str(tmp_path / "training"),
+                max_steps=2,
+                per_device_train_batch_size=2,
+                learning_rate=0.01,
+                optim="adamw_torch",
+                bf16=dtype == torch.bfloat16,
+                use_cpu=device == "cpu",
+                save_strategy="no",
+                report_to="none",
+                disable_tqdm=True,
+            ),
+            train_dataset=dataset,
+        )
+        result = trainer.train()
+        assert np.isfinite(result.training_loss)
+        assert any(not torch.equal(p, initial[name]) for name, p in trainable.items())
+        # Trainability, including the router, must remain restricted to the adapter.
+        for name, parameter in model.base_model.model.named_parameters():
+            if "cortex_" not in name:
+                assert parameter.grad is None and not parameter.requires_grad
+                reference = clean.get_parameter(name.replace(".base_layer.", "."))
+                torch.testing.assert_close(parameter, reference, rtol=0, atol=0)
+        with torch.no_grad():
+            # Trainer converts mixed-precision outputs to FP32. Compare values
+            # in the same dtype after reloading outside the training wrapper.
+            expected = model.eval()(tokens, use_cache=False).logits.float()
+        adapter_dir = tmp_path / "adapter"
+        model.save_pretrained(adapter_dir, save_embedding_layers=False)
+        restored = PeftModel.from_pretrained(clean, adapter_dir, adapter_name="reloaded").eval()
+        tolerance = {"rtol": 0.02, "atol": 0.002} if dtype == torch.bfloat16 else {"rtol": 2e-4, "atol": 3e-5}
+        with torch.no_grad():
+            torch.testing.assert_close(restored(tokens, use_cache=False).logits.float(), expected, **tolerance)
+        native_dir = tmp_path / "native"
+        restored.merge_and_unload(safe_merge=True).save_pretrained(native_dir)
+        native = (
+            AutoModelForCausalLM.from_pretrained(
+                native_dir,
+                dtype=dtype,
+                attn_implementation="eager",
+                **({"experts_implementation": "eager"} if kind != "llama" else {}),
+            )
+            .to(device)
+            .eval()
+        )
+        with torch.no_grad():
+            torch.testing.assert_close(native(tokens, use_cache=False).logits.float(), expected, **tolerance)
+        del trainer, model, restored, native, base, clean
+        clear_device_cache(garbage_collection=True)
