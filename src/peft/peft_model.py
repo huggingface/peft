@@ -143,17 +143,17 @@ def _filter_expected_adapter_keys(keys: list[str], config: PeftConfig) -> list[s
     A key can legitimately be absent from, or extra in, a params-only comparison without indicating a real load
     problem:
 
-    - VB-LoRA's shared ``vblora_vector_bank`` and TinyLoRA's layer-level ``tinylora_v`` are references to a
+    - VB-LoRA's shared `vblora_vector_bank` and TinyLoRA's layer-level `tinylora_v` are references to a
       model-level parameter, not independent per-layer state.
-    - ``prompt_encoder`` itself is not part of the checkpoint.
-    - UniLoRA's ``unilora_theta_d`` outside its canonical ``base_model.unilora_theta_d.`` location is a reference,
+    - `prompt_encoder` itself is not part of the checkpoint.
+    - UniLoRA's `unilora_theta_d` outside its canonical `base_model.unilora_theta_d.` location is a reference,
       not the owning parameter.
     - Prompt learning's state is loaded through the prompt encoder
-      (:meth:`BasePromptEncoder._load_adapter_state_dict`), not through ``model.load_state_dict``, so its keys
+      ([`~BasePromptEncoder._load_adapter_state_dict`]), not through `model.load_state_dict`, so its keys
       never resolve through the normal path and would otherwise always show up as unexpected. Every prompt
       learning variant (plain prompt/prefix tuning, Cartridge, MultitaskPromptTuning's extra
-      ``prefix_task_cols``/``prefix_task_rows``) reports this state as flat, top-level keys with no ``.`` in
-      them, see every ``_get_adapter_state_dict`` override under ``src/peft/tuners/*/model.py`` for prompt
+      `prefix_task_cols`/`prefix_task_rows`) reports this state as flat, top-level keys with no `.` in
+      them, see every `_get_adapter_state_dict` override under `src/peft/tuners/*/model.py` for prompt
       learning tuners: none of them ever nest a key under a submodule path. That is the general signal used
       here, rather than hardcoding each variant's key names one by one.
     """
@@ -170,6 +170,20 @@ def _filter_expected_adapter_keys(keys: list[str], config: PeftConfig) -> list[s
         return config.is_prompt_learning and "." not in k
 
     return [k for k in keys if not is_expected(k)]
+
+
+def _describe_adapter_key_problems(missing_keys: list[str], unexpected_keys: list[str]) -> str:
+    """Describe missing and/or unexpected adapter keys in one phrase.
+
+    Used for both the warning in `from_pretrained` and the error raised for `strict_adapter_check`, so the two never
+    drift apart.
+    """
+    parts = []
+    if missing_keys:
+        parts.append(f"missing adapter keys: {missing_keys}")
+    if unexpected_keys:
+        parts.append(f"unexpected adapter keys: {unexpected_keys}")
+    return " and ".join(parts)
 
 
 class PeftModel(PushToHubMixin, torch.nn.Module):
@@ -681,12 +695,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             # quite difficult for users to even notice that something might have gone wrong here.
 
             # careful: if the wording of the warning is changed, adjust the unit tests accordingly!
-            warn_parts = []
-            if missing_keys:
-                warn_parts.append(f"missing adapter keys: {missing_keys}")
-            if unexpected_keys:
-                warn_parts.append(f"unexpected adapter keys: {unexpected_keys}")
-            warn_message = f"Found {' and '.join(warn_parts)} while loading the checkpoint."
+            problems = _describe_adapter_key_problems(missing_keys, unexpected_keys)
+            warn_message = f"Found {problems} while loading the checkpoint."
 
             prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(config.peft_type)
             if prefix and adapter_name in prefix:
@@ -1679,14 +1689,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         load_result.unexpected_keys.extend(adapter_unexpected_keys)
 
         if strict_adapter_check and (load_result.missing_keys or load_result.unexpected_keys):
-            error_msgs = []
-            if load_result.missing_keys:
-                error_msgs.append(f"Missing key(s) in adapter state_dict: {load_result.missing_keys}")
-            if load_result.unexpected_keys:
-                error_msgs.append(f"Unexpected key(s) in adapter state_dict: {load_result.unexpected_keys}")
-            raise RuntimeError(
-                f"Error(s) in loading adapter '{adapter_name}' state_dict:\n\t" + "\n\t".join(error_msgs)
-            )
+            problems = _describe_adapter_key_problems(load_result.missing_keys, load_result.unexpected_keys)
+            raise RuntimeError(f"Error(s) in loading adapter '{adapter_name}' state_dict: found {problems}.")
 
         if (
             (getattr(self, "hf_device_map", None) is not None)

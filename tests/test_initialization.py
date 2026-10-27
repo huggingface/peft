@@ -4192,122 +4192,132 @@ class TestFromPretrainedKeyWarnings:
 class TestStrictAdapterCheck:
     """Tests for the `strict_adapter_check` argument to `load_adapter` and `from_pretrained`. See issue 3804."""
 
-    def _get_model_and_state_dict(self):
-        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
-        model = get_peft_model(model, LoraConfig())
-        return model, model.state_dict()
+    model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+    some_key = "base_model.model.model.decoder.layers.0.self_attn.v_proj.lora_A.default.weight"
+    extra_key = "base_model.model.model.decoder.layers.0.self_attn.v_proj.lora_A.default.extra_weight"
 
-    def test_load_adapter_strict_adapter_check_passes_on_clean_load(self, tmp_path):
-        model, _ = self._get_model_and_state_dict()
+    def _load_base_model(self, model_id=None):
+        model_id = model_id or self.model_id
+        with hub_online_once(model_id):
+            return AutoModelForCausalLM.from_pretrained(model_id)
+
+    @pytest.fixture
+    def model(self):
+        return get_peft_model(self._load_base_model(), LoraConfig())
+
+    @pytest.fixture
+    def state_dict(self, model):
+        return model.state_dict()
+
+    @pytest.fixture
+    def state_dict_missing_key(self, state_dict):
+        return {k: v for k, v in state_dict.items() if k != self.some_key}
+
+    @pytest.fixture
+    def state_dict_unexpected_key(self, state_dict):
+        return {**state_dict, self.extra_key: state_dict[self.some_key]}
+
+    @pytest.fixture
+    def state_dict_missing_and_unexpected_key(self, state_dict):
+        out = {k: v for k, v in state_dict.items() if k != self.some_key}
+        out[self.extra_key] = state_dict[self.some_key]
+        return out
+
+    @staticmethod
+    def _save_with_state_dict(model, state_dict, path):
+        # save_pretrained reads model.state_dict(), so overriding it writes a checkpoint with the desired defect
+        model.state_dict = lambda: state_dict
+        model.save_pretrained(path)
+
+    def test_load_adapter_strict_adapter_check_passes_on_clean_load(self, model, tmp_path):
         model.save_pretrained(tmp_path)
-        del model
-
-        base = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
-        model = get_peft_model(base, LoraConfig())
+        model = get_peft_model(self._load_base_model(), LoraConfig())
         # should not raise
         model.load_adapter(tmp_path, adapter_name="other", strict_adapter_check=True)
 
-    def test_load_adapter_strict_adapter_check_raises_on_missing_key(self, tmp_path):
-        model, state_dict = self._get_model_and_state_dict()
-        missing_key = "base_model.model.model.decoder.layers.0.self_attn.v_proj.lora_A.default.weight"
-        model.state_dict = lambda: {k: v for k, v in state_dict.items() if k != missing_key}
-        model.save_pretrained(tmp_path)
-        del model
+    def test_load_adapter_strict_adapter_check_raises_on_missing_key(self, model, state_dict_missing_key, tmp_path):
+        self._save_with_state_dict(model, state_dict_missing_key, tmp_path)
 
-        base = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
-        model = get_peft_model(base, LoraConfig())
-        with pytest.raises(RuntimeError, match="Missing key"):
+        model = get_peft_model(self._load_base_model(), LoraConfig())
+        with pytest.raises(RuntimeError, match="missing adapter keys"):
             model.load_adapter(tmp_path, adapter_name="other", strict_adapter_check=True)
+        # without strict_adapter_check, the same checkpoint loads and does not raise
+        model.load_adapter(tmp_path, adapter_name="other")
 
-    def test_load_adapter_strict_adapter_check_raises_on_unexpected_key(self, tmp_path):
-        model, state_dict = self._get_model_and_state_dict()
-        extra_key = "base_model.model.model.decoder.layers.0.self_attn.v_proj.lora_A.default.extra_weight"
+    def test_load_adapter_strict_adapter_check_raises_on_unexpected_key(
+        self, model, state_dict_unexpected_key, tmp_path
+    ):
+        self._save_with_state_dict(model, state_dict_unexpected_key, tmp_path)
 
-        def new_state_dict():
-            out = dict(state_dict)
-            out[extra_key] = state_dict[
-                "base_model.model.model.decoder.layers.0.self_attn.v_proj.lora_A.default.weight"
-            ]
-            return out
-
-        model.state_dict = new_state_dict
-        model.save_pretrained(tmp_path)
-        del model
-
-        base = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
-        model = get_peft_model(base, LoraConfig())
-        with pytest.raises(RuntimeError, match="Unexpected key"):
+        model = get_peft_model(self._load_base_model(), LoraConfig())
+        with pytest.raises(RuntimeError, match="unexpected adapter keys"):
             model.load_adapter(tmp_path, adapter_name="other", strict_adapter_check=True)
+        # without strict_adapter_check, the same checkpoint loads and does not raise
+        model.load_adapter(tmp_path, adapter_name="other")
 
-    def test_load_adapter_strict_adapter_check_default_false_only_warns(self, recwarn, tmp_path):
-        model, state_dict = self._get_model_and_state_dict()
-        missing_key = "base_model.model.model.decoder.layers.0.self_attn.v_proj.lora_A.default.weight"
-        model.state_dict = lambda: {k: v for k, v in state_dict.items() if k != missing_key}
-        model.save_pretrained(tmp_path)
-        del model
+    def test_load_adapter_strict_adapter_check_raises_on_missing_and_unexpected_key(
+        self, model, state_dict_missing_and_unexpected_key, tmp_path
+    ):
+        self._save_with_state_dict(model, state_dict_missing_and_unexpected_key, tmp_path)
 
-        base = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
-        model = get_peft_model(base, LoraConfig())
+        model = get_peft_model(self._load_base_model(), LoraConfig())
+        # both problems are reported in the same error
+        with pytest.raises(RuntimeError, match="missing adapter keys.*unexpected adapter keys"):
+            model.load_adapter(tmp_path, adapter_name="other", strict_adapter_check=True)
+        model.load_adapter(tmp_path, adapter_name="other")
+
+    def test_load_adapter_strict_adapter_check_default_false_only_warns(self, model, state_dict_missing_key, tmp_path):
+        self._save_with_state_dict(model, state_dict_missing_key, tmp_path)
+
+        model = get_peft_model(self._load_base_model(), LoraConfig())
         # default is strict_adapter_check=False: no raise, load_adapter itself doesn't warn (from_pretrained does)
         # loading under a new adapter name re-inserts that name into the reported key
         result = model.load_adapter(tmp_path, adapter_name="other")
-        assert missing_key.replace(".default.", ".other.") in result.missing_keys
+        assert self.some_key.replace(".default.", ".other.") in result.missing_keys
 
-    def test_from_pretrained_strict_adapter_check_raises(self, tmp_path):
-        model, state_dict = self._get_model_and_state_dict()
-        missing_key = "base_model.model.model.decoder.layers.0.self_attn.v_proj.lora_A.default.weight"
-        model.state_dict = lambda: {k: v for k, v in state_dict.items() if k != missing_key}
-        model.save_pretrained(tmp_path)
-        del model
+    def test_from_pretrained_strict_adapter_check_raises(self, model, state_dict_missing_key, tmp_path):
+        self._save_with_state_dict(model, state_dict_missing_key, tmp_path)
 
-        base = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
-        with pytest.raises(RuntimeError, match="Missing key"):
+        base = self._load_base_model()
+        with pytest.raises(RuntimeError, match="missing adapter keys"):
             PeftModel.from_pretrained(base, tmp_path, strict_adapter_check=True)
 
     def test_strict_adapter_check_ignores_shared_and_prompt_encoder_keys(self, tmp_path):
         # VB-LoRA's shared vector bank and the prompt encoder path must not trip strict_adapter_check: these are
         # expected to differ from a plain per-layer key comparison for structural reasons, not load problems.
-        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
         config = VBLoRAConfig(target_modules=["q_proj", "v_proj"], vector_length=1, num_vectors=2)
-        model = get_peft_model(model, config)
+        model = get_peft_model(self._load_base_model(), config)
         model.save_pretrained(tmp_path)
         del model
 
-        base = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
         # should not raise: vblora_vector_bank round-trips correctly, nothing structurally missing/unexpected
-        PeftModel.from_pretrained(base, tmp_path, strict_adapter_check=True)
+        PeftModel.from_pretrained(self._load_base_model(), tmp_path, strict_adapter_check=True)
 
     def test_strict_adapter_check_ignores_prompt_tuning_keys(self, tmp_path):
         # Plain prompt tuning: the prompt encoder's state (prompt_embeddings) is loaded through
         # BasePromptEncoder._load_adapter_state_dict, not model.load_state_dict, and must not trip
         # strict_adapter_check.
-        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
-        model = AutoModelForCausalLM.from_pretrained(model_id)
         config = PromptTuningConfig(task_type="CAUSAL_LM", num_virtual_tokens=4)
-        model = get_peft_model(model, config)
+        model = get_peft_model(self._load_base_model(), config)
         model.save_pretrained(tmp_path)
         del model
 
-        base = AutoModelForCausalLM.from_pretrained(model_id)
         # should not raise
-        PeftModel.from_pretrained(base, tmp_path, strict_adapter_check=True)
+        PeftModel.from_pretrained(self._load_base_model(), tmp_path, strict_adapter_check=True)
 
     def test_strict_adapter_check_ignores_multitask_prompt_tuning_keys(self, tmp_path):
-        # See issue 3804 (PR #3832 review): MultitaskPromptTuning loads prefix_task_cols and prefix_task_rows
-        # through the prompt encoder in addition to prompt_embeddings, none of them backed by a real
-        # model.load_state_dict path. An earlier version of this check only special-cased the literal string
-        # "prompt_embeddings" and false-positived here; the general rule is that every prompt learning key
-        # loaded this way is a flat, top-level key with no "." in it.
+        # MultitaskPromptTuning loads prefix_task_cols and prefix_task_rows through the prompt encoder in addition to
+        # prompt_embeddings, none of them backed by a real model.load_state_dict path. Checking only for the literal
+        # key "prompt_embeddings" would wrongly flag them, the general rule is that every prompt learning key loaded
+        # this way is a flat, top-level key with no "." in it.
         model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
-        model = AutoModelForCausalLM.from_pretrained(model_id)
         config = MultitaskPromptTuningConfig(task_type="CAUSAL_LM", num_virtual_tokens=4, num_tasks=1)
-        model = get_peft_model(model, config)
+        model = get_peft_model(self._load_base_model(model_id), config)
         model.save_pretrained(tmp_path)
         del model
 
-        base = AutoModelForCausalLM.from_pretrained(model_id)
         # should not raise
-        PeftModel.from_pretrained(base, tmp_path, strict_adapter_check=True)
+        PeftModel.from_pretrained(self._load_base_model(model_id), tmp_path, strict_adapter_check=True)
 
 
 class TestNamingConflictWarning:
