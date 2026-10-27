@@ -96,6 +96,8 @@ from .testing_common import (
 from .testing_utils import get_state_dict, hub_online_once, require_non_cpu, set_init_weights_false
 
 
+# Note about `save_pretrained` and `get_peft_model_state_dict`
+#
 # The base models in this file are defined locally and loaded through `MockTransformerWrapper`, so their "model ids"
 # (e.g. "MLP" or "Conv2d") are not Hub repo ids. With the default `save_embedding_layers="auto"`, saving such a model
 # makes PEFT ask the Hub whether the base model's `config.json` exists. That can never succeed for these ids, so it only
