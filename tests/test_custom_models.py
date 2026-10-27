@@ -8502,9 +8502,13 @@ class TestFsdp2UnshardedParams:
 
         output.sum().backward()
         assert all(param.grad is not None for param in lora_params)
+
+        # The backward resharded the FSDP modules, so the next forward unshards them again and the new unsharded
+        # parameters take `requires_grad` from the shards. Clearing the gradients checks that this step trains the
+        # adapters too, i.e. that skipping the reshard on exit didn't leave the shards frozen.
         for param in lora_params:
             param.grad = None
-        model(X).sum().backward()  # the next step still trains the adapters
+        model(X).sum().backward()
         assert all(param.grad is not None for param in lora_params)
 
     @pytest.mark.parametrize("adapter_name, requires_grad", [("default", False), ("other", True)])
