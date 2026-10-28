@@ -2616,10 +2616,9 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_save_load_roundtrip_direct_injection(self, test_name, model_id, config_cls, config_kwargs):
         X = self.prepare_inputs_for_testing()
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
-        config = config_cls(
-            base_model_name_or_path=model_id,
-            **config_kwargs,
-        )
+        # Don't set base_model_name_or_path: model_id is not a Hub repo id here, so get_peft_model_state_dict would
+        # send a lookup for it to the Hub on each call, which only results in 404/429 errors.
+        config = config_cls(**config_kwargs)
 
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         torch.manual_seed(0)
@@ -2641,7 +2640,7 @@ class TestPeftCustomModel(PeftCommonTester):
 
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         torch.manual_seed(54321)
-        model = inject_adapter_in_model(config_cls(base_model_name_or_path=model_id, **config_kwargs), model)
+        model = inject_adapter_in_model(config_cls(**config_kwargs), model)
         model.eval()
         load_result = set_peft_model_state_dict(model, state_dict)
         assert not load_result.unexpected_keys
