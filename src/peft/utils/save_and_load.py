@@ -173,6 +173,23 @@ def _filter_state_dict_for_adapter_name(
     return filtered_state_dict
 
 
+def _gather_state_dict_for_save(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """Gather DTensors into full CPU tensors. All participating ranks must call this function."""
+    # Adapted from transformers.distributed.tensor_parallel.gather_state_dict_for_save, without unused TP arguments.
+    # Vendored so FSDP2 saving also works with Transformers versions that predate DTensor TP.
+    from torch.distributed.tensor import DTensor
+
+    gathered = {}
+    for key, tensor in state_dict.items():
+        if isinstance(tensor, torch.Tensor):
+            if isinstance(tensor, DTensor):
+                tensor = tensor.full_tensor()
+            gathered[key] = tensor.detach().cpu().contiguous()
+        else:
+            gathered[key] = tensor
+    return gathered
+
+
 def get_peft_model_state_dict(
     model,
     state_dict=None,
@@ -376,9 +393,8 @@ def get_peft_model_state_dict(
 
         # FSDP2 has no TP metadata. Gather only selected entries using each tensor's mesh and placements, so
         # unselected base model weights remain sharded.
-        to_return = {
-            name: tensor.full_tensor() if isinstance(tensor, DTensor) else tensor for name, tensor in to_return.items()
-        }
+        if any(isinstance(tensor, DTensor) for tensor in to_return.values()):
+            to_return = _gather_state_dict_for_save(to_return)
 
     # REMOVE ADAPTER NAME
     # Key formats can be method-specific, so the removal is delegated to the tuner class, see

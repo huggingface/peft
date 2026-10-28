@@ -86,6 +86,7 @@ from peft import (
     inject_adapter_in_model,
     set_peft_model_state_dict,
 )
+from peft.import_utils import is_transformers_dtensor_tp
 from peft.tuners import lora
 from peft.tuners.lora.config import BdLoraConfig
 from peft.tuners.lora.monteclora import MontecloraSampler
@@ -8734,7 +8735,7 @@ def _test_fsdp2_save_load(rank, world_size, root, device_type, config_cls):
         fully_shard(model, mesh=mesh)
         assert not getattr(model, "_tp_size", None)
 
-        state_dict = model.state_dict()
+        state_dict = model.state_dict(keep_vars=True)
         gathered = []
         full_tensor = DTensor.full_tensor
 
@@ -8750,7 +8751,10 @@ def _test_fsdp2_save_load(rank, world_size, root, device_type, config_cls):
         assert not any(id(tensor) in unselected_ids for tensor in gathered)
         for key in expected:
             assert not isinstance(actual[key], DTensor)
-            torch.testing.assert_close(actual[key], expected[key], rtol=0, atol=0)
+            assert actual[key].device.type == "cpu"
+            assert not actual[key].requires_grad
+            assert actual[key].is_contiguous()
+            torch.testing.assert_close(actual[key], expected[key].cpu(), rtol=0, atol=0)
 
         for safe_serialization in (True, False):
             destination = Path(root, "safe" if safe_serialization else "bin")
@@ -8775,6 +8779,9 @@ def _test_fsdp2_save_load(rank, world_size, root, device_type, config_cls):
             inputs = torch.arange(90, device=device).view(9, 10).float()
             with torch.no_grad():
                 torch.testing.assert_close(reloaded(inputs), reference(inputs))
+                # Direct restoration into DTensors requires Transformers' DTensor loading support.
+                if not is_transformers_dtensor_tp:
+                    continue
                 # Make restoring into distributed parameters observable, rather than reloading unchanged weights.
                 for name, param in model.named_parameters():
                     if "selected" in name.split("."):
@@ -8782,7 +8789,7 @@ def _test_fsdp2_save_load(rank, world_size, root, device_type, config_cls):
             set_peft_model_state_dict(model, saved, adapter_name="selected")
             restored = get_peft_model_state_dict(model, adapter_name="selected")
             for key in expected:
-                torch.testing.assert_close(restored[key], expected[key], rtol=0, atol=0)
+                torch.testing.assert_close(restored[key], expected[key].cpu(), rtol=0, atol=0)
     finally:
         dist.destroy_process_group()
 
