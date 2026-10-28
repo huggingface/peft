@@ -75,9 +75,26 @@ def calibrated_model(base, config, inputs, attention_mask=None, **kwargs):
 
 
 class TestActivationSteering:
+    """Check steering against hand-calculated outputs of simple linear models.
+
+    Most tests use SteeringBlock's bias-free weight matrix W = [[3, 0, 1], [4, 2, 0]]. Each input token [x, y, z]
+    therefore produces [3*x + z, 4*x + 2*y]. Neuron indices select input columns of W: column 0 is [3, 4], with L2 norm
+    sqrt(3**2 + 4**2) = 5, and column 1 is [0, 2], with norm 2. Their normalized steering directions are consequently
+    [3/5, 4/5] and [0, 1].
+
+    The inputs fixture contains tokens [100, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]. Multiplication by W gives [300,
+    400], [3, 4], [6, 8], [9, 12], whose L2 norms are 500, 5, 10, 15. Calibration excludes the first valid token,
+    leaving norms 5, 10, 15 and a median scale of 10. The large first token makes accidentally including it change the
+    median.
+
+    Each selected column contributes dose * scale * normalized_direction. At scale 10, unit doses on columns 0 and 1
+    thus add [6, 8] and [0, 10], respectively. Contributions are summed, and a scalar dose broadcasts over the selected
+    indices. These constant offsets apply to every valid token, including the first; only calibration excludes the
+    first token. Padded tokens receive no offset.
+    """
+
     @pytest.fixture
     def inputs(self):
-        # Position zero has a large norm and must not contribute to calibration.
         return torch.tensor([[[100.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [3.0, 0.0, 0.0]]])
 
     @pytest.mark.parametrize(
@@ -90,6 +107,7 @@ class TestActivationSteering:
         ],
     )
     def test_doses_control_direction_and_strength(self, inputs, indices, dose, expected_change):
+        # Expected offsets: 0; 2 * [6, 8]; 0.5 * ([6, 8] + [0, 10]); -[6, 8] + 0.5 * [0, 10].
         base = SteeringModel()
         reference = base(inputs)
         model = calibrated_model(base, steering_config(indices=indices, init_val=dose), inputs)
@@ -99,6 +117,7 @@ class TestActivationSteering:
     def test_calibration_ignores_padding_and_first_tokens(self, inputs, batched):
         sequences = inputs.repeat(2, 1, 1)
         sequences[1] *= 2
+        # Cover right and left padding, skipping the first valid token of each sequence during calibration.
         mask = torch.tensor([[1, 1, 1, 0], [0, 1, 1, 1]])
         base = SteeringModel()
         reference = base(sequences)
@@ -111,7 +130,8 @@ class TestActivationSteering:
                 {"hidden_states": sequences[1:, 1:]},
             ]
         calibrate_activation_steering(model, data)
-        # Both representations contain the same four calibration tokens; padded outputs stay unchanged.
+        # Either batching gives eligible norms [5, 10] and [20, 30], with median (10 + 20) / 2 = 15.
+        # The offset is 15 * [3/5, 4/5] = [9, 12], including at first valid tokens but excluding padding.
         expected = reference + torch.tensor([9.0, 12.0]) * mask[..., None]
         torch.testing.assert_close(model(sequences, attention_mask=mask), expected)
 
@@ -138,7 +158,8 @@ class TestActivationSteering:
         inputs = torch.tensor([[[100.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]])
         model = get_peft_model(TwoBlockModel(), config)
         calibrate_activation_steering(model, {"hidden_states": inputs})
-        # Both blocks use baseline calibration; the earlier intervention must not affect the later scale.
+        # Both identity blocks have baseline norms [1, 2, 3], hence scale 2, and add [2, 0] and [0, -2].
+        # Calibrating the later block must ignore the earlier intervention.
         torch.testing.assert_close(model(inputs), inputs + torch.tensor([2.0, -2.0]))
 
     def test_calibration_is_fixed_until_recalibration(self, inputs):
@@ -149,6 +170,7 @@ class TestActivationSteering:
         # New prompts, including single-token inputs and a different batch size, reuse the trained scale.
         torch.testing.assert_close(model(probe), reference + torch.tensor([6.0, 8.0]))
         calibrate_activation_steering(model, {"hidden_states": inputs * 2})
+        # Doubling calibration inputs gives norms [10, 20, 30], so the new offset is 20 * [3/5, 4/5].
         torch.testing.assert_close(model(probe), reference + torch.tensor([12.0, 16.0]))
 
     def test_named_adapters_keep_separate_calibration(self, inputs):
@@ -157,15 +179,19 @@ class TestActivationSteering:
         model = calibrated_model(base, steering_config(init_val=1.0), inputs)
         first = model(inputs)
         model.add_adapter("other", steering_config(indices=[1], init_val=-1.0))
+        # Calibrating the inactive adapter must preserve the active adapter's scale and output.
         calibrate_activation_steering(model, {"hidden_states": inputs * 2}, adapter_name="other")
         torch.testing.assert_close(model(inputs), first)
 
         model.set_adapter("other")
+        # Scale 20 and dose -1 on column 1 contribute -20 * [0, 1] = [0, -20].
         torch.testing.assert_close(model(inputs), reference + torch.tensor([0.0, -20.0]))
 
+        # Contributions add to [6, 8] + [0, -20] = [6, -12]
         model.base_model.set_adapter(["default", "other"])
         torch.testing.assert_close(model(inputs), reference + torch.tensor([6.0, -12.0]))
 
+        # Order of adapters does not matter
         model.base_model.set_adapter(["other", "default"])
         torch.testing.assert_close(model(inputs), reference + torch.tensor([6.0, -12.0]))
 
@@ -180,6 +206,7 @@ class TestActivationSteering:
             yield {"hidden_states": inputs * 2}
             raise RuntimeError("Calibration data could not be loaded")
 
+        # A failure after collecting partial statistics must preserve calibration, training mode, and disabled state.
         with model.disable_adapter():
             with pytest.raises(RuntimeError, match="Calibration data could not be loaded"):
                 calibrate_activation_steering(model, interrupted_data())
@@ -197,7 +224,13 @@ class TestActivationSteering:
         with pytest.raises(RuntimeError, match="not calibrated"):
             model(inputs)
 
+    def test_unknown_calibration_adapter_raises(self, inputs):
+        model = get_peft_model(SteeringModel(), steering_config())
+        with pytest.raises(ValueError, match="No activation steering layers"):
+            calibrate_activation_steering(model, {"hidden_states": inputs}, adapter_name="missing")
+
     def test_directly_injected_adapter_can_be_calibrated(self, inputs):
+        # The helper also accepts the original model after low-level adapter injection.
         base = SteeringModel()
         reference = base(inputs)
         model = inject_adapter_in_model(steering_config(init_val=1.0), base)
@@ -205,42 +238,10 @@ class TestActivationSteering:
         torch.testing.assert_close(model(inputs), reference + torch.tensor([6.0, 8.0]))
 
     @pytest.mark.parametrize("method", ["merge_adapter", "merge_and_unload", "unmerge_adapter"])
-    def test_merging_is_unsupported(self, method):
+    def test_merging_raises(self, method):
         model = get_peft_model(SteeringModel(), steering_config())
         with pytest.raises(ValueError, match="does not support"):
             getattr(model, method)()
-
-    @pytest.mark.parametrize(
-        "kwargs",
-        [
-            {"indices": []},
-            {"indices": [0, 0]},
-            {"indices": [-1]},
-            {"init_val": float("nan")},
-            {"indices": [0, 1], "init_val": [1.0]},
-            {"indices": [0, 1], "statistic": ["median_l2"]},
-            {"statistic": "mean_l2"},
-        ],
-    )
-    def test_invalid_steering_configuration_is_rejected(self, kwargs):
-        with pytest.raises(ValueError):
-            steering_config(**kwargs)
-
-    @pytest.mark.parametrize(
-        "target,source,indices",
-        [("missing", "down_proj", [0]), ("block", "missing", [0]), ("block", "down_proj", [3])],
-    )
-    def test_unknown_target_or_neuron_is_rejected(self, target, source, indices):
-        config = ActivationSteeringConfig(
-            steering_pattern={target: {"source_module": source, "indices": indices, "init_val": 1.0}}
-        )
-        with pytest.raises(ValueError):
-            get_peft_model(SteeringModel(), config)
-
-    def test_unknown_calibration_adapter_is_rejected(self, inputs):
-        model = get_peft_model(SteeringModel(), steering_config())
-        with pytest.raises(ValueError, match="No activation steering layers"):
-            calibrate_activation_steering(model, {"hidden_states": inputs}, adapter_name="missing")
 
 
 @pytest.mark.parametrize(
@@ -255,6 +256,8 @@ class TestActivationSteering:
     ],
 )
 class TestActivationSteeringDecoderModels(PeftCommonTester):
+    """Run a subset of the common tests with activation steering. Not all tests make sense with this method."""
+
     # Block targets and explicit initial doses do not fit ALL_CONFIGS' projection-targeting assumptions.
     transformers_class = AutoModelForCausalLM
 

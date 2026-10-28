@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # Activation Steering
 
-Activation steering is a method to directly influence the activations of specific layers of a pretrained model. It is not a parameter-efficient fine-tuning model in the sense that we train a small amount of parameters on a dataset. Instead, it assumes that you already know which activations to influence and how -- PEFT is just a convenient interface to inject actiation steering into the model and share your checkpoint with others.
+Activation steering is a method to directly influence the activations of specific layers of a pretrained model. It is not a parameter-efficient fine-tuning model in the sense that we train a small amount of parameters on a dataset. Instead, it assumes that you already know which activations to influence and how -- PEFT is just a convenient interface to inject activation steering into the model and share your checkpoint with others.
 
 The original inspiration for this came from [this tweet](https://x.com/_lyraaaa_/status/2113833330429083662). Repositories used for reference are [Lyra's neuron-explorer](https://github.com/lyramakesmusic/neuron-explorer) and [this reproduction](https://github.com/Mr-Neutr0n/qwen3.5-4b-neuron-steering).
 
