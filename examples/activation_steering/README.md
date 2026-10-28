@@ -12,7 +12,7 @@ Install PEFT from this checkout and a Transformers version supporting Qwen3.5. R
 
 ## Presets
 
-Each preset has an `adapter_config.json` under `presets/`. These contain configuration only; calibrate a preset to create its adapter checkpoint before generation. The additional recipes encode the supplied suggestions; their behavioral labels have not been validated here.
+Each preset has an `adapter_config.json` under `presets/`. These contain configuration only; calibrate a preset to create its adapter checkpoint before generation. The additional recipes encode the supplied suggestions from [this tweet](https://x.com/_lyraaaa_/status/2113887372610077136).
 
 | Preset                                                       | Interventions (zero-based layer and neuron, signed dose)                       |
 |--------------------------------------------------------------|--------------------------------------------------------------------------------|
@@ -24,7 +24,7 @@ Each preset has an `adapter_config.json` under `presets/`. These contain configu
 | [chill-friend](presets/chill-friend/adapter_config.json)     | L15 N3920 +1; L11 N6261 +0.4; L17 N7870 -0.4                                   |
 | [mixed](presets/mixed/adapter_config.json)                   | L18 N5796 +0.6; L15 N3920 +0.6; L12 N2920 -0.5; L10 N6295 +0.4; L16 N8168 -0.3 |
 
-Unspecified dose magnitudes are interpreted as 1. The "add" suggestions are interpreted as additions to `sarcastiqwen`; the two suggested sycophancy neurons are separate alternatives. The final five-neuron recipe is `mixed`. Select a preset with `--preset` before the subcommand:
+Select a preset with `--preset` before the subcommand:
 
 ```bash
 python examples/activation_steering/qwen3_5.py --preset chill-friend calibrate
@@ -45,7 +45,7 @@ Calibration runs an unsteered forward pass and measures the median outgoing resi
 python examples/activation_steering/qwen3_5.py calibrate --reference-text "Your calibration text goes here."
 ```
 
-No optimizer step is needed. The configured doses and calibrated scales are saved to `qwen3.5-4b-steering` for `original`, or `qwen3.5-4b-steering-PRESET` for other presets. Use `--adapter-path PATH` before either subcommand to select another directory. Generation loads the saved checkpoint's configuration and scales.
+No actual training is needed. The configured doses and calibrated scales are saved to `qwen3.5-4b-steering` for `original`, or `qwen3.5-4b-steering-PRESET` for other presets. Use `--adapter-path PATH` before either subcommand to select another directory. Generation loads the saved checkpoint's configuration and scales.
 
 ## Generate
 
@@ -53,7 +53,7 @@ No optimizer step is needed. The configured doses and calibrated scales are save
 python examples/activation_steering/qwen3_5.py generate --prompt "Tell me a short story."
 ```
 
-The example reloads the pinned base model and uses Transformers' `model.load_adapter()` to restore the intervention. No recalibration is needed. It applies the tokenizer's chat template with `add_generation_prompt=True` and `enable_thinking=False`, then tokenizes with `add_special_tokens=False` to avoid adding special tokens twice. The empty `<think>...</think>` block in the prompt is part of Qwen's non-thinking template.
+The example reloads the pinned base model and uses Transformers' `model.load_adapter()` to restore the intervention. No recalibration is needed.
 
 Generation defaults follow [Qwen's recommendations for non-thinking general tasks](https://huggingface.co/Qwen/Qwen3.5-4B#best-practices):
 
@@ -64,10 +64,7 @@ Generation defaults follow [Qwen's recommendations for non-thinking general task
 | `--top-p`              | 0.8                                                |
 | `--top-k`              | 20                                                 |
 | `min_p`                | 0.0                                                |
-| `--presence-penalty`   | 1.5                                                |
 | `--repetition-penalty` | 1.0 (disabled)                                     |
-
-Transformers' `generate()` does not directly support `presence_penalty`, so the example supplies a logits processor. It subtracts the penalty once from each distinct token seen in the generated answer, excluding prompt tokens. This differs from the multiplicative repetition penalty; the two values are not interchangeable.
 
 Use `--seed` to control sampling and `--disable-adapter` to compare the same prompt without steering:
 
@@ -76,12 +73,132 @@ python examples/activation_steering/qwen3_5.py generate --prompt "Tell me a shor
 python examples/activation_steering/qwen3_5.py generate --prompt "Tell me a short story." --seed 42 --disable-adapter
 ```
 
-These sampling defaults differ from the reproduction's greedy decoding. To use greedy decoding without a presence penalty:
+These sampling defaults differ from the reproduction's greedy decoding. To use greedy decoding:
 
 ```bash
-python examples/activation_steering/qwen3_5.py generate --no-do-sample --presence-penalty 0
+python examples/activation_steering/qwen3_5.py generate --no-do-sample
 ```
 
-The example explicitly stops on both `<|endoftext|>` (248044) and `<|im_end|>` (248046). The pinned model's [config](https://huggingface.co/Qwen/Qwen3.5-4B/blob/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a/config.json) only specifies the former, while its [tokenizer](https://huggingface.co/Qwen/Qwen3.5-4B/blob/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a/tokenizer_config.json) uses the latter to end chat turns. Include both EOS IDs when using another chat client; otherwise generation can continue into invented user and assistant turns. `skip_special_tokens=True` hides the delimiters but does not stop generation.
+## Create and share your own intervention
 
-Repetition within an answer can still occur. Each full-dose intervention adds a vector whose L2 norm matches its block's calibrated median residual norm, so these are large perturbations. The independent reproduction reports reduced coherence. Compare with `--disable-adapter` to distinguish baseline generation issues from intervention effects. Smaller doses may also help, but change the intervention; adjusting temperature alone has no effect with `--no-do-sample`.
+A calibrated intervention is a regular PEFT adapter checkpoint. Recipients need this PEFT checkout, or a release containing `ActivationSteeringConfig`, and a Transformers version supporting Qwen3.5.
+
+### 1. Define the intervention
+
+Create a configuration in Python:
+
+```python
+from peft import ActivationSteeringConfig, TaskType
+
+config = ActivationSteeringConfig(
+    base_model_name_or_path="Qwen/Qwen3.5-4B",
+    task_type=TaskType.CAUSAL_LM,
+    steering_pattern={
+        "layers.15": {
+            "source_module": "mlp.down_proj",
+            "indices": [3920],
+            "init_val": 0.5,
+            "statistic": "median_l2",
+        },
+    },
+)
+```
+
+You can change the block names, zero-based neuron indices, and signed doses to define your intervention. `source_module` is relative to the targeted block; for these Qwen MLP neurons, it is `mlp.down_proj`. A scalar `init_val` broadcasts over the indices, or provide a list with one dose per index. Only `median_l2` is currently supported for `statistic`.
+
+### 2. Create and calibrate the PEFT model
+
+```python
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from peft import get_peft_model
+from peft.tuners.activation_steering import calibrate_activation_steering
+
+tokenizer = AutoTokenizer.from_pretrained(config.base_model_name_or_path)
+base_model = AutoModelForCausalLM.from_pretrained(
+    config.base_model_name_or_path,
+    dtype=torch.bfloat16,
+    device_map="auto",
+)
+model = get_peft_model(base_model, config).eval()
+
+calibration_text = (
+    "The river runs past the village and through the fields. "
+    "At the market, people trade fruit, bread, and stories from their travels. "
+    "A programmer writes a function to sort a list of numbers."
+)
+inputs = tokenizer(calibration_text, return_tensors="pt").to(model.device)
+calibrate_activation_steering(model, {**inputs, "use_cache": False})
+```
+
+Replace the sample text with representative calibration data. It runs unsteered forwards and stores fixed residual scales; no actual training is needed.
+
+### 3. Push the calibrated model directly to the Hub
+
+After authenticating with `hf auth login`, call `push_to_hub()` on the PEFT model and tokenizer:
+
+```python
+repo_id = "your-username/qwen3.5-4b-my-intervention"
+model.push_to_hub(repo_id)
+tokenizer.push_to_hub(repo_id)
+```
+
+This creates the repository if needed and uploads `adapter_config.json`, `adapter_model.safetensors`, and tokenizer files. The adapter checkpoint stores both the doses and calibrated scales; the base model weights are not uploaded. Sharing only the configuration omits the calibration. Include a model card to describe the intervention.
+
+### 4. Load the shared intervention
+
+Others can pass the Hub repository ID to this example, which loads through Transformers' PEFT integration:
+
+```bash
+python examples/activation_steering/qwen3_5.py --adapter-path your-username/qwen3.5-4b-my-intervention generate --prompt "Tell me a short story." --seed 42
+```
+
+They can also load it directly with `PeftModel` and generate:
+
+```python
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
+from transformers.utils import logging
+
+from peft import PeftConfig, PeftModel
+
+logging.set_verbosity_error()
+set_seed(42)
+adapter_id = "your-username/qwen3.5-4b-my-intervention"
+config = PeftConfig.from_pretrained(adapter_id)
+tokenizer = AutoTokenizer.from_pretrained(adapter_id)
+base_model = AutoModelForCausalLM.from_pretrained(
+    config.base_model_name_or_path,
+    dtype=torch.bfloat16,
+    device_map="auto",
+)
+model = PeftModel.from_pretrained(base_model, adapter_id).eval()
+
+inputs = tokenizer.apply_chat_template(
+    [{"role": "user", "content": "Tell me a short story."}],
+    tokenize=True,
+    return_dict=True,
+    return_tensors="pt",
+    add_generation_prompt=True,
+    enable_thinking=False,
+).to(model.device)
+prompt_length = inputs.input_ids.shape[1]
+
+with torch.inference_mode():
+    output = model.generate(
+        **inputs,
+        max_new_tokens=256,
+        do_sample=True,
+        temperature=0.7,
+        top_p=0.8,
+        top_k=20,
+        min_p=0.0,
+        repetition_penalty=1.0,
+        eos_token_id=tokenizer.convert_tokens_to_ids(["<|endoftext|>", "<|im_end|>"]),
+        pad_token_id=tokenizer.pad_token_id,
+    )
+print(tokenizer.decode(output[0, prompt_length:], skip_special_tokens=True))
+```
+
+Loading restores the saved doses and scales, so recipients do not need to calibrate again.

@@ -30,7 +30,7 @@ import math
 from pathlib import Path
 
 import torch
-from transformers import AutoTokenizer, LogitsProcessor, LogitsProcessorList, Qwen3_5ForConditionalGeneration, set_seed
+from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
 from transformers.utils import logging
 
 from peft import PeftConfig
@@ -47,19 +47,6 @@ REFERENCE_TEXT = (
     "def merge(a, b):\n    out = []\n    while a and b:\n        out.append(a.pop(0) if a[0] < b[0] else b.pop(0))\n"
     "    return out + a + b\nShe asked me what I thought of the plan, and I told her honestly that it seemed rushed. "
 )
-
-
-class PresencePenaltyLogitsProcessor(LogitsProcessor):
-    """Subtract a fixed penalty once per distinct generated token, excluding the prompt."""
-
-    def __init__(self, penalty: float, prompt_length: int):
-        self.penalty = penalty
-        self.prompt_length = prompt_length
-
-    def __call__(self, input_ids: torch.Tensor, scores: torch.Tensor) -> torch.Tensor:
-        penalties = torch.zeros_like(scores)
-        penalties.scatter_(1, input_ids[:, self.prompt_length :], self.penalty)
-        return scores - penalties
 
 
 def main():
@@ -86,7 +73,6 @@ def main():
     generate_parser.add_argument("--temperature", type=float, default=0.7)
     generate_parser.add_argument("--top-p", type=float, default=0.8)
     generate_parser.add_argument("--top-k", type=int, default=20)
-    generate_parser.add_argument("--presence-penalty", type=float, default=1.5)
     generate_parser.add_argument("--repetition-penalty", type=float, default=1.0)
     generate_parser.add_argument("--seed", type=int, help="Random seed for repeatable sampling on the same setup.")
     generate_parser.add_argument("--disable-adapter", action="store_true", help="Generate with steering disabled.")
@@ -101,8 +87,6 @@ def main():
             parser.error("--top-p must be in (0, 1].")
         if args.top_k < 0:
             parser.error("--top-k must be non-negative.")
-        if not -2 <= args.presence_penalty <= 2:
-            parser.error("--presence-penalty must be in [-2, 2].")
         if not math.isfinite(args.repetition_penalty) or args.repetition_penalty <= 0:
             parser.error("--repetition-penalty must be finite and positive.")
         if args.seed is not None:
@@ -117,7 +101,7 @@ def main():
     model_id, revision = config.base_model_name_or_path, config.revision
 
     tokenizer = AutoTokenizer.from_pretrained(model_id, revision=revision)
-    model = Qwen3_5ForConditionalGeneration.from_pretrained(
+    model = AutoModelForCausalLM.from_pretrained(
         model_id, revision=revision, dtype=getattr(torch, args.dtype), device_map=args.device_map
     )
     model.eval()
@@ -140,11 +124,6 @@ def main():
             enable_thinking=False,
         )
         inputs = tokenizer(prompt, add_special_tokens=False, return_tensors="pt").to(model.device)
-        logits_processor = LogitsProcessorList()
-        if args.presence_penalty != 0:
-            logits_processor.append(
-                PresencePenaltyLogitsProcessor(args.presence_penalty, prompt_length=inputs.input_ids.shape[1])
-            )
         generation_kwargs = {"do_sample": args.do_sample, "repetition_penalty": args.repetition_penalty}
         if args.do_sample:
             generation_kwargs.update(temperature=args.temperature, top_p=args.top_p, top_k=args.top_k, min_p=0.0)
@@ -153,7 +132,6 @@ def main():
             output = model.generate(
                 **inputs,
                 max_new_tokens=args.max_new_tokens,
-                logits_processor=logits_processor,
                 eos_token_id=tokenizer.convert_tokens_to_ids(["<|endoftext|>", "<|im_end|>"]),
                 pad_token_id=tokenizer.pad_token_id,
                 **generation_kwargs,
