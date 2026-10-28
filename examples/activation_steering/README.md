@@ -4,6 +4,7 @@ This example applies configurable neuron interventions to [Qwen/Qwen3.5-4B](http
 
 Sources:
 
+- [Instigating tweet](https://x.com/_lyraaaa_/status/2113833330429083662)
 - [Lyra's neuron-explorer](https://github.com/lyramakesmusic/neuron-explorer): original steering implementation and calibration text.
 - [Independent reproduction](https://github.com/Mr-Neutr0n/qwen3.5-4b-neuron-steering): implementation, comparisons, and reported limitations.
 
@@ -52,8 +53,35 @@ No optimizer step is needed. The configured doses and calibrated scales are save
 python examples/activation_steering/qwen3_5.py generate --prompt "Tell me a short story."
 ```
 
-The example reloads the pinned base model and uses Transformers' `model.load_adapter()` to restore the intervention. No recalibration is needed. Generation uses greedy decoding and disables thinking, matching the reproduction's decoding setup.
+The example reloads the pinned base model and uses Transformers' `model.load_adapter()` to restore the intervention. No recalibration is needed. It applies the tokenizer's chat template with `add_generation_prompt=True` and `enable_thinking=False`, then tokenizes with `add_special_tokens=False` to avoid adding special tokens twice. The empty `<think>...</think>` block in the prompt is part of Qwen's non-thinking template.
+
+Generation defaults follow [Qwen's recommendations for non-thinking general tasks](https://huggingface.co/Qwen/Qwen3.5-4B#best-practices):
+
+| Setting                | Default                                            |
+|------------------------|----------------------------------------------------|
+| Sampling               | Enabled (`--no-do-sample` selects greedy decoding) |
+| `--temperature`        | 0.7                                                |
+| `--top-p`              | 0.8                                                |
+| `--top-k`              | 20                                                 |
+| `min_p`                | 0.0                                                |
+| `--presence-penalty`   | 1.5                                                |
+| `--repetition-penalty` | 1.0 (disabled)                                     |
+
+Transformers' `generate()` does not directly support `presence_penalty`, so the example supplies a logits processor. It subtracts the penalty once from each distinct token seen in the generated answer, excluding prompt tokens. This differs from the multiplicative repetition penalty; the two values are not interchangeable.
+
+Use `--seed` to control sampling and `--disable-adapter` to compare the same prompt without steering:
+
+```bash
+python examples/activation_steering/qwen3_5.py generate --prompt "Tell me a short story." --seed 42
+python examples/activation_steering/qwen3_5.py generate --prompt "Tell me a short story." --seed 42 --disable-adapter
+```
+
+These sampling defaults differ from the reproduction's greedy decoding. To use greedy decoding without a presence penalty:
+
+```bash
+python examples/activation_steering/qwen3_5.py generate --no-do-sample --presence-penalty 0
+```
 
 The example explicitly stops on both `<|endoftext|>` (248044) and `<|im_end|>` (248046). The pinned model's [config](https://huggingface.co/Qwen/Qwen3.5-4B/blob/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a/config.json) only specifies the former, while its [tokenizer](https://huggingface.co/Qwen/Qwen3.5-4B/blob/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a/tokenizer_config.json) uses the latter to end chat turns. Include both EOS IDs when using another chat client; otherwise generation can continue into invented user and assistant turns. `skip_special_tokens=True` hides the delimiters but does not stop generation.
 
-Repetition within an answer can still occur. Each full-dose intervention adds a vector whose L2 norm matches its block's calibrated median residual norm, so these are large perturbations. The independent reproduction reports reduced coherence. Compare the same prompt with adapters disabled (`model.disable_adapters()`, then `model.enable_adapters()` to restore). Sampling or smaller doses may help, but change the experiment; adjusting temperature alone has no effect with `do_sample=False`.
+Repetition within an answer can still occur. Each full-dose intervention adds a vector whose L2 norm matches its block's calibrated median residual norm, so these are large perturbations. The independent reproduction reports reduced coherence. Compare with `--disable-adapter` to distinguish baseline generation issues from intervention effects. Smaller doses may also help, but change the intervention; adjusting temperature alone has no effect with `--no-do-sample`.

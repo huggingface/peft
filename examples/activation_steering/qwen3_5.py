@@ -26,10 +26,11 @@ The saved adapter contains both the doses and the measured scales, so inference 
 """
 
 import argparse
+import math
 from pathlib import Path
 
 import torch
-from transformers import AutoTokenizer, Qwen3_5ForConditionalGeneration
+from transformers import AutoTokenizer, LogitsProcessor, LogitsProcessorList, Qwen3_5ForConditionalGeneration, set_seed
 
 from peft import PeftConfig
 from peft.tuners.activation_steering import calibrate_activation_steering
@@ -45,6 +46,19 @@ REFERENCE_TEXT = (
     "def merge(a, b):\n    out = []\n    while a and b:\n        out.append(a.pop(0) if a[0] < b[0] else b.pop(0))\n"
     "    return out + a + b\nShe asked me what I thought of the plan, and I told her honestly that it seemed rushed. "
 )
+
+
+class PresencePenaltyLogitsProcessor(LogitsProcessor):
+    """Subtract a fixed penalty once per distinct generated token, excluding the prompt."""
+
+    def __init__(self, penalty: float, prompt_length: int):
+        self.penalty = penalty
+        self.prompt_length = prompt_length
+
+    def __call__(self, input_ids: torch.Tensor, scores: torch.Tensor) -> torch.Tensor:
+        penalties = torch.zeros_like(scores)
+        penalties.scatter_(1, input_ids[:, self.prompt_length :], self.penalty)
+        return scores - penalties
 
 
 def main():
@@ -66,7 +80,31 @@ def main():
     generate_parser = commands.add_parser("generate", help="Load the saved adapter using Transformers and generate.")
     generate_parser.add_argument("--prompt", default="Tell me a short story.")
     generate_parser.add_argument("--max-new-tokens", type=int, default=256)
+    generate_parser.add_argument("--do-sample", action=argparse.BooleanOptionalAction, default=True)
+    generate_parser.add_argument("--temperature", type=float, default=0.7)
+    generate_parser.add_argument("--top-p", type=float, default=0.8)
+    generate_parser.add_argument("--top-k", type=int, default=20)
+    generate_parser.add_argument("--presence-penalty", type=float, default=1.5)
+    generate_parser.add_argument("--repetition-penalty", type=float, default=1.0)
+    generate_parser.add_argument("--seed", type=int, help="Random seed for repeatable sampling on the same setup.")
+    generate_parser.add_argument("--disable-adapter", action="store_true", help="Generate with steering disabled.")
     args = parser.parse_args()
+
+    if args.command == "generate":
+        if args.max_new_tokens <= 0:
+            parser.error("--max-new-tokens must be positive.")
+        if not math.isfinite(args.temperature) or args.temperature <= 0:
+            parser.error("--temperature must be finite and positive; use --no-do-sample for greedy decoding.")
+        if not 0 < args.top_p <= 1:
+            parser.error("--top-p must be in (0, 1].")
+        if args.top_k < 0:
+            parser.error("--top-k must be non-negative.")
+        if not -2 <= args.presence_penalty <= 2:
+            parser.error("--presence-penalty must be in [-2, 2].")
+        if not math.isfinite(args.repetition_penalty) or args.repetition_penalty <= 0:
+            parser.error("--repetition-penalty must be finite and positive.")
+        if args.seed is not None:
+            set_seed(args.seed)
 
     if args.adapter_path is None:
         suffix = "" if args.preset == "original" else f"-{args.preset}"
@@ -91,6 +129,8 @@ def main():
         print(f"Saved calibrated steering adapter to {args.adapter_path}")
     else:
         model.load_adapter(args.adapter_path)
+        if args.disable_adapter:
+            model.disable_adapters()
         prompt = tokenizer.apply_chat_template(
             [{"role": "user", "content": args.prompt}],
             tokenize=False,
@@ -98,14 +138,23 @@ def main():
             enable_thinking=False,
         )
         inputs = tokenizer(prompt, add_special_tokens=False, return_tensors="pt").to(model.device)
+        logits_processor = LogitsProcessorList()
+        if args.presence_penalty != 0:
+            logits_processor.append(
+                PresencePenaltyLogitsProcessor(args.presence_penalty, prompt_length=inputs.input_ids.shape[1])
+            )
+        generation_kwargs = {"do_sample": args.do_sample, "repetition_penalty": args.repetition_penalty}
+        if args.do_sample:
+            generation_kwargs.update(temperature=args.temperature, top_p=args.top_p, top_k=args.top_k, min_p=0.0)
         with torch.inference_mode():
             # The pinned config only stops on <|endoftext|>; chat turns end with <|im_end|>.
             output = model.generate(
                 **inputs,
                 max_new_tokens=args.max_new_tokens,
-                do_sample=False,
+                logits_processor=logits_processor,
                 eos_token_id=tokenizer.convert_tokens_to_ids(["<|endoftext|>", "<|im_end|>"]),
                 pad_token_id=tokenizer.pad_token_id,
+                **generation_kwargs,
             )
         print(tokenizer.decode(output[0, inputs.input_ids.shape[1] :], skip_special_tokens=True))
 
