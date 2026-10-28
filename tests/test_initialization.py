@@ -4131,10 +4131,16 @@ class TestLowCpuMemUsage:
 
 
 class TestFromPretrainedKeyWarnings:
+    model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+
+    def _load_base_model(self):
+        with hub_online_once(self.model_id):
+            return AutoModelForCausalLM.from_pretrained(self.model_id)
+
     def test_missing_keys_warning(self, recwarn, tmp_path):
         # For more context, see issue 2115
         # When loading a PEFT adapter and we're missing a PEFT-specific weight, there should be a warning.
-        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+        model = self._load_base_model()
         config = LoraConfig()
         model = get_peft_model(model, config)
         state_dict = model.state_dict()
@@ -4142,7 +4148,7 @@ class TestFromPretrainedKeyWarnings:
         # first, sanity check that there are no warnings if no key is missing
         model.save_pretrained(tmp_path)
         del model
-        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+        model = self._load_base_model()
         model = PeftModel.from_pretrained(model, tmp_path)
         msg = "Found missing adapter keys"
         assert not any(msg in str(w.message) for w in recwarn.list)
@@ -4157,15 +4163,14 @@ class TestFromPretrainedKeyWarnings:
         model.save_pretrained(tmp_path)
         del model
 
-        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+        model = self._load_base_model()
         model = PeftModel.from_pretrained(model, tmp_path)
         assert any(msg in str(w.message) for w in recwarn.list)
         assert any(missing_key in str(w.message) for w in recwarn.list)
 
     def test_unexpected_keys_warning(self, recwarn, tmp_path):
-        # See issue 3804. from_pretrained should warn about unexpected adapter keys the same way it already warns
-        # about missing ones, since it discards the load_adapter result and the caller has no other way to notice.
-        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+        # See issue 3804. Unexpected adapter keys are reported the same way as missing ones.
+        model = self._load_base_model()
         config = LoraConfig()
         model = get_peft_model(model, config)
         state_dict = model.state_dict()
@@ -4182,7 +4187,7 @@ class TestFromPretrainedKeyWarnings:
         model.save_pretrained(tmp_path)
         del model
 
-        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+        model = self._load_base_model()
         model = PeftModel.from_pretrained(model, tmp_path)
         assert any("unexpected adapter keys" in str(w.message) for w in recwarn.list)
         # the adapter name segment is stripped from the reported key (it's re-inserted on load, not part of the file)
@@ -4233,14 +4238,14 @@ class TestStrictAdapterCheck:
         model.save_pretrained(tmp_path)
         model = get_peft_model(self._load_base_model(), LoraConfig())
         # should not raise
-        model.load_adapter(tmp_path, adapter_name="other", strict_adapter_check=True)
+        model.load_adapter(tmp_path, adapter_name="other", strict_adapter_check="error")
 
     def test_load_adapter_strict_adapter_check_raises_on_missing_key(self, model, state_dict_missing_key, tmp_path):
         self._save_with_state_dict(model, state_dict_missing_key, tmp_path)
 
         model = get_peft_model(self._load_base_model(), LoraConfig())
         with pytest.raises(RuntimeError, match="missing adapter keys"):
-            model.load_adapter(tmp_path, adapter_name="other", strict_adapter_check=True)
+            model.load_adapter(tmp_path, adapter_name="other", strict_adapter_check="error")
         # without strict_adapter_check, the same checkpoint loads and does not raise
         model.load_adapter(tmp_path, adapter_name="other")
 
@@ -4251,7 +4256,7 @@ class TestStrictAdapterCheck:
 
         model = get_peft_model(self._load_base_model(), LoraConfig())
         with pytest.raises(RuntimeError, match="unexpected adapter keys"):
-            model.load_adapter(tmp_path, adapter_name="other", strict_adapter_check=True)
+            model.load_adapter(tmp_path, adapter_name="other", strict_adapter_check="error")
         # without strict_adapter_check, the same checkpoint loads and does not raise
         model.load_adapter(tmp_path, adapter_name="other")
 
@@ -4263,24 +4268,57 @@ class TestStrictAdapterCheck:
         model = get_peft_model(self._load_base_model(), LoraConfig())
         # both problems are reported in the same error
         with pytest.raises(RuntimeError, match="missing adapter keys.*unexpected adapter keys"):
-            model.load_adapter(tmp_path, adapter_name="other", strict_adapter_check=True)
+            model.load_adapter(tmp_path, adapter_name="other", strict_adapter_check="error")
         model.load_adapter(tmp_path, adapter_name="other")
 
-    def test_load_adapter_strict_adapter_check_default_false_only_warns(self, model, state_dict_missing_key, tmp_path):
+    def test_load_adapter_default_warns_and_does_not_raise(self, model, state_dict_missing_key, tmp_path):
         self._save_with_state_dict(model, state_dict_missing_key, tmp_path)
 
         model = get_peft_model(self._load_base_model(), LoraConfig())
-        # default is strict_adapter_check=False: no raise, load_adapter itself doesn't warn (from_pretrained does)
+        # the default is strict_adapter_check="warn": load_adapter itself warns, and does not raise
+        with pytest.warns(UserWarning, match="Found missing adapter keys"):
+            result = model.load_adapter(tmp_path, adapter_name="other")
         # loading under a new adapter name re-inserts that name into the reported key
-        result = model.load_adapter(tmp_path, adapter_name="other")
         assert self.some_key.replace(".default.", ".other.") in result.missing_keys
+
+    def test_load_adapter_strict_adapter_check_ignore_is_silent(
+        self, recwarn, model, state_dict_missing_and_unexpected_key, tmp_path
+    ):
+        self._save_with_state_dict(model, state_dict_missing_and_unexpected_key, tmp_path)
+
+        model = get_peft_model(self._load_base_model(), LoraConfig())
+        result = model.load_adapter(tmp_path, adapter_name="other", strict_adapter_check="ignore")
+        assert not any("adapter keys" in str(w.message) for w in recwarn.list)
+        # the load result is still returned, so callers can inspect it themselves
+        assert result.missing_keys and result.unexpected_keys
+
+    def test_load_adapter_strict_adapter_check_no_warning_on_clean_load(self, recwarn, model, tmp_path):
+        model.save_pretrained(tmp_path)
+        model = get_peft_model(self._load_base_model(), LoraConfig())
+        model.load_adapter(tmp_path, adapter_name="other")
+        assert not any("adapter keys" in str(w.message) for w in recwarn.list)
+
+    @pytest.mark.parametrize("bad_value", [True, False, "strict", None])
+    def test_strict_adapter_check_invalid_value_raises(self, model, bad_value, tmp_path):
+        model.save_pretrained(tmp_path)
+        model = get_peft_model(self._load_base_model(), LoraConfig())
+        with pytest.raises(ValueError, match="strict_adapter_check must be one of"):
+            model.load_adapter(tmp_path, adapter_name="other", strict_adapter_check=bad_value)
+
+    def test_from_pretrained_strict_adapter_check_ignore_is_silent(
+        self, recwarn, model, state_dict_missing_key, tmp_path
+    ):
+        self._save_with_state_dict(model, state_dict_missing_key, tmp_path)
+
+        PeftModel.from_pretrained(self._load_base_model(), tmp_path, strict_adapter_check="ignore")
+        assert not any("adapter keys" in str(w.message) for w in recwarn.list)
 
     def test_from_pretrained_strict_adapter_check_raises(self, model, state_dict_missing_key, tmp_path):
         self._save_with_state_dict(model, state_dict_missing_key, tmp_path)
 
         base = self._load_base_model()
         with pytest.raises(RuntimeError, match="missing adapter keys"):
-            PeftModel.from_pretrained(base, tmp_path, strict_adapter_check=True)
+            PeftModel.from_pretrained(base, tmp_path, strict_adapter_check="error")
 
     def test_strict_adapter_check_ignores_shared_and_prompt_encoder_keys(self, tmp_path):
         # VB-LoRA's shared vector bank and the prompt encoder path must not trip strict_adapter_check: these are
@@ -4291,7 +4329,7 @@ class TestStrictAdapterCheck:
         del model
 
         # should not raise: vblora_vector_bank round-trips correctly, nothing structurally missing/unexpected
-        PeftModel.from_pretrained(self._load_base_model(), tmp_path, strict_adapter_check=True)
+        PeftModel.from_pretrained(self._load_base_model(), tmp_path, strict_adapter_check="error")
 
     def test_strict_adapter_check_ignores_prompt_tuning_keys(self, tmp_path):
         # Plain prompt tuning: the prompt encoder's state (prompt_embeddings) is loaded through
@@ -4303,7 +4341,7 @@ class TestStrictAdapterCheck:
         del model
 
         # should not raise
-        PeftModel.from_pretrained(self._load_base_model(), tmp_path, strict_adapter_check=True)
+        PeftModel.from_pretrained(self._load_base_model(), tmp_path, strict_adapter_check="error")
 
     def test_strict_adapter_check_ignores_multitask_prompt_tuning_keys(self, tmp_path):
         # MultitaskPromptTuning loads prefix_task_cols and prefix_task_rows through the prompt encoder in addition to
@@ -4317,7 +4355,7 @@ class TestStrictAdapterCheck:
         del model
 
         # should not raise
-        PeftModel.from_pretrained(self._load_base_model(model_id), tmp_path, strict_adapter_check=True)
+        PeftModel.from_pretrained(self._load_base_model(model_id), tmp_path, strict_adapter_check="error")
 
 
 class TestNamingConflictWarning:

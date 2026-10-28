@@ -172,20 +172,6 @@ def _filter_expected_adapter_keys(keys: list[str], config: PeftConfig) -> list[s
     return [k for k in keys if not is_expected(k)]
 
 
-def _describe_adapter_key_problems(missing_keys: list[str], unexpected_keys: list[str]) -> str:
-    """Describe missing and/or unexpected adapter keys in one phrase.
-
-    Used for both the warning in `from_pretrained` and the error raised for `strict_adapter_check`, so the two never
-    drift apart.
-    """
-    parts = []
-    if missing_keys:
-        parts.append(f"missing adapter keys: {missing_keys}")
-    if unexpected_keys:
-        parts.append(f"unexpected adapter keys: {unexpected_keys}")
-    return " and ".join(parts)
-
-
 class PeftModel(PushToHubMixin, torch.nn.Module):
     """
     Base model encompassing various Peft methods.
@@ -496,7 +482,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         ephemeral_gpu_offload: bool = False,
         low_cpu_mem_usage: bool = False,
         key_mapping: Optional[dict[str, str]] = None,
-        strict_adapter_check: bool = False,
+        strict_adapter_check: Literal["warn", "error", "ignore"] = "warn",
         **kwargs: Any,
     ) -> Self:
         r"""
@@ -541,10 +527,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 Extra mapping of PEFT `state_dict` keys applied before loading the `state_dict`. When this mapping is
                 applied, the PEFT-specific `"base_model.model"` prefix is removed beforehand and the adapter name (e.g.
                 `"default"`) is not inserted yet. Only pass this argument if you know what you're doing.
-            strict_adapter_check (`bool`, *optional*, defaults to `False`):
-                If `True`, raise a `RuntimeError` when the checkpoint has adapter keys missing from, or unexpected
-                for, the model (see [`load_adapter`][PeftModel.load_adapter] for the exact semantics). When `False`
-                (the default), the same conditions are surfaced as a warning instead of an error.
+            strict_adapter_check (`Literal["warn", "error", "ignore"]`, *optional*, defaults to `"warn"`):
+                What to do if the checkpoint has adapter keys that are missing from, or unexpected for, the model,
+                after accounting for keys that are expected to differ for structural reasons (shared parameters, the
+                prompt encoder path, etc.). `"warn"` emits a warning, `"error"` raises a `RuntimeError` and
+                `"ignore"` does nothing. This is not the same check as `torch.nn.Module.load_state_dict`'s `strict`:
+                PEFT adapters always coexist with a frozen base model, so this only concerns adapter-specific keys,
+                never the base model's own parameters.
             kwargs: (`optional`):
                 Additional keyword arguments passed along to the specific PEFT configuration class. This includes
                 `torch_device` (`str`, *optional*): the device to load the adapter on (forwarded to
@@ -673,7 +662,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 low_cpu_mem_usage=low_cpu_mem_usage,
             )
 
-        load_result = model.load_adapter(
+        model.load_adapter(
             model_id,
             adapter_name,
             is_trainable=is_trainable,
@@ -683,29 +672,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             strict_adapter_check=strict_adapter_check,
             **kwargs,
         )
-
-        # load_adapter already filters out keys that are expected to differ for structural reasons (shared
-        # parameters, the prompt encoder path, etc.) via `_filter_expected_adapter_keys`, and already raised above
-        # if `strict_adapter_check` was set and a real problem was found. What's left on `load_result` here is
-        # exactly what's worth telling the caller about.
-        missing_keys = load_result.missing_keys
-        unexpected_keys = load_result.unexpected_keys
-        if missing_keys or unexpected_keys:
-            # Let's warn here since (in contrast to load_adapter) we don't return the load result, so it could be
-            # quite difficult for users to even notice that something might have gone wrong here.
-
-            # careful: if the wording of the warning is changed, adjust the unit tests accordingly!
-            problems = _describe_adapter_key_problems(missing_keys, unexpected_keys)
-            warn_message = f"Found {problems} while loading the checkpoint."
-
-            prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(config.peft_type)
-            if prefix and adapter_name in prefix:
-                warn_message = (
-                    f"Adapter name '{adapter_name}' should not be contained in the prefix '{prefix}'. "
-                    "This could be the potential reason for missing adapter keys. "
-                ) + warn_message
-
-            warnings.warn(warn_message)
 
         return model
 
@@ -1569,7 +1535,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         ephemeral_gpu_offload: bool = False,
         low_cpu_mem_usage: bool = False,
         key_mapping: Optional[dict[str, str]] = None,
-        strict_adapter_check: bool = False,
+        strict_adapter_check: Literal["warn", "error", "ignore"] = "warn",
         **kwargs: Any,
     ):
         """
@@ -1608,17 +1574,22 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 Extra mapping of PEFT `state_dict` keys applied before loading the `state_dict`. When this mapping is
                 applied, the PEFT-specific `"base_model.model"` prefix is removed beforehand and the adapter name (e.g.
                 `"default"`) is not inserted yet. Only pass this argument if you know what you're doing.
-            strict_adapter_check (`bool`, *optional*, defaults to `False`):
-                If `True`, raise a `RuntimeError` when the checkpoint has adapter keys missing from, or unexpected
-                for, the model, after accounting for keys that are expected to differ for structural reasons (shared
-                parameters, the prompt encoder path, etc.). This is not the same check as
-                `torch.nn.Module.load_state_dict`'s `strict`: PEFT adapters always coexist with a frozen base model,
-                so this only ever concerns adapter-specific keys, never the base model's own parameters. When
-                `False` (the default), the same conditions are surfaced as a warning instead of an error.
+            strict_adapter_check (`Literal["warn", "error", "ignore"]`, *optional*, defaults to `"warn"`):
+                What to do if the checkpoint has adapter keys that are missing from, or unexpected for, the model,
+                after accounting for keys that are expected to differ for structural reasons (shared parameters, the
+                prompt encoder path, etc.). `"warn"` emits a warning, `"error"` raises a `RuntimeError` and
+                `"ignore"` does nothing. This is not the same check as `torch.nn.Module.load_state_dict`'s `strict`:
+                PEFT adapters always coexist with a frozen base model, so this only concerns adapter-specific keys,
+                never the base model's own parameters.
             kwargs: (`optional`):
                 Additional arguments to modify the way the adapter is loaded, e.g. the token for Hugging Face Hub.
         """
         from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING
+
+        if strict_adapter_check not in ("warn", "error", "ignore"):
+            raise ValueError(
+                f"strict_adapter_check must be one of 'warn', 'error' or 'ignore', got {strict_adapter_check!r}."
+            )
 
         hf_hub_download_kwargs, kwargs = self._split_kwargs(kwargs)
         if torch_device is None:
@@ -1688,9 +1659,26 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         load_result.unexpected_keys.clear()
         load_result.unexpected_keys.extend(adapter_unexpected_keys)
 
-        if strict_adapter_check and (load_result.missing_keys or load_result.unexpected_keys):
-            problems = _describe_adapter_key_problems(load_result.missing_keys, load_result.unexpected_keys)
-            raise RuntimeError(f"Error(s) in loading adapter '{adapter_name}' state_dict: found {problems}.")
+        if strict_adapter_check != "ignore" and (load_result.missing_keys or load_result.unexpected_keys):
+            problems = []
+            if load_result.missing_keys:
+                problems.append(f"missing adapter keys: {load_result.missing_keys}")
+            if load_result.unexpected_keys:
+                problems.append(f"unexpected adapter keys: {load_result.unexpected_keys}")
+            problems = " and ".join(problems)
+
+            hint = ""
+            prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(tuner)
+            if prefix and adapter_name in prefix:
+                hint = (
+                    f"Adapter name '{adapter_name}' should not be contained in the prefix '{prefix}'. "
+                    "This could be the potential reason for missing adapter keys. "
+                )
+
+            if strict_adapter_check == "error":
+                raise RuntimeError(f"{hint}Error(s) in loading adapter '{adapter_name}' state_dict: found {problems}.")
+            # careful: if the wording of the warning is changed, adjust the unit tests accordingly!
+            warnings.warn(f"{hint}Found {problems} while loading the checkpoint.")
 
         if (
             (getattr(self, "hf_device_map", None) is not None)
