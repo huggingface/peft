@@ -33,9 +33,6 @@ from tests.testing_utils import hub_online_once
 def workdir(tmp_path_factory):
     """
     Create a temp directory for the duration of the module.
-
-    Don't chdir into it: HF_HOME can be a relative path (it is on CI), so models fetched by `hub_online_once` would
-    land in a cache that is gone once the module is done, and later offline loads of the same model would fail.
     """
     return tmp_path_factory.mktemp("arrow_workdir")
     # (pytest will auto-delete it)
