@@ -31,6 +31,7 @@ from pathlib import Path
 
 import torch
 from transformers import AutoTokenizer, LogitsProcessor, LogitsProcessorList, Qwen3_5ForConditionalGeneration, set_seed
+from transformers.utils import logging
 
 from peft import PeftConfig
 from peft.tuners.activation_steering import calibrate_activation_steering
@@ -62,6 +63,7 @@ class PresencePenaltyLogitsProcessor(LogitsProcessor):
 
 
 def main():
+    logging.set_verbosity_error()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--preset",
