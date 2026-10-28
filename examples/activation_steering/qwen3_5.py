@@ -68,7 +68,7 @@ def main():
     parser.add_argument(
         "--preset",
         choices=sorted(path.name for path in PRESETS_DIR.iterdir() if (path / "adapter_config.json").is_file()),
-        default="original",
+        default="evil",
         help="Intervention to calibrate and default checkpoint directory to use.",
     )
     parser.add_argument("--adapter-path", help="Checkpoint directory; defaults to a separate directory per preset.")
