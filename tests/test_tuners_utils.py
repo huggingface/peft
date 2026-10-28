@@ -580,7 +580,7 @@ class TestTargetedParameterNames:
         assert model.targeted_parameter_names == ["lin0.weight", "lin1.weight"]
 
     def test_realistic_example(self):
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
         config = LoraConfig(target_modules=[], task_type="CAUSAL_LM", target_parameters=["v_proj.weight"])

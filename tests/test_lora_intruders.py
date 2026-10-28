@@ -14,7 +14,7 @@ from .testing_utils import hub_online_once
 class TestLoraIntruders:
     @pytest.fixture
     def model_lin(self):
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             base_model = AutoModelForCausalLM.from_pretrained(model_id)
 
@@ -25,7 +25,7 @@ class TestLoraIntruders:
 
     @pytest.fixture
     def model_emb(self):
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             base_model = AutoModelForCausalLM.from_pretrained(model_id)
 
@@ -36,7 +36,7 @@ class TestLoraIntruders:
 
     @pytest.fixture
     def model_lin_bf16_no_autocast(self):
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             base_model = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.bfloat16)
 
@@ -49,7 +49,7 @@ class TestLoraIntruders:
 
     @pytest.fixture
     def model_lin_non_lora(self):
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             base_model = AutoModelForCausalLM.from_pretrained(model_id)
 
