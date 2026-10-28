@@ -93,7 +93,7 @@ def main():
             set_seed(args.seed)
 
     if args.adapter_path is None:
-        suffix = "" if args.preset == "original" else f"-{args.preset}"
+        suffix = "" if args.preset == "evil" else f"-{args.preset}"
         args.adapter_path = f"qwen3.5-4b-steering{suffix}"
 
     config_path = PRESETS_DIR / args.preset if args.command == "calibrate" else args.adapter_path
