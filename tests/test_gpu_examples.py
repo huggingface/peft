@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from functools import lru_cache, partial
 from pathlib import Path
 from typing import Any, Union
+from unittest.mock import patch
 
 import numpy as np
 import packaging
@@ -71,6 +72,7 @@ from peft import (
     EvaConfig,
     FrodConfig,
     HiraConfig,
+    IA3Config,
     LoftQConfig,
     LoraConfig,
     PeftModel,
@@ -7198,6 +7200,19 @@ def _test_save_unsharded_weights(rank, world_size, tmp_dir_reference, tmp_dir_tp
             )
 
 
+@require_torch_multi_accelerator
+@pytest.mark.multi_gpu_tests
+@pytest.mark.skipif(
+    packaging.version.parse(torch.__version__) < packaging.version.parse("2.6"), reason="FSDP2 requires torch >= 2.6"
+)
+class TestFsdp2StateDict:
+    @pytest.mark.parametrize("config_cls", [LoraConfig, IA3Config])
+    def test_save_load_without_tp_metadata(self, config_cls, tmp_path):
+        from .test_custom_models import _test_fsdp2_save_load
+
+        mp.spawn(_test_fsdp2_save_load, args=(2, str(tmp_path), torch_device, config_cls), nprocs=2, join=True)
+
+
 def _test_save_gathers_only_adapter_weights(rank, world_size):
     """
     Test that get_peft_model_state_dict only gathers the adapter weights of a TP model, gathering the whole state dict
@@ -7215,18 +7230,25 @@ def _test_save_gathers_only_adapter_weights(rank, world_size):
     lora_config = LoraConfig(r=4, target_modules=["q_proj", "o_proj"], init_lora_weights=False)
     model = get_peft_model(model, lora_config)
 
+    state_dict = model.state_dict()
+    tensor_names = {id(value): name for name, value in state_dict.items()}
     gathered_keys = []
+    full_tensor = DTensor.full_tensor
     gather_state_dict_for_save = tensor_parallel.gather_state_dict_for_save
+
+    def spy_full_tensor(tensor, *args, **kwargs):
+        gathered_keys.append(tensor_names[id(tensor)])
+        return full_tensor(tensor, *args, **kwargs)
 
     def spy_gather_state_dict_for_save(state_dict, *args):
         gathered_keys.extend(state_dict)
         return gather_state_dict_for_save(state_dict, *args)
 
-    tensor_parallel.gather_state_dict_for_save = spy_gather_state_dict_for_save
-    try:
-        peft_state_dict = get_peft_model_state_dict(model)
-    finally:
-        tensor_parallel.gather_state_dict_for_save = gather_state_dict_for_save
+    with (
+        patch.object(DTensor, "full_tensor", spy_full_tensor),
+        patch.object(tensor_parallel, "gather_state_dict_for_save", spy_gather_state_dict_for_save),
+    ):
+        peft_state_dict = get_peft_model_state_dict(model, state_dict=state_dict)
 
     assert gathered_keys
     non_adapter_keys = [key for key in gathered_keys if "lora_" not in key]
