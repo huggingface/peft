@@ -130,6 +130,7 @@ calibration_text = (
 )
 inputs = tokenizer(calibration_text, return_tensors="pt").to(model.device)
 calibrate_activation_steering(model, {**inputs, "use_cache": False})
+model.save_pretrained("path/to/checkpoint")
 ```
 
 Replace the sample text with representative calibration data. It runs unsteered forwards and stores fixed residual scales; no actual training is needed.
@@ -163,7 +164,6 @@ from transformers.utils import logging
 
 from peft import PeftConfig, PeftModel
 
-logging.set_verbosity_error()
 set_seed(42)
 adapter_id = "your-username/qwen3.5-4b-my-intervention"
 config = PeftConfig.from_pretrained(adapter_id)

@@ -51,10 +51,6 @@ class ActivationSteeringModel(BaseTuner):
     prefix = "activation_steering_"
     tuner_layer_cls = ActivationSteeringLayer
 
-    # @staticmethod
-    # def _prepare_adapter_config(peft_config, model_config):
-    #     return peft_config
-
     @staticmethod
     def _get_spec(config, key):
         matches = [name for name in config.steering_pattern if key == name or key.endswith("." + name)]

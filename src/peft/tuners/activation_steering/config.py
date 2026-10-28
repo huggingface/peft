@@ -43,22 +43,42 @@ class ActivationSteeringConfig(PeftConfig):
     Steering adds normalized source weight columns to the block output. This is equivalent to an additive neuron edit
     before the projection only when its output feeds directly into the block's final residual addition. Model inputs
     after the primary input, including `attention_mask` and `past_key_values`, must be passed by keyword.
+
+    Example:
+
+    ```py
+    >>> from peft import ActivationSteeringConfig, TaskType
+
+    >>> config = ActivationSteeringConfig(
+    ...     base_model_name_or_path="Qwen/Qwen3.5-4B",
+    ...     task_type=TaskType.CAUSAL_LM,
+    ...     steering_pattern={
+    ...         "layers.15": {
+    ...             "source_module": "mlp.down_proj",
+    ...             "indices": [3920],
+    ...             "init_val": 0.5,
+    ...             "statistic": "median_l2",
+    ...         },
+    ...     },
+    ... )
+    ```
     """
 
     steering_pattern: dict[str, dict] = field(
         default_factory=dict,
         metadata={
             "help": (
-                "Maps block module names (exact or suffix matches) to specifications containing `source_module`, `indices`, "
-                "`init_val`, and optionally `statistic`. `source_module` names a linear projection relative to the block. "
-                "Its input-channel `indices` select weight columns, each normalized to unit L2 norm. `init_val` initializes "
-                "independent, trainable signed doses; a number broadcasts, and a list must match the number of indices. "
-                "`statistic` also broadcasts or accepts a matching list. Currently, only `'median_l2'` is supported and is "
-                "the default: scale the addition by the median outgoing residual L2 norm measured on baseline calibration "
-                "data, excluding each sequence's first valid token and padding. Call `calibrate_activation_steering` from "
-                "`peft.tuners.activation_steering` before using a new adapter. The helper pools eligible tokens across all "
-                "calibration batches and saves a fixed scale per block and adapter in the checkpoint. The scale is not "
-                "trainable; the doses can be fine-tuned after calibration. Apply additions at all non-padding positions. "
+                "Maps block module names (exact or suffix matches) to specifications containing `source_module`, "
+                "`indices`, `init_val`, and optionally `statistic`. `source_module` names a linear projection "
+                "relative to the block. Its input-channel `indices` select weight columns, each normalized to unit L2 "
+                "norm. `init_val` initializes independent, trainable signed doses; a number broadcasts, and a list "
+                "must match the number of indices. `statistic` also broadcasts or accepts a matching list. Currently, "
+                "only `'median_l2'` is supported and is the default: scale the addition by the median outgoing "
+                "residual L2 norm measured on baseline calibration data, excluding each sequence's first valid token "
+                "and padding. Call `calibrate_activation_steering` from `peft.tuners.activation_steering` before "
+                "using a new adapter. The helper pools eligible tokens across all calibration batches and saves a "
+                "fixed scale per block and adapter in the checkpoint. The scale is not trainable; the doses can be "
+                "fine-tuned after calibration. Apply additions at all non-padding positions."
             ),
         },
     )
