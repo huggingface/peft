@@ -18,26 +18,27 @@ Requires this PEFT checkout and a Transformers version supporting Qwen3.5.
 
     python examples/activation_steering/qwen3_5.py calibrate
     python examples/activation_steering/qwen3_5.py generate --prompt "Tell me a short story."
+    python examples/activation_steering/qwen3_5.py --preset sarcastiqwen calibrate
+    python examples/activation_steering/qwen3_5.py --preset sarcastiqwen generate --prompt "Tell me a short story."
 
 Calibration runs a baseline forward without optimization. The signed doses remain at their configured values.
 The saved adapter contains both the doses and the measured scales, so inference needs no recalibration.
 """
 
 import argparse
+from pathlib import Path
 
 import torch
 from transformers import AutoTokenizer, Qwen3_5ForConditionalGeneration
 
-from peft import ActivationSteeringConfig, PeftConfig, TaskType
+from peft import PeftConfig
 from peft.tuners.activation_steering import calibrate_activation_steering
 
 
-MODEL_ID = "Qwen/Qwen3.5-4B"
-MODEL_REVISION = "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
+PRESETS_DIR = Path(__file__).resolve().parent / "presets"
 
 # The original author's fallback calibration text, copied from:
-# https://github.com/lyramakesmusic/neuron-explorer/blob/5a8f8267f6bd3c8caa87d598870949ab0d25b914/explorer/runtime.py
-# This uses the fallback text rather than the author's precomputed corpus statistics.
+# https://github.com/lyramakesmusic/neuron-explorer/blob/5a8f8267f6bd3c8caa87d598870949ab0d25b914/explorer/runtime.py#L21
 REFERENCE_TEXT = (
     "The history of the region is long and varied. Farmers settled the river valley first, then traders arrived, "
     "and by the twelfth century the town had a market, a bridge, and a quarrel with its neighbours over tolls. "
@@ -48,39 +49,32 @@ REFERENCE_TEXT = (
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--adapter-path", default="qwen3.5-4b-steering")
+    parser.add_argument(
+        "--preset",
+        choices=sorted(path.name for path in PRESETS_DIR.iterdir() if (path / "adapter_config.json").is_file()),
+        default="original",
+        help="Intervention to calibrate and default checkpoint directory to use.",
+    )
+    parser.add_argument("--adapter-path", help="Checkpoint directory; defaults to a separate directory per preset.")
     parser.add_argument("--device-map", default="auto")
     parser.add_argument("--dtype", choices=["bfloat16", "float16", "float32"], default="bfloat16")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("calibrate", help="Measure baseline residual scales and save the adapter.")
+    calibrate_parser = commands.add_parser("calibrate", help="Measure baseline residual scales and save the adapter.")
+    calibrate_parser.add_argument(
+        "--reference-text", default=REFERENCE_TEXT, help="Calibration text; defaults to the author's fallback text."
+    )
     generate_parser = commands.add_parser("generate", help="Load the saved adapter using Transformers and generate.")
     generate_parser.add_argument("--prompt", default="Tell me a short story.")
     generate_parser.add_argument("--max-new-tokens", type=int, default=256)
     args = parser.parse_args()
 
-    if args.command == "calibrate":
-        config = ActivationSteeringConfig(
-            task_type=TaskType.CAUSAL_LM,
-            revision=MODEL_REVISION,
-            steering_pattern={
-                "layers.13": {
-                    "source_module": "mlp.down_proj",
-                    "indices": [7956],
-                    "init_val": -1.0,
-                    "statistic": "median_l2",
-                },
-                "layers.14": {
-                    "source_module": "mlp.down_proj",
-                    "indices": [8949],
-                    "init_val": 1.0,
-                    "statistic": "median_l2",
-                },
-            },
-        )
-        model_id, revision = MODEL_ID, MODEL_REVISION
-    else:
-        config = PeftConfig.from_pretrained(args.adapter_path)
-        model_id, revision = config.base_model_name_or_path, config.revision
+    if args.adapter_path is None:
+        suffix = "" if args.preset == "original" else f"-{args.preset}"
+        args.adapter_path = f"qwen3.5-4b-steering{suffix}"
+
+    config_path = PRESETS_DIR / args.preset if args.command == "calibrate" else args.adapter_path
+    config = PeftConfig.from_pretrained(str(config_path))
+    model_id, revision = config.base_model_name_or_path, config.revision
 
     tokenizer = AutoTokenizer.from_pretrained(model_id, revision=revision)
     model = Qwen3_5ForConditionalGeneration.from_pretrained(
@@ -90,7 +84,7 @@ def main():
 
     if args.command == "calibrate":
         model.add_adapter(config)
-        inputs = tokenizer(REFERENCE_TEXT, return_tensors="pt").to(model.device)
+        inputs = tokenizer(args.reference_text, return_tensors="pt").to(model.device)
         calibrate_activation_steering(model, {**inputs, "use_cache": False})
         model.save_pretrained(args.adapter_path)
         tokenizer.save_pretrained(args.adapter_path)
@@ -105,7 +99,14 @@ def main():
         )
         inputs = tokenizer(prompt, add_special_tokens=False, return_tensors="pt").to(model.device)
         with torch.inference_mode():
-            output = model.generate(**inputs, max_new_tokens=args.max_new_tokens, do_sample=False)
+            # The pinned config only stops on <|endoftext|>; chat turns end with <|im_end|>.
+            output = model.generate(
+                **inputs,
+                max_new_tokens=args.max_new_tokens,
+                do_sample=False,
+                eos_token_id=tokenizer.convert_tokens_to_ids(["<|endoftext|>", "<|im_end|>"]),
+                pad_token_id=tokenizer.pad_token_id,
+            )
         print(tokenizer.decode(output[0, inputs.input_ids.shape[1] :], skip_special_tokens=True))
 
 
