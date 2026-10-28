@@ -5716,6 +5716,29 @@ class TestMultipleActiveAdapters:
 
         assert torch.allclose(disabled_adapter_output, base_output, atol=1e-4)
 
+    def test_oft_merge_multiple_active_adapters_matches_forward(self):
+        # Regression test for #4052: OFT rotations compose in the opposite order on the
+        # weight than on the input, so merging multiple adapters must reverse their order.
+        torch.manual_seed(0)
+        model = MLP().to(self.torch_device).eval()
+        X = self.prepare_inputs_for_testing()
+        config_1 = OFTConfig(target_modules=["lin0"], r=2, oft_block_size=0, init_weights=False)
+        config_2 = OFTConfig(target_modules=["lin0"], r=2, oft_block_size=0, init_weights=False)
+
+        peft_model = get_peft_model(model, config_1, adapter_name="adapter_1").eval()
+        peft_model.add_adapter("adapter_2", config_2)
+        self.set_multiple_active_adapters(peft_model, ["adapter_1", "adapter_2"])
+
+        with torch.inference_mode():
+            expected = peft_model(**X)
+
+        peft_model.merge_adapter()
+
+        with torch.inference_mode():
+            merged = peft_model(**X)
+
+        assert torch.allclose(merged, expected, atol=1e-4)
+
     @pytest.mark.parametrize(
         "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
     )
