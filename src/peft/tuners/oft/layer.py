@@ -553,6 +553,9 @@ class Linear(nn.Module, OFTLayer):
         if not adapter_names:
             # no adapter to merge
             return
+        # `forward` rotates the input as x @ R1 @ R2 @ ..., so the equivalent weight update is
+        # W @ R2.T @ R1.T @ ... . As each iteration applies W @ R.T, the adapters have to be merged in
+        # reverse order to reproduce the same composition.
         for active_adapter in reversed(adapter_names):
             if active_adapter in self.oft_R.keys():
                 oft_mat = self.get_delta_weight(active_adapter)
