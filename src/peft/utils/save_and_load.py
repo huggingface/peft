@@ -177,7 +177,12 @@ def _gather_state_dict_for_save(state_dict: dict[str, torch.Tensor]) -> dict[str
     """Gather DTensors into full CPU tensors. All participating ranks must call this function."""
     # Adapted from transformers.distributed.tensor_parallel.gather_state_dict_for_save, without unused TP arguments.
     # Vendored so FSDP2 saving also works with Transformers versions that predate DTensor TP.
+    # https://github.com/huggingface/transformers/blob/144ecf007b8b4f2910da104c84a79801db6985a6/src/transformers/distributed/tensor_parallel.py#L749-L767
     from torch.distributed.tensor import DTensor
+
+    # Ordinary state dicts retain their tensors' device, layout and autograd behavior.
+    if not any(isinstance(tensor, DTensor) for tensor in state_dict.values()):
+        return state_dict
 
     gathered = {}
     for key, tensor in state_dict.items():
@@ -389,12 +394,9 @@ def get_peft_model_state_dict(
         warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
 
     if torch.distributed.is_available() and parse(torch.__version__) >= parse("2.5"):
-        from torch.distributed.tensor import DTensor
-
         # FSDP2 has no TP metadata. Gather only selected entries using each tensor's mesh and placements, so
         # unselected base model weights remain sharded.
-        if any(isinstance(tensor, DTensor) for tensor in to_return.values()):
-            to_return = _gather_state_dict_for_save(to_return)
+        to_return = _gather_state_dict_for_save(to_return)
 
     # REMOVE ADAPTER NAME
     # Key formats can be method-specific, so the removal is delegated to the tuner class, see
