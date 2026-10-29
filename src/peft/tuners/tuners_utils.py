@@ -44,7 +44,7 @@ from peft.utils.constants import (
     SEQ_CLS_HEAD_NAMES,
 )
 from peft.utils.error import NoMatchingPeftModuleError
-from peft.utils.integrations import init_empty_weights
+from peft.utils.integrations import TpMeshDimRegistry, init_empty_weights
 from peft.utils.other import (
     AuxiliaryTrainingWrapper,
     _get_module_names_tied_with_embedding,
@@ -174,16 +174,16 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     """
     if isinstance(module, nn.Linear):
         if _torch_supports_distributed and isinstance(module.weight, torch.distributed.tensor.DTensor):
-            # Sharded weight. Under Tensor Parallel the module computes on its local shard, so the LoRA
-            # layers must match the local shape. Under FSDP2 (a mesh dimension named "fsdp") the storage is
-            # sharded but the module still computes the full projection, so the full shape is the right one.
-            # A mesh with no dimension names comes from plain `fully_shard(model)`, which builds its default
-            # mesh unnamed, so it is FSDP-sharded as well.
-            mesh_dim_names = module.weight.device_mesh.mesh_dim_names or ()
-            if set(mesh_dim_names) <= {"fsdp"}:
-                in_features, out_features = module.in_features, module.out_features
-            else:
+            # Transformers TP initializes full-shaped adapters and shards them with the TP hooks afterwards.
+            # Without a Transformers TP plan, only registered TP mesh dimensions use the local shard shape.
+            # All other meshes use the full shape, as FSDP2 gathers the base weight before the projection.
+            has_tp_dim = any(
+                TpMeshDimRegistry.is_registered(name) for name in module.weight.device_mesh.mesh_dim_names or ()
+            )
+            if has_tp_dim and getattr(module, "_hf_tp_plan", None) is None:
                 out_features, in_features = module.weight.to_local().shape
+            else:
+                in_features, out_features = module.in_features, module.out_features
         else:
             in_features, out_features = module.in_features, module.out_features
     elif isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
@@ -2301,10 +2301,18 @@ class BaseTunerLayer(ABC):
             item = adapter_layer[adapter_name]
             item_dtype = getattr(item, "dtype", None)
             cast_dtype = item_dtype is None or item_dtype.is_floating_point or item_dtype.is_complex
+
+            # Note that `adapter_layer[adapter_name] = item.to(target_device, dtype=target_dtype)` always sets
+            # requires_grad=True if the device or dtype is different, even if LHS and RHS of the assignment have
+            # requires_grad=False, as a new tensor is returned. This leads to a new nn.Parameter being registered, which
+            # has requires_grad=True by default. We need to use `getattr` for nn.Identity etc.
+            requires_grad_before = getattr(item, "requires_grad", None)
             if target_dtype is not None and cast_dtype:
                 adapter_layer[adapter_name] = item.to(target_device, dtype=target_dtype)
             else:
                 adapter_layer[adapter_name] = item.to(target_device)
+            if requires_grad_before is not None:
+                adapter_layer[adapter_name].requires_grad = requires_grad_before
 
     @overload
     def _cast_input_dtype(self, x: None, dtype: torch.dtype) -> None: ...
@@ -2833,11 +2841,18 @@ def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dty
                 continue
 
             if isinstance(submodule[adapter_name], nn.Parameter):
+                # Note that the assignment below always sets requires_grad=True if the dtype is different, even if LHS
+                # and RHS of the assignment have requires_grad=False, as a new tensor is returned. This leads to a new
+                # nn.Parameter being registered, which has requires_grad=True by default. We need to use `getattr` for
+                # nn.Identity etc.
+                requires_grad_before = getattr(submodule[adapter_name], "requires_grad", None)
                 if submodule[adapter_name].dtype in dtypes_to_convert_to_fp32:
                     # Reassign through the ParameterDict rather than mutating `.data` in place: for a
                     # DTensor-backed parameter (TP), `.data = ...` only updates the outer dtype metadata
                     # while leaving the local shard's actual dtype unchanged.
                     submodule[adapter_name] = submodule[adapter_name].to(torch.float32)
+                    if requires_grad_before is not None:
+                        submodule[adapter_name].requires_grad = requires_grad_before
                 continue
 
             if isinstance(submodule[adapter_name], torch.Tensor):  # e.g. from a BufferDict

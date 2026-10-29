@@ -29,7 +29,7 @@ from peft.utils.save_and_load import get_peft_model_state_dict
 
 
 MODELS_TO_TEST = [
-    "trl-internal-testing/tiny-random-LlamaForCausalLM",
+    "peft-internal-testing/tiny-random-LlamaForCausalLM",
 ]
 
 

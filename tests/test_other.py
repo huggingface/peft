@@ -123,7 +123,7 @@ def test_load_multiple_adapters_different_modules_to_save(tmp_path):
     # This tests the error described in #2422 where loading multiple adapters with different modules_to_save
     # attributes fails (due to a regression from #2376).
 
-    model = AutoModelForCausalLM.from_pretrained("trl-internal-testing/tiny-random-LlamaForCausalLM")
+    model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-LlamaForCausalLM")
 
     def peft_config(**kwargs):
         return LoraConfig(target_modules="all-linear", **kwargs)
