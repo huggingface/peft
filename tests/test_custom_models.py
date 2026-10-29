@@ -2469,7 +2469,10 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.fixture(autouse=True)
     def allow_custom_models(self, monkeypatch):
-        # hub_online_once skips non-tiny models on MacOS runners unless is_custom_model=True is set.
+        # hub_online_once skips non-tiny models on MacOS CI runners unless is_custom_model=True is set. We want the
+        # tests in this test class to run, but the custom models are not recognized as tiny. Therefore, set
+        # is_custom_model explicitly to True. Note that this fixture is only active inside testing_common.py, so any
+        # test in this class that doesn't go through testing_common.py still must set this argument explicitly.
         monkeypatch.setattr(testing_common, "hub_online_once", partial(hub_online_once, is_custom_model=True))
 
     def prepare_inputs_for_testing(self):
@@ -2654,7 +2657,9 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip("Merging with target_parameters is not supported for all PEFT methods.")
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
 
-        with hub_online_once(model_id, is_custom_model=True):  # allow this test to run on MacOS nightly
+        # Explicitly set is_custom_modle=True to allow this test to run on MacOS CI. The monkey-patch from
+        # allow_custom_models is not active here
+        with hub_online_once(model_id, is_custom_model=True):
             base = self.transformers_class.from_pretrained(model_id)
             config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
             # Best-effort enable dropout for the various PEFT methods to check for deterministic merging.

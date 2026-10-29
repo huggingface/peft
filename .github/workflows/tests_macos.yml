@@ -6,7 +6,8 @@ on:
   workflow_dispatch:
 
 env:
-  HF_HOME: .cache/huggingface
+  # HF_HOME should be absolute so that change in working directory doesn't lead to model cache misses.
+  HF_HOME: "${{ github.workspace }}/.cache/huggingface"
 
 permissions: {}
 
@@ -26,8 +27,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: |
-            ${{ env.HF_HOME }}/hub/**
-            !${{ env.HF_HOME }}/**/*.pyc
+            ${HF_HOME}/hub/**
+            !${HF_HOME}/**/*.pyc
           key: model-cache-${{ github.run_id }}
           restore-keys: model-cache-
           enableCrossOsArchive: true
