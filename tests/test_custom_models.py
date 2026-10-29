@@ -8898,10 +8898,17 @@ class TestPeftFsdpStateDict:
 @pytest.mark.usefixtures("fsdp_process_group")
 class TestFsdp2UnshardedParams:
     """
-    Changes to `requires_grad` must reach the FSDP2 shards while a forward left unsharded parameters, see #3800.
+    Changes to `requires_grad` and merges must reach the FSDP2 shards while a forward left unsharded parameters, see
+    #3800.
     """
 
-    def get_model(self, adapter_names=("default",), reshard_after_forward=False, fsdp_module_names=("lin0",)):
+    def get_model(
+        self,
+        adapter_names=("default",),
+        reshard_after_forward=False,
+        fsdp_module_names=("lin0",),
+        randomize_lora_b=False,
+    ):
         # imported here, as FSDP2 is public from torch 2.6 on
         from torch.distributed.fsdp import fully_shard
 
@@ -8910,6 +8917,13 @@ class TestFsdp2UnshardedParams:
         model = get_peft_model(MLP(), config, adapter_name=adapter_names[0])
         for adapter_name in adapter_names[1:]:
             model.add_adapter(adapter_name, config)
+        if randomize_lora_b:
+            # lora_B is initialized to zero, which gives a zero delta, so a merge would not change the weights
+            for _, module in model.named_modules():
+                if isinstance(module, lora.LoraLayer):
+                    for adapter_name in module.lora_B:
+                        torch.manual_seed(0)
+                        module.lora_B[adapter_name].weight.data.normal_()
         mesh = init_device_mesh("cpu", (1,))
         # by default, lin0 gets its own FSDP module and lin1 belongs to the root FSDP module, which is the PeftModel
         for name in fsdp_module_names:
@@ -9073,3 +9087,46 @@ class TestFsdp2UnshardedParams:
         for name, base_weight in base_weights.items():
             weight = state_dict[f"base_model.model.{name}.base_layer.weight"].full_tensor()
             assert torch.allclose(weight, base_weight, atol=1e-6)
+
+    def test_merge_after_forward_reaches_shards(self):
+        # A merge after a forward goes into the unsharded parameters, which the next reshard drops without writing
+        # them back, so the merged weights never reach the shards that FSDP2 keeps, see #3800.
+        model = self.get_model(randomize_lora_b=True)
+        names = ("lin0", "lin1")
+        base_weights = {
+            name: model.base_model.model.get_submodule(name).base_layer.weight.full_tensor().clone() for name in names
+        }
+        deltas = {
+            name: model.base_model.model.get_submodule(name).get_delta_weight("default").full_tensor().clone()
+            for name in names
+        }
+        assert any(delta.abs().sum() > 0 for delta in deltas.values())
+
+        with torch.no_grad():
+            model(self.get_input())
+        model.merge_adapter()
+
+        # the state dict is gathered from the shards, so it only contains the merged weights if the merge reached them
+        state_dict = model.state_dict()
+        for name in names:
+            weight = state_dict[f"base_model.model.{name}.base_layer.weight"].full_tensor()
+            assert torch.allclose(weight, base_weights[name] + deltas[name], atol=1e-6)
+
+    def test_unmerge_after_forward_reaches_shards(self):
+        # The unmerge has to subtract the delta from the shards as well, otherwise the next reshard brings the merged
+        # weights back, see #3800.
+        model = self.get_model(randomize_lora_b=True)
+        names = ("lin0", "lin1")
+        base_weights = {
+            name: model.base_model.model.get_submodule(name).base_layer.weight.full_tensor().clone() for name in names
+        }
+
+        model.merge_adapter()
+        with torch.no_grad():
+            model(self.get_input())  # the forward leaves the unsharded parameters registered
+        model.unmerge_adapter()
+
+        state_dict = model.state_dict()  # reshards, so this returns the sharded weights
+        for name in names:
+            weight = state_dict[f"base_model.model.{name}.base_layer.weight"].full_tensor()
+            assert torch.allclose(weight, base_weights[name], atol=1e-6)
