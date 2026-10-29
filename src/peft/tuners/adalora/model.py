@@ -116,9 +116,9 @@ class AdaLoraModel(LoraModel):
             )
 
     def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
-        # in theory, AdaLoRA should reject addition of more than one adapter with inference_mode=False. However, a uesr
-        # could for instance add an adapter with inference_mode=False and later change the attribute to False. Thus,
-        # still check here that we never activate more than one adapter without inference_mode.
+        # In theory, AdaLoRA should reject addition of more than one adapter with inference_mode=False. However, a user
+        # could add an adapter with inference_mode=True and later change the attribute to False. Thus, still check here
+        # that we never activate more than one adapter without inference_mode.
         adapter_names = [adapter_name] if isinstance(adapter_name, str) else adapter_name
         trainable_adapters = [not self.peft_config[name].inference_mode for name in adapter_names]
         if sum(trainable_adapters) > 1:
