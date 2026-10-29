@@ -87,7 +87,7 @@ from peft.tuners import lora
 from peft.tuners.lora.config import BdLoraConfig
 from peft.tuners.lora.monteclora import MontecloraSampler
 from peft.tuners.tuners_utils import BaseTunerLayer
-from peft.utils import AuxiliaryTrainingWrapper, infer_device
+from peft.utils import infer_device
 
 from .testing_common import (
     PeftCommonTester,
@@ -3721,13 +3721,21 @@ class TestPeftCustomModel(PeftCommonTester):
         assert model.active_adapter == "other"
 
         # set both adapters as active
-        # Note: On the PeftModel, there cannot be multiple active adapters, so we have to go through model.base_model
-        # instead.
-        model.base_model.set_adapter(["default", "other"])
-        # model.active_adapters works, as it delegates to the base_model
+        if not model.base_model.supports_multiple_active_adapters(["default", "other"]):
+            with pytest.raises(ValueError, match="does not support"):
+                model.set_adapter(["default", "other"])
+            return
+        model.set_adapter(["default", "other"])
         assert model.active_adapters == ["default", "other"]
-        # model.active_adapter would not work, thus we have to check the base_model directly
+        assert model.active_adapter == "default"
         assert model.base_model.active_adapter == ["default", "other"]
+
+        model.add_adapter("third", config)
+        if model.base_model.supports_multiple_active_adapters(["default", "other", "third"]):
+            model.set_adapter(["default", "other", "third"])
+            model.delete_adapter("default")
+            assert model.active_adapters == ["other", "third"]
+            assert model.active_adapter == "other"
 
     @pytest.mark.parametrize("mixed", [False, True])
     def test_add_adapter_rejects_duplicate_name_without_mutation(self, mixed):
@@ -3749,7 +3757,8 @@ class TestPeftCustomModel(PeftCommonTester):
         for key, value in state_dict_before.items():
             assert torch.equal(state_dict_after[key], value)
 
-    def test_set_adapter_on_merged_model_warns_and_unmerges(self, recwarn):
+    @pytest.mark.parametrize("adapter_name", ["other", ["default", "other"]])
+    def test_set_adapter_on_merged_model_warns_and_unmerges(self, recwarn, adapter_name):
         # Switching the active adapter on a model with a merged layer has to unmerge that layer first, a merge
         # and a newly active adapter can't coexist, and it should warn about doing so, since the caller may not
         # expect their merge to be undone as a side effect of switching adapters.
@@ -3765,18 +3774,16 @@ class TestPeftCustomModel(PeftCommonTester):
         assert model.base_model.model.lin0.merged
 
         with pytest.warns(UserWarning, match=msg):
-            model.set_adapter("other")
+            model.set_adapter(adapter_name)
 
         assert not model.base_model.model.lin0.merged
-        assert model.active_adapter == "other"
+        assert model.active_adapters == ([adapter_name] if isinstance(adapter_name, str) else adapter_name)
 
     @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
     def test_set_adapter_non_overlapping_modules(self, config_cls):
         # Ensure that when setting multiple adapters, the active adapters are correctly being set, even if
         # target_modules that only overlap partially. Apart from checking model.set_adapter, also check
-        # model.base_model.set_adapter. Normally, users wouldn't call this, but there are situations where this is
-        # required, e.g. activating multiple adapters at once cannot be done on the PeftModel but works on LoraModel
-        # etc.
+        # model.base_model.set_adapter, which remains available as a lower-level API.
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Model has no embedding layer, skipping TrainableTokensConfig.")
         if config_cls is AdaLoraConfig:
@@ -3947,7 +3954,7 @@ class TestPeftCustomModel(PeftCommonTester):
 
         msg = "Only one adapter can be set at a time for ModulesToSaveWrapper"
         with pytest.raises(ValueError, match=msg):
-            model.base_model.set_adapter(["default", "other"])
+            model.set_adapter(["default", "other"])
 
     @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
     def test_multiple_active_adapters_with_overlapping_modules_to_save_raises(self, config_cls):
@@ -3973,7 +3980,7 @@ class TestPeftCustomModel(PeftCommonTester):
 
         msg = "Only one adapter can be set at a time for ModulesToSaveWrapper"
         with pytest.raises(ValueError, match=msg):
-            model.base_model.set_adapter(["default", "other"])
+            model.set_adapter(["default", "other"])
 
     @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
     def test_multiple_active_adapters_with_different_modules_to_save_works(self, config_cls):
@@ -3992,7 +3999,9 @@ class TestPeftCustomModel(PeftCommonTester):
         model = get_peft_model(model, config0, adapter_name="default")
         # adding the adapter is fine
         model.add_adapter("other", config1)
-        model.base_model.set_adapter(["default", "other"])  # does not raise
+        if not model.base_model.supports_multiple_active_adapters(["default", "other"]):
+            pytest.skip("The PEFT method does not support multiple active adapters.")
+        model.set_adapter(["default", "other"])  # does not raise
 
         assert model.base_model.model.layers[0].lin1.active_adapters == ["default"]
         assert model.base_model.model.layers[1].lin1.active_adapters == ["other"]
@@ -4010,7 +4019,7 @@ class TestPeftCustomModel(PeftCommonTester):
 
         msg = "Only one adapter can be set at a time for TrainableTokensWrapper"
         with pytest.raises(ValueError, match=msg):
-            model.base_model.set_adapter(["default", "other"])
+            model.set_adapter(["default", "other"])
 
     def test_multiple_active_adapters_with_different_trainable_token_indices_works(self):
         # Same test as the previous one but targeting different embedding layers should work
@@ -4028,7 +4037,7 @@ class TestPeftCustomModel(PeftCommonTester):
         model = get_peft_model(model, config0, adapter_name="default")
         # adding the adapter is fine
         model.add_adapter("other", config1)
-        model.base_model.set_adapter(["default", "other"])  # does not raise
+        model.set_adapter(["default", "other"])  # does not raise
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_disable_adapters_exiting_context_restores_previous_state(
@@ -5437,7 +5446,7 @@ class TestPeftCustomModel(PeftCommonTester):
         peft_model.eval()
 
         merged_model = copy.deepcopy(peft_model)
-        merged_model.base_model.set_adapter(adapters)
+        merged_model.set_adapter(adapters)
         merged_model.base_model.merge_adapter(adapter_names=adapters)
         merged_output = merged_model(**X)
 
@@ -5591,11 +5600,6 @@ class TestMultipleActiveAdapters:
         X = torch.arange(90).view(9, 10).to(self.torch_device)
         return {"X": X}
 
-    def set_multiple_active_adapters(self, model, adapter_names):
-        for module in model.modules():
-            if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
-                module.set_adapter(adapter_names)
-
     def resolve_model_cls(self, tuner_method):
         if tuner_method == "lora+trainable_tokens":
             # for this method we need an Embedding layer to target
@@ -5604,19 +5608,128 @@ class TestMultipleActiveAdapters:
             return MLP(bias=False)
         return MLP(bias=True)
 
-    @pytest.mark.parametrize("adapter_name", [["test-adapter"], ("test-adapter",), None])
-    def test_peft_model_multi_adapter_raises(self, adapter_name):
-        # Regression test for https://github.com/huggingface/peft/issues/3723
+    @pytest.mark.parametrize(
+        "adapter_name, error, match",
+        [
+            (("test-adapter",), TypeError, "string or a list of strings"),
+            (None, TypeError, "string or a list of strings"),
+            ([None], TypeError, "string or a list of strings"),
+            ([], ValueError, "at least one adapter"),
+            (["test-adapter", "missing"], ValueError, "missing.*not found"),
+            (["test-adapter", "test-adapter"], ValueError, "Duplicate adapter names"),
+        ],
+    )
+    def test_peft_model_invalid_adapter_names_raise(self, adapter_name, error, match):
         config = LoraConfig(target_modules=["lin0"])
         model = get_peft_model(MLP(), config, adapter_name="test-adapter")
-        msg = (
-            "PeftModel.set_adapter only supports a single adapter name as a string. "
-            "To activate multiple adapters, use model.base_model.set_adapter(adapter_names) "
-            "if the PEFT method supports it."
-        )
-        with pytest.raises(TypeError, match=re.escape(msg)):
+        with pytest.raises(error, match=match):
             model.set_adapter(adapter_name)
+
         assert model.active_adapter == "test-adapter"
+        assert model.active_adapters == ["test-adapter"]
+
+    def test_peft_model_singleton_adapter_list_and_deprecated_config(self):
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0"]))
+        model.add_adapter("other", LoraConfig(target_modules=["lin0"]))
+        model.set_adapter(["other"])
+
+        assert model.active_adapter == "other"
+        assert model.active_adapters == ["other"]
+        # TODO: remove in PEFT v1.2
+        with pytest.warns(FutureWarning, match="removed in PEFT v1.2"):
+            assert model.active_peft_config is model.peft_config["other"]
+
+    @pytest.mark.parametrize("use_base_model", [False, True])
+    @pytest.mark.parametrize("modules_to_save", [False, True])
+    def test_multiple_active_adapters_delete_representative(self, use_base_model, modules_to_save):
+        def get_config(index):
+            return LoraConfig(
+                target_modules=["layers.0.lin0"],
+                modules_to_save=[f"layers.{index}.lin1"] if modules_to_save else None,
+            )
+
+        model = get_peft_model(DeepMLP(size=16, num_hidden_layers=3), get_config(0))
+        for index, name in enumerate(["other", "third"], 1):
+            model.add_adapter(name, get_config(index))
+
+        setter = model.base_model.set_adapter if use_base_model else model.set_adapter
+        setter(["default", "other", "third"])
+        model.delete_adapter("default")
+        assert model.active_adapters == ["other", "third"]
+        # for legacy reasons, model.active_adapter is one of the active adapter(s), if any
+        assert model.active_adapter == "other"
+
+        model.delete_adapter("third")
+        assert model.active_adapter == "other"
+
+        model.delete_adapter("other")
+        assert model.active_adapter == []
+        assert model.active_adapters == []
+        assert not model.is_prompt_learning
+
+    @pytest.mark.parametrize("config_cls", [LNTuningConfig, LoraConfig])
+    def test_unsupported_multiple_active_adapters(self, config_cls):
+        # test some PEFT methods that don't support multiple active adapters; not necessarily exhaustive
+        kwargs = {"alora_invocation_tokens": [1, 2]} if config_cls is LoraConfig else {}
+        model = get_peft_model(MLP(), config_cls(target_modules=["lin0"], **kwargs))
+        model.add_adapter("other", config_cls(target_modules=["lin0"], **kwargs))
+        assert not model.base_model.supports_multiple_active_adapters(["default", "other"])
+
+        with pytest.raises(ValueError, match="does not support"):
+            model.set_adapter(["default", "other"])
+        assert model.active_adapters == ["default"]
+
+    def test_multiple_active_adapters_validation_does_not_change_modules_to_save(self):
+        # modules_to_save does not allow to set multiple active adapters that target the same module
+        model = get_peft_model(
+            DeepMLP(size=16),
+            LoraConfig(target_modules=["layers.0.lin0"], modules_to_save=["layers.0.lin1", "layers.1.lin1"]),
+        )
+        model.add_adapter("other", LoraConfig(target_modules=["layers.0.lin0"], modules_to_save=["layers.1.lin1"]))
+        model.set_adapter("other")
+        trainable_before = {name: param.requires_grad for name, param in model.named_parameters()}
+        with pytest.raises(ValueError, match="Only one adapter can be set at a time"):
+            model.set_adapter(["default", "other"])
+
+        assert model.active_adapter == "other"
+        assert model.base_model.model.layers[0].lin1.active_adapters == []
+        assert trainable_before == {name: param.requires_grad for name, param in model.named_parameters()}
+
+    @pytest.mark.parametrize("inference_mode", [False, True])
+    def test_multiple_active_adalora_adapters(self, inference_mode):
+        model = get_peft_model(MLP(), AdaLoraConfig(target_modules=["lin0"], total_step=10))
+        model.add_adapter("frozen", AdaLoraConfig(target_modules=["lin0"], total_step=10, inference_mode=True))
+        model.add_adapter("third", AdaLoraConfig(target_modules=["lin0"], total_step=10, inference_mode=True))
+        assert model.supports_multiple_active_adapters(["default", "frozen"])
+
+        # at most one adapter is allowed to be trainable
+        model.set_adapter(["default", "frozen", "third"], inference_mode=inference_mode)
+        assert model.base_model.model.lin0.lora_A["default"].requires_grad is not inference_mode
+        assert not model.base_model.model.lin0.lora_A["frozen"].requires_grad
+        assert not model.base_model.model.lin0.lora_A["third"].requires_grad
+
+        model.delete_adapter("third")
+        assert model.active_adapters == ["default", "frozen"]
+        assert not model.base_model.model.lin0.lora_A["frozen"].requires_grad
+
+    def test_adalora_rejects_multiple_active_adapters(self):
+        # in theory, AdaLoRA should reject addition of more than one adapter with inference_mode=False. However, a uesr
+        # could for instance add an adapter with inference_mode=False and later change the attribute to False. Thus,
+        # still check here that we never activate more than one adapter without inference_mode.
+        model = get_peft_model(MLP(), AdaLoraConfig(target_modules=["lin0"], total_step=10))
+        model.add_adapter("other", AdaLoraConfig(target_modules=["lin0"], total_step=10, inference_mode=True))
+        # sneaky:
+        model.peft_config["other"].inference_mode = False
+        msg = "Trying to set multiple active adapters with inference_mode=False"
+        with pytest.raises(ValueError, match=msg):
+            model.set_adapter(["default", "other"])
+
+        # nothing has changed:
+        assert model.active_adapters == ["default"]
+
+        # sanity check: only activating 'other' is allowed
+        model.set_adapter("other")
+        assert model.active_adapters == ["other"]
 
     @pytest.mark.parametrize(
         "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
@@ -5661,7 +5774,7 @@ class TestMultipleActiveAdapters:
         adapter_2_output = peft_model(**X)
 
         # set ["adapter_1", "adapter_2"]
-        self.set_multiple_active_adapters(peft_model, ["adapter_1", "adapter_2"])
+        peft_model.set_adapter(["adapter_1", "adapter_2"])
         combined_output = peft_model(**X)
 
         assert not torch.allclose(adapter_1_output, adapter_2_output, atol=1e-5)
@@ -5702,7 +5815,7 @@ class TestMultipleActiveAdapters:
         peft_model.add_adapter("adapter_2", config_2)
 
         # set ["adapter_1", "adapter_2"]
-        self.set_multiple_active_adapters(peft_model, ["adapter_1", "adapter_2"])
+        peft_model.set_adapter(["adapter_1", "adapter_2"])
         combined_output = peft_model(**X)
 
         peft_model.merge_adapter()
@@ -5882,7 +5995,7 @@ class TestMultipleActiveAdapters:
             peft_model.add_adapter(f"adapter_{i}", config())
             adapters.append(f"adapter_{i}")
 
-        self.set_multiple_active_adapters(peft_model, adapters)
+        peft_model.set_adapter(adapters)
         combined_output = peft_model(**X)
 
         peft_model.merge_adapter(safe_merge=safe_merge)
@@ -5916,7 +6029,7 @@ class TestMultipleActiveAdapters:
         peft_model.add_adapter("adapter_2", config(use_dora=True))
         adapters = ["adapter_0", "adapter_1", "adapter_2"]
 
-        self.set_multiple_active_adapters(peft_model, adapters)
+        peft_model.set_adapter(adapters)
         combined_output = peft_model(**X)
 
         peft_model.merge_adapter(safe_merge=safe_merge)
@@ -5949,7 +6062,7 @@ class TestMultipleActiveAdapters:
                 peft_model.add_adapter(f"adapter_{i}", config())
                 adapters.append(f"adapter_{i}")
 
-            self.set_multiple_active_adapters(peft_model, adapters)
+            peft_model.set_adapter(adapters)
             peft_model.merge_adapter(safe_merge=safe_merge)
             return peft_model.base_model.model.get_submodule(module_name).get_base_layer().weight.data.clone()
 

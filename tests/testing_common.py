@@ -148,7 +148,7 @@ class PeftCommonTester:
 
         # The Hub expects the lora tag to be set for PEFT LoRA models since they
         # have explicit support for things like inference.
-        if model.active_peft_config.peft_type.value == "LORA":
+        if model.peft_type.value == "LORA":
             assert "lora" in dct["tags"]
 
     def check_config_json(self, tmp_dirname, model):

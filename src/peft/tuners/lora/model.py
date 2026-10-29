@@ -269,6 +269,12 @@ class LoraModel(BaseTuner):
                     f"{sorted(other_target_parameters)} for adapter '{adapter_name}'."
                 )
 
+    def supports_multiple_active_adapters(self, adapter_names: list[str]) -> bool:
+        # aLoRA's input preprocessing computes invocation offsets for only one active adapter.
+        return len(adapter_names) <= 1 or not any(
+            getattr(self.peft_config[name], "alora_invocation_tokens", None) is not None for name in adapter_names
+        )
+
     def _create_and_replace(
         self,
         lora_config,

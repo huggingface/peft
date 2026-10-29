@@ -128,7 +128,7 @@ def test_cartridge_forward_and_save_load(tmp_path, num_frozen_tokens, base_model
     peft_config = CartridgeConfig(num_virtual_tokens=4, num_frozen_tokens=num_frozen_tokens, task_type="CAUSAL_LM")
     model = get_peft_model(base, peft_config)
 
-    assert model.active_peft_config.peft_type.value == "CARTRIDGE"
+    assert model.peft_type.value == "CARTRIDGE"
     if num_frozen_tokens:
         assert model.prompt_encoder[model.active_adapter].frozen_embedding is not None
         assert model.prompt_encoder[model.active_adapter].frozen_embedding.requires_grad is False

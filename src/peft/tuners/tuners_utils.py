@@ -1419,6 +1419,13 @@ class BaseTuner(nn.Module, ABC):
                 with onload_layer(module):
                     module.unmerge()
 
+    def supports_multiple_active_adapters(self, adapter_names: list[str]) -> bool:
+        """Whether this PEFT method supports using the given adapters together in a forward pass.
+
+        Auxiliary training modules can impose additional restrictions, checked when activating the adapters.
+        """
+        return True
+
     def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
         """Set the active adapter(s).
 
@@ -2748,7 +2755,10 @@ def set_adapter(
 def _delete_auxiliary_adapter(model, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
     for module in model.modules():
         if isinstance(module, AuxiliaryTrainingWrapper):
-            module.delete_adapter(adapter_name, new_active_adapters=new_active_adapters)
+            module_active_adapters = (
+                [name for name in new_active_adapters if name in module._adapters] if new_active_adapters else None
+            )
+            module.delete_adapter(adapter_name, new_active_adapters=module_active_adapters)
 
 
 def _check_adapters_not_merged(model: nn.Module, adapter_names: str | Sequence[str]) -> None:

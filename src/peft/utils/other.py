@@ -1012,11 +1012,9 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         if len(adapter_name) == 0:
             raise ValueError("Please specify at least one adapter to set")
 
-        # TODO In theory, multiple active trainable tokens is fine when the indices don't overlap
         adapter_names_in_module = [n for n in adapter_name if n in self.token_adapter.trainable_tokens_delta]
-
-        if len(adapter_names_in_module) > 1:
-            raise ValueError(f"Only one adapter can be set at a time for {self}, got {len(adapter_names_in_module)}")
+        # raise an error if the targeted indices to be activated intersect
+        self.token_adapter._check_overlapping_tokens(adapter_names_in_module)
 
         adapter_name_to_set: str | None
         if not adapter_names_in_module:
