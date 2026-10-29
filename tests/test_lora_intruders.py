@@ -1,3 +1,4 @@
+import copy
 from functools import partial
 from io import StringIO
 
@@ -148,3 +149,19 @@ class TestLoraIntruders:
         with pytest.raises(ValueError) as e:
             reduce_intruder_dimension(model_lin_non_lora, threshold_epsilon=999)
             assert "The provided model is not using LoRA" in str(e)
+
+    def test_lora_intruders_lowrank_matches_full_svd(self, model_lin):
+        # Make sure layers with reduced intruders with and without lowrank are the same
+        model_full = copy.deepcopy(model_lin)
+
+        reduce_intruder_dimension(model_lin, threshold_epsilon=999, use_lowrank=True, logging_sink=None)
+        reduce_intruder_dimension(model_full, threshold_epsilon=999, use_lowrank=False, logging_sink=None)
+
+        for name, module in model_lin.named_modules():
+            if "q_proj" in name and hasattr(module, "lora_B"):
+                full_module = model_full.get_submodule(name)
+                assert torch.allclose(
+                    module.lora_B["intruder_reduced"].weight,
+                    full_module.lora_B["intruder_reduced"].weight,
+                    atol=1e-5,
+                    )
