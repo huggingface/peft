@@ -1089,18 +1089,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     "This is most likely unintentional. After exiting the disable_adapter context, all adapters "
                     "will be enabled"
                 )
-            try:
-                self.base_model.disable_adapter_layers()
-                self._adapters_disabled = True
-                yield
-            finally:
-                if model_status.enabled is not False:
-                    # model_status.enabled is `True` or `"irregular"`
-                    # with FSDP2, re-enabling has to reach the sharded parameters; it decides the final state, so
-                    # disabling doesn't need to reshard
-                    self._reshard_fsdp_modules()
-                    self.base_model.enable_adapter_layers()
-                self._adapters_disabled = was_disabled
+            # model_status.enabled is `True`, `False` or `"irregular"`
+            reenable = model_status.enabled is not False
+            with self._reenable_on_fsdp_shards(reenable):
+                try:
+                    self.base_model.disable_adapter_layers()
+                    self._adapters_disabled = True
+                    yield
+                finally:
+                    if reenable:
+                        self.base_model.enable_adapter_layers()
+                    self._adapters_disabled = was_disabled
 
     def get_base_model(self) -> torch.nn.Module:
         """
@@ -1800,6 +1799,34 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 if not sharded_modules.isdisjoint(merged_modules):
                     continue
             fsdp_module.reshard()
+
+    @contextmanager
+    def _reenable_on_fsdp_shards(self, reenable: bool):
+        """
+        Context manager for `disable_adapter()` that makes re-enabling the adapter layers at its end reach the FSDP2
+        shards.
+
+        The parameters registered on entry are the shards, or unsharded copies with the same `requires_grad`. If they
+        are still registered after re-enabling, with unchanged `requires_grad`, re-enabling already reached the shards.
+        Otherwise, as when a forward inside the context replaced them, the FSDP2 modules are resharded and the adapter
+        layers are enabled again.
+        """
+        check_fsdp_params = reenable and bool(get_fsdp_modules(self))
+        if not check_fsdp_params:
+            yield
+            return
+
+        entry_params = {name: (param, param.requires_grad) for name, param in self.named_parameters()}
+        try:
+            yield
+        finally:
+            params = dict(self.named_parameters())
+            if any(
+                params.get(name) is not param or param.requires_grad != requires_grad
+                for name, (param, requires_grad) in entry_params.items()
+            ):
+                self._reshard_fsdp_modules()
+                self.base_model.enable_adapter_layers()
 
     @property
     def base_model_torch_dtype(self):
