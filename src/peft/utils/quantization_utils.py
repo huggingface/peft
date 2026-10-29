@@ -153,6 +153,12 @@ class Bnb4bitBackend(QuantizationBackend):
     backend_name = "bnb 4bit"
     layer_type = "linear"
 
+    def __init__(self) -> None:
+        # Per-block quantization scale of the unmerged base weight, kept alive between merge and
+        # unmerge so that unmerge can re-quantize on the grid the unmerged weight used. See
+        # set_base_weight.
+        self._unmerged_quant_state = None
+
     def get_base_weight(self, base_layer: nn.Module) -> torch.Tensor:
         weight = base_layer.weight
         return dequantize_bnb_weight(weight, state=weight.quant_state)
@@ -169,7 +175,22 @@ class Bnb4bitBackend(QuantizationBackend):
         kwargs.pop("data", None)
         # torch.compile can introduce attributes preceded by '_', remove them
         kwargs = {k: v for k, v in kwargs.items() if not k.startswith("_")}
-        base_layer.weight = bnb.nn.Params4bit(weight_data.to("cpu"), **kwargs).to(weight.device)
+        new_weight = bnb.nn.Params4bit(weight_data.to("cpu"), **kwargs).to(weight.device)
+
+        # Quantizing `weight_data` above computed a fresh per-block scale. Using that scale on unmerge
+        # rescales every value of a block even when its codes come back unchanged, so the base weight
+        # drifts. Reuse the scale the unmerged weight had instead. `merged_adapters` is empty both when
+        # a merge starts and when an unmerge finishes, so the saved state is what tells the two apart:
+        # it is still unset during the first merge of a cycle and set during the last unmerge.
+        if not peft_layer.merged_adapters:
+            if self._unmerged_quant_state is None:
+                self._unmerged_quant_state = weight.quant_state
+            else:
+                new_weight.quant_state = self._unmerged_quant_state
+                base_layer.quant_state = self._unmerged_quant_state
+                self._unmerged_quant_state = None
+
+        base_layer.weight = new_weight
 
     def maybe_clone_base_result(self, x: torch.Tensor) -> torch.Tensor:
         # As per Tim Dettmers, for 4bit bnb, we need to defensively clone here. The reason is that in some cases, an

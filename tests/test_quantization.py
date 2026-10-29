@@ -18,6 +18,7 @@ Test PEFT method x quantization method matrix, focusing on basic tests.
 
 from dataclasses import dataclass
 
+import packaging.version
 import pytest
 import torch
 from accelerate.utils.memory import clear_device_cache
@@ -397,29 +398,35 @@ class TestQuantization:
 
 def _bnb_4bit_cpu_quantization_available() -> bool:
     # bitsandbytes only got CPU (de)quantization kernels in 0.46.0
-    if not is_bnb_4bit_available():
+    if not is_bnb_available():
         return False
-    try:
-        from bitsandbytes.functional import dequantize_4bit, quantize_4bit
+    import bitsandbytes as bnb
 
-        quantized, state = quantize_4bit(torch.randn(64, 64), blocksize=64, quant_type="nf4")
-        dequantize_4bit(quantized, state, quant_type="nf4", blocksize=64)
-    except Exception:
-        return False
-    return True
+    return packaging.version.parse(bnb.__version__) >= packaging.version.parse("0.46.0")
+
+
+# Methods that merge 4-bit layers through the shared QuantizationBackend, rather than through LoRA's
+# own implementation. VeRA is missing because it has no delta until the user sets vera_A / vera_B.
+GENERIC_BACKEND_CASES = [
+    (BOFTConfig, {"boft_block_size": 4, "target_modules": ["q_proj", "v_proj"]}),
+    (OFTConfig, {"oft_block_size": 4, "target_modules": ["q_proj", "v_proj"]}),
+    (MissConfig, {"r": 2, "target_modules": ["q_proj", "v_proj"]}),
+    (PacaConfig, {"r": 8, "random_seed": 42, "target_modules": ["q_proj", "v_proj"]}),
+    (ShiraConfig, {"r": 8, "random_seed": 42, "target_modules": ["q_proj", "v_proj"]}),
+]
 
 
 @pytest.mark.skipif(
     not _bnb_4bit_cpu_quantization_available(),
-    reason="requires bitsandbytes with CPU 4-bit quantization support",
+    reason="requires bitsandbytes >= 0.46.0 for CPU 4-bit quantization",
 )
 class TestBnb4bitMergeUnmerge:
-    """Merging a LoRA adapter into a 4-bit layer and unmerging it must leave the base weight where it was."""
+    """Merging an adapter into a 4-bit layer and unmerging it must leave the base weight where it was."""
 
     model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
 
-    def _load_model(self):
-        # Quantize on the fly, the way a user would, rather than hand-building a bitsandbytes layer.
+    def _load_model(self, config):
+        # Quantize on the fly, like a user would.
         quant_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_use_double_quant=False,
@@ -430,17 +437,7 @@ class TestBnb4bitMergeUnmerge:
                 self.model_id, quantization_config=quant_config, device_map={"": DEVICE}
             )
         torch.manual_seed(SEED)
-        model = get_peft_model(model, LoraConfig(r=8, lora_alpha=16, target_modules=["q_proj", "v_proj"]))
-        # A delta small enough that the 4-bit codes survive a round trip unchanged, which leaves the
-        # stale block scale as the only source of drift.
-        torch.manual_seed(SEED)
-        with torch.no_grad():
-            for name, param in model.named_parameters():
-                if "lora_A" in name:
-                    param.normal_(0.0, 1.0)
-                elif "lora_B" in name:
-                    param.normal_(0.0, 1e-5)
-        return model
+        return get_peft_model(model, config)
 
     @staticmethod
     def _bnb_layers(model):
@@ -462,28 +459,45 @@ class TestBnb4bitMergeUnmerge:
         state = weight.quant_state
         return dequantize_4bit(weight.data, state, quant_type=state.quant_type, blocksize=state.blocksize)
 
+    @staticmethod
+    def _changed_fraction(model, layers, before):
+        numel = sum(weight.numel() for weight in before)
+        changed = sum((TestBnb4bitMergeUnmerge._dequantize(layer) != weight).sum().item() for layer, weight in zip(layers, before))
+        return changed / numel
+
+    def _lora_model(self):
+        model = self._load_model(
+            LoraConfig(r=8, lora_alpha=16, target_modules=["q_proj", "v_proj"], init_lora_weights=False)
+        )
+        # A delta small enough that the 4-bit codes survive a round trip unchanged, which leaves the
+        # stale block scale as the only source of drift.
+        torch.manual_seed(SEED)
+        with torch.no_grad():
+            for name, param in model.named_parameters():
+                if "lora_A" in name:
+                    param.normal_(0.0, 1.0)
+                elif "lora_B" in name:
+                    param.normal_(0.0, 1e-5)
+        return model
+
     def _drifted_fraction(self, *, keep_scale):
-        model = self._load_model()
+        """Fraction of the dequantized base weights that one LoRA merge/unmerge round trip changes."""
+        model = self._lora_model()
         layers = self._bnb_layers(model)
         before = [self._dequantize(layer) for layer in layers]
 
-        for layer in layers:
-            layer.merge()
+        model.merge_adapter()
         if not keep_scale:
             for layer in layers:
                 layer._unmerged_quant_state = None
-        for layer in layers:
-            layer.unmerge()
+        model.unmerge_adapter()
 
-        numel = sum(weight.numel() for weight in before)
-        changed = sum((self._dequantize(layer) != weight).sum().item() for layer, weight in zip(layers, before))
-        return changed / numel
+        return self._changed_fraction(model, layers, before)
 
     def test_merge_unmerge_keeps_base_weight_unchanged(self):
         # Unmerging re-quantizes the weight and bitsandbytes recomputes the per-block scale while doing
         # so. A fresh scale rescales every value of a block even when the codes are restored, so the
-        # base weight drifts. Unmerge now reuses the scale the unmerged weight had. Setting
-        # `_unmerged_quant_state` to None brings back the old behaviour, used here for comparison.
+        # base weight drifts. Unmerge now reuses the scale the unmerged weight had.
         drift_fixed = self._drifted_fraction(keep_scale=True)
         drift_legacy = self._drifted_fraction(keep_scale=False)
 
@@ -491,15 +505,28 @@ class TestBnb4bitMergeUnmerge:
         assert drift_fixed < drift_legacy / 10, (drift_fixed, drift_legacy)
         assert drift_fixed < 0.01, drift_fixed
 
-    def test_unmerge_restores_block_scale(self):
-        model = self._load_model()
+    @pytest.mark.parametrize("config_cls,config_kwargs", GENERIC_BACKEND_CASES, ids=_peft_id)
+    def test_merge_unmerge_keeps_base_weight_unchanged_generic_backend(self, config_cls, config_kwargs):
+        """The same has to hold for the methods that merge through the shared QuantizationBackend."""
+        model = self._load_model(config_cls(**config_kwargs))
+        # A freshly initialized adapter is the identity transform, so give it a small delta first, one
+        # small enough that the 4-bit codes survive a round trip unchanged and the stale block scale is
+        # the only source of drift.
+        with torch.no_grad():
+            torch.manual_seed(SEED)
+            for param in model.parameters():
+                if param.requires_grad:
+                    param.add_(torch.randn_like(param) * 3e-5)
+
         layers = self._bnb_layers(model)
-        scale_before = [layer.get_base_layer().weight.quant_state.absmax.clone() for layer in layers]
+        before = [self._dequantize(layer) for layer in layers]
 
-        for layer in layers:
-            layer.merge()
-        for layer in layers:
-            layer.unmerge()
+        model.merge_adapter()
+        merged = [self._dequantize(layer) for layer in layers]
+        model.unmerge_adapter()
 
-        for layer, scale in zip(layers, scale_before):
-            assert torch.equal(layer.get_base_layer().weight.quant_state.absmax, scale)
+        # The adapter has to actually move the base weight, otherwise this test proves nothing.
+        assert any(not torch.equal(after, original) for after, original in zip(merged, before))
+
+        changed = self._changed_fraction(model, layers, before)
+        assert changed < 0.01, changed
