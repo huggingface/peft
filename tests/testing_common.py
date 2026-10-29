@@ -32,10 +32,15 @@ from safetensors.torch import load_file, save_file
 
 from peft import (
     AdaLoraConfig,
+    BeftConfig,
     BOFTConfig,
+    C3AConfig,
     CPTConfig,
+    DeloraConfig,
+    GloraConfig,
     GraloraConfig,
     HiraConfig,
+    HRAConfig,
     IA3Config,
     LilyConfig,
     LNTuningConfig,
@@ -43,15 +48,20 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     MissConfig,
+    OFTConfig,
     OSFConfig,
+    PacaConfig,
     PeftModel,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptLearningConfig,
     PromptTuningConfig,
+    PsoftConfig,
     PveraConfig,
     RoadConfig,
     ShadowConfig,
+    ShiraConfig,
+    SupertuningConfig,
     UniLoraConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -78,6 +88,27 @@ from peft.utils import (
 )
 
 from .testing_utils import get_state_dict, hub_online_once
+
+
+# PEFT methods that don't support transformers' Conv1D layers (used by GPT2)
+CONV1D_UNSUPPORTED_CONFIGS = (
+    BeftConfig,
+    BOFTConfig,
+    C3AConfig,
+    DeloraConfig,
+    GloraConfig,
+    HRAConfig,
+    LoHaConfig,
+    LoKrConfig,
+    MissConfig,
+    OFTConfig,
+    OSFConfig,
+    PacaConfig,
+    PsoftConfig,
+    RoadConfig,
+    ShiraConfig,
+    SupertuningConfig,
+)
 
 
 def skip_non_prompt_learning(config_cls):
@@ -110,7 +141,7 @@ def _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs):
     if "gpt2" not in model_id.lower():
         return
 
-    if config_cls not in (IA3Config, LoHaConfig, LoKrConfig, LoraConfig):
+    if config_cls in CONV1D_UNSUPPORTED_CONFIGS:
         pytest.skip("This PEFT method does not support Conv1D layers, skipping this test.")
 
 
