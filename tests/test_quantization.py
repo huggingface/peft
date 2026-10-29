@@ -32,7 +32,6 @@ from peft import (
     ShiraConfig,
     VeraConfig,
     get_peft_model,
-    inject_adapter_in_model,
 )
 from peft.import_utils import (
     is_bnb_4bit_available,
@@ -415,63 +414,92 @@ def _bnb_4bit_cpu_quantization_available() -> bool:
     reason="requires bitsandbytes with CPU 4-bit quantization support",
 )
 class TestBnb4bitMergeUnmerge:
-    def test_merge_unmerge_keeps_base_weight_unchanged(self):
-        # Unmerging re-quantizes the weight and bitsandbytes recomputes the per-block scale while
-        # doing so. A fresh scale rescales all values of a block even when the codes are restored, so
-        # the base weight drifts. Unmerge now reuses the scale the unmerged weight had. Setting
-        # `_unmerged_quant_state` to None brings back the old behaviour, used here for comparison.
+    """Merging a LoRA adapter into a 4-bit layer and unmerging it must leave the base weight where it was."""
+
+    model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+
+    def _load_model(self):
+        # Quantize on the fly, the way a user would, rather than hand-building a bitsandbytes layer.
+        quant_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=False,
+            bnb_4bit_compute_dtype=torch.float32,
+        )
+        with hub_online_once(self.model_id):
+            model = AutoModelForCausalLM.from_pretrained(
+                self.model_id, quantization_config=quant_config, device_map={"": DEVICE}
+            )
+        torch.manual_seed(SEED)
+        model = get_peft_model(model, LoraConfig(r=8, lora_alpha=16, target_modules=["q_proj", "v_proj"]))
+        # A delta small enough that the 4-bit codes survive a round trip unchanged, which leaves the
+        # stale block scale as the only source of drift.
+        torch.manual_seed(SEED)
+        with torch.no_grad():
+            for name, param in model.named_parameters():
+                if "lora_A" in name:
+                    param.normal_(0.0, 1.0)
+                elif "lora_B" in name:
+                    param.normal_(0.0, 1e-5)
+        return model
+
+    @staticmethod
+    def _bnb_layers(model):
         import bitsandbytes as bnb
+
+        layers = [
+            module
+            for module in model.modules()
+            if isinstance(module, BaseTunerLayer) and isinstance(module.get_base_layer(), bnb.nn.Linear4bit)
+        ]
+        assert len(layers) == 10  # (q_proj, v_proj) x 5 layers
+        return layers
+
+    @staticmethod
+    def _dequantize(layer):
         from bitsandbytes.functional import dequantize_4bit
 
-        class TinyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.proj = bnb.nn.Linear4bit(32, 64, bias=False, quant_type="nf4", compute_dtype=torch.float32)
-                self.proj = self.proj.to("cpu")
+        weight = layer.get_base_layer().weight
+        state = weight.quant_state
+        return dequantize_4bit(weight.data, state, quant_type=state.quant_type, blocksize=state.blocksize)
 
-            def forward(self, x):
-                return self.proj(x)
+    def _drifted_fraction(self, *, keep_scale):
+        model = self._load_model()
+        layers = self._bnb_layers(model)
+        before = [self._dequantize(layer) for layer in layers]
 
-        def build_layer():
-            torch.manual_seed(0)
-            base = TinyModel()
-            # selects PEFT's bnb LoRA layer, the quantization ops used here run on CPU
-            base.is_loaded_in_4bit = True
-            model = inject_adapter_in_model(LoraConfig(r=8, lora_alpha=16, target_modules=["proj"]), base)
-            # a small delta, as for a model that is still training
-            with torch.no_grad():
-                for name, param in model.named_parameters():
-                    if "lora_A" in name:
-                        param.normal_(0.0, 1.0)
-                    elif "lora_B" in name:
-                        param.normal_(0.0, 5e-4)
-            return next(module for module in model.modules() if hasattr(module, "lora_A"))
-
-        def dequantize(layer):
-            weight = layer.get_base_layer().weight
-            return dequantize_4bit(
-                weight.data, weight.quant_state, quant_type="nf4", blocksize=weight.quant_state.blocksize
-            )
-
-        def drifted_fraction(*, keep_scale):
-            layer = build_layer()
-            before = dequantize(layer)
+        for layer in layers:
             layer.merge()
-            if not keep_scale:
+        if not keep_scale:
+            for layer in layers:
                 layer._unmerged_quant_state = None
+        for layer in layers:
             layer.unmerge()
-            return (dequantize(layer) != before).float().mean().item()
 
-        drift_fixed = drifted_fraction(keep_scale=True)
-        drift_legacy = drifted_fraction(keep_scale=False)
+        numel = sum(weight.numel() for weight in before)
+        changed = sum((self._dequantize(layer) != weight).sum().item() for layer, weight in zip(layers, before))
+        return changed / numel
+
+    def test_merge_unmerge_keeps_base_weight_unchanged(self):
+        # Unmerging re-quantizes the weight and bitsandbytes recomputes the per-block scale while doing
+        # so. A fresh scale rescales every value of a block even when the codes are restored, so the
+        # base weight drifts. Unmerge now reuses the scale the unmerged weight had. Setting
+        # `_unmerged_quant_state` to None brings back the old behaviour, used here for comparison.
+        drift_fixed = self._drifted_fraction(keep_scale=True)
+        drift_legacy = self._drifted_fraction(keep_scale=False)
 
         assert drift_legacy > 0.5, f"expected the previous behaviour to drift, got {drift_legacy}"
         assert drift_fixed < drift_legacy / 10, (drift_fixed, drift_legacy)
         assert drift_fixed < 0.01, drift_fixed
 
-        # the per-block scale has to be restored exactly
-        layer = build_layer()
-        scale_before = layer.get_base_layer().weight.quant_state.absmax.clone()
-        layer.merge()
-        layer.unmerge()
-        assert torch.equal(layer.get_base_layer().weight.quant_state.absmax, scale_before)
+    def test_unmerge_restores_block_scale(self):
+        model = self._load_model()
+        layers = self._bnb_layers(model)
+        scale_before = [layer.get_base_layer().weight.quant_state.absmax.clone() for layer in layers]
+
+        for layer in layers:
+            layer.merge()
+        for layer in layers:
+            layer.unmerge()
+
+        for layer, scale in zip(layers, scale_before):
+            assert torch.equal(layer.get_base_layer().weight.quant_state.absmax, scale)
