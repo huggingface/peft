@@ -88,9 +88,8 @@ def reduce_intruder_dimension(
             but slower per layer. Too low over-flags.
 
     """
-    # Note that this function currently doesn't support `compile_kwargs` similar to the LoRA conversion tooling
-    # since there's was no clear way how `torch.compile` can be used to improve performance at the time of
-    # implementation. See discussion: https://github.com/huggingface/peft/pull/2999#discussion_r2717989613
+    # Note torch.compile not implemented, since 98% of time spend on GPU with torch.linalg.svd
+    # which is already optimised through cuSOLVER (LAPACK for CPU)
 
     def no_logging_sink(*args, **kwargs):
         pass
