@@ -442,7 +442,7 @@ class HRAConv2d(nn.Module, HRALayer):
                         x = self._apply_delta_weight_to_input(x, active_adapter)
                     x = x.permute(0, 3, 1, 2)
                     x = x.to(dtype=orig_dtype)
-                    result = base_layer._conv_forward(x, base_layer.weight, base_layer.bias)
+                    result = base_layer._conv_forward(x, base_layer.weight, bias=base_layer.bias)
                 else:
                     height, width = self._get_output_size(x)
                     padding = base_layer.padding

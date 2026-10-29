@@ -794,7 +794,9 @@ class Conv2d(nn.Module, OFTLayer):
             # no adapter to merge
             return
 
-        # Weight rotations compose in the opposite order to input rotations.
+        # `forward` rotates the input as x @ R1 @ R2 @ ..., so the equivalent weight update is
+        # W @ R2.T @ R1.T @ ... . As each iteration applies W @ R.T, the adapters have to be merged in
+        # reverse order to reproduce the same composition.
         for active_adapter in reversed(adapter_names):
             if active_adapter in self.oft_R.keys():
                 base_layer = self.get_base_layer()

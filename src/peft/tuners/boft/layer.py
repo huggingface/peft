@@ -993,7 +993,7 @@ class Conv2d(nn.Module, BOFTLayer):
             )
             x = self._cast_input_dtype(x, scaled_rotated_weight.dtype)
             bias = self._cast_input_dtype(self.base_layer.bias, scaled_rotated_weight.dtype)
-            result = self.base_layer._conv_forward(x, scaled_rotated_weight, bias)
+            result = self.base_layer._conv_forward(x, scaled_rotated_weight, bias=bias)
 
         result = result.to(previous_dtype)
         return result

@@ -245,7 +245,7 @@ class _DoraConvNdLayer(DoraLinearLayer):
         mag_norm_scale = magnitude / weight_norm
 
         if base_result is None:
-            base_result = base_layer._conv_forward(x, weight, None)
+            base_result = base_layer._conv_forward(x, weight, bias=None)
         else:
             bias = base_layer.bias
             if bias is not None:

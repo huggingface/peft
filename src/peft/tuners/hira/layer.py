@@ -600,7 +600,7 @@ class _ConvNd(nn.Module, HiraLayer):
                 # element-wise modulate base weight: W0 ⊙ (B@A)
                 base_weight = base.weight
                 eff_weight = base_weight * bia
-                hira_out = base._conv_forward(x_drop, eff_weight, None)
+                hira_out = base._conv_forward(x_drop, eff_weight, bias=None)
                 result = result + hira_out
 
             result = result.to(torch_result_dtype)

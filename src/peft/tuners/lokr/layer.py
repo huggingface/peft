@@ -378,7 +378,7 @@ class Conv2d(LoKrLayer):
         input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()
-        return base_layer._conv_forward(input, delta_weight, None)
+        return base_layer._conv_forward(input, delta_weight, bias=None)
 
     def __repr__(self) -> str:
         rep = super().__repr__()
@@ -413,7 +413,7 @@ class Conv1d(LoKrLayer):
         input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()
-        return base_layer._conv_forward(input, delta_weight, None)
+        return base_layer._conv_forward(input, delta_weight, bias=None)
 
     def __repr__(self) -> str:
         rep = super().__repr__()
