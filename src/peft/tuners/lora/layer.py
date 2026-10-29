@@ -311,8 +311,12 @@ class LoraLayer(BaseTunerLayer):
         elif init_lora_weights == "lora_ga":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.lora_ga_init(adapter_name, config.lora_ga_config)
+        elif init_lora_weights == "nora":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.nora_init(adapter_name)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
+
         # call this before init of the lora variants
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self._sync_tp_replicated_lora_weights(adapter_name)
@@ -332,6 +336,26 @@ class LoraLayer(BaseTunerLayer):
             for adapter in self.lora_variant:
                 if adapter in self.lora_arrow:
                     self.lora_arrow[adapter].on_adapter_change(self.lora_A, self.lora_B)
+
+    def nora_init(self, adapter_name):
+        # When the adapter is being created under `init_empty_weights` (e.g. low_cpu_mem_usage=True), its parameters
+        # live on the meta device and will be filled in from a checkpoint after creation. Skip in that case.
+        if self.lora_B[adapter_name].weight.device.type == "meta":
+            return
+        with torch.no_grad():
+            A = self.lora_A[adapter_name].weight
+            num_experts = getattr(self, "num_experts", 1)
+            if num_experts > 1:
+                # For 3d parameters (e.g. MoE expert weights), A stacks one (r, in_features) block per expert along
+                # the first dimension, so normalize the columns of each block independently.
+                A = A.view(num_experts, self.r[adapter_name], -1)
+                A.div_(A.norm(dim=1, keepdim=True).clamp_min(1e-6))
+            else:
+                A.div_(A.norm(dim=0, keepdim=True).clamp_min(1e-6))
+
+        nn.init.zeros_(self.lora_B[adapter_name].weight)
+        if self.lora_bias[adapter_name]:
+            nn.init.zeros_(self.lora_B[adapter_name].bias)
 
     def reset_lora_parameters(self, adapter_name, init_lora_weights):
         if init_lora_weights is not False:
@@ -419,7 +443,8 @@ class LoraLayer(BaseTunerLayer):
 
         scale_factor = self.scaling[adapter_name]
         r = self.r[adapter_name]
-        weight_tensor = weight_tensor.to(torch.float32)
+        # Factorize in the Linear layout even when the base layer stores (fan_in, fan_out), as in GPT-2.
+        weight_tensor = transpose(weight_tensor.to(torch.float32), self.fan_in_fan_out)
         Q, R = torch.linalg.qr(weight_tensor.data)
 
         Qr, Rr = Q[:, :r], R[:r]
@@ -428,6 +453,7 @@ class LoraLayer(BaseTunerLayer):
         self.lora_B[adapter_name].weight.data = Qr.contiguous()
 
         weight_tensor.data -= scale_factor * self.lora_B[adapter_name].weight @ self.lora_A[adapter_name].weight
+        weight_tensor = transpose(weight_tensor, self.fan_in_fan_out)
         if bnb_param_type == "4bit":
             weight_tensor = orig_weight.__class__(
                 weight_tensor,
@@ -672,7 +698,7 @@ class LoraLayer(BaseTunerLayer):
         del linear.eigens
 
     def loftq_init(self, adapter_name, config: LoraConfig):
-        weight = self.get_base_layer().weight
+        weight = transpose(self.get_base_layer().weight, self.fan_in_fan_out)
         kwargs = {
             "num_bits": config.loftq_config["loftq_bits"],
             "reduced_rank": self.r[adapter_name],
@@ -684,11 +710,7 @@ class LoraLayer(BaseTunerLayer):
             # initialize A the same way as the default for nn.Linear and B to zero
             self.lora_A[adapter_name].weight.data = lora_A
             self.lora_B[adapter_name].weight.data = lora_B
-        if adapter_name in self.lora_embedding_A.keys():
-            # initialize a the same way as the default for nn.linear and b to zero
-            self.lora_embedding_A[adapter_name].weight.data = lora_A
-            self.lora_embedding_B[adapter_name].weight.data = lora_B
-        self.get_base_layer().weight.data = qweight
+        self.get_base_layer().weight.data = transpose(qweight, self.fan_in_fan_out)
 
     @torch.no_grad()
     def orthogonal_init(self, adapter_name):
@@ -788,7 +810,7 @@ class LoraLayer(BaseTunerLayer):
             lora_B_weight = U[:, indices] @ torch.diag(S_B)  # Shape: (out_features, r)
 
         scaling_factor = self.scaling[adapter_name]
-        out_features = weight.shape[0]
+        out_features = self.out_features
 
         if scale == "stable":
             scale_factor = (out_features**0.25) / (stable_gamma**0.5)
@@ -1347,10 +1369,8 @@ class Embedding(nn.Module, LoraLayer):
         if isinstance(init_lora_weights, str) and init_lora_weights.lower() == "mica":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.mica_init(adapter_name)
-        elif init_lora_weights == "loftq":
-            self.loftq_init(adapter_name)
-        elif init_lora_weights == "lora_ga":
-            # Embedding layers don't support LoRA-GA, fall back to standard initialization
+        elif init_lora_weights in ("loftq", "lora_ga"):
+            # Embedding layers don't support LoftQ or LoRA-GA, fall back to standard initialization
             self.reset_lora_parameters(adapter_name, True)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
@@ -1740,10 +1760,8 @@ class _ConvNd(nn.Module, LoraLayer):
 
         self.use_dora[adapter_name] = config.use_dora
 
-        if init_lora_weights == "loftq":
-            self.loftq_init(adapter_name)
-        elif init_lora_weights == "lora_ga":
-            # Conv layers don't support LoRA-GA, fall back to standard initialization
+        if init_lora_weights in ("loftq", "lora_ga"):
+            # Conv layers don't support LoftQ or LoRA-GA, fall back to standard initialization
             self.reset_lora_parameters(adapter_name, True)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
@@ -2039,6 +2057,11 @@ class MultiheadAttention(nn.Module, LoraLayer):
             raise ValueError(f"{self.__class__.__name__} does not support KaSA, please set `kasa_config=None`.")
         if kwargs.get("use_alora", False):
             raise ValueError(f"{self.__class__.__name__} does not support aLoRA (yet), please set use_alora to False")
+        if config.init_lora_weights == "loftq":
+            raise ValueError(
+                f"{self.__class__.__name__} does not support init_lora_weights='loftq', please use a different "
+                "init_lora_weights"
+            )
         super().__init__()
         LoraLayer.__init__(self, base_layer, **kwargs)
 
@@ -2117,10 +2140,21 @@ class MultiheadAttention(nn.Module, LoraLayer):
     def add_zero_attn(self) -> bool:
         return self.get_base_layer().add_zero_attn
 
-    def update_layer(self, *args, **kwargs) -> None:
-        super().update_layer(*args, **kwargs)
+    def update_layer(self, *args, config: LoraConfig, **kwargs) -> None:
+        # lora_bias is not applied correctly for MHA and there is no use case for it, see #3935. Checking it here covers
+        # both __init__ and adding another adapter to an existing layer.
+        if config.lora_bias:
+            raise ValueError(
+                f"{self.__class__.__name__} does not support lora_bias=True, please set lora_bias to False"
+            )
+        if config.init_lora_weights == "loftq":
+            raise ValueError(
+                f"{self.__class__.__name__} does not support init_lora_weights='loftq', please use a different "
+                "init_lora_weights"
+            )
+        super().update_layer(*args, config=config, **kwargs)
         # Note: LoRA is applied to both in_proj and out_proj. There is currently no way to only specify one of them.
-        self.base_layer.out_proj.update_layer(*args, **kwargs)
+        self.base_layer.out_proj.update_layer(*args, config=config, **kwargs)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -2585,7 +2619,7 @@ class ParamWrapper(nn.Module, LoraLayer):
                 self.olora_init(adapter_name)
         elif init_lora_weights == "loftq":
             with gather_params_ctx(self.get_base_layer().weight):
-                self.loftq_init(adapter_name)
+                self.loftq_init(adapter_name, config)
         elif init_lora_weights == "eva":
             nn.init.zeros_(self.lora_B[adapter_name].weight)
         elif init_lora_weights == "orthogonal":
@@ -2594,6 +2628,9 @@ class ParamWrapper(nn.Module, LoraLayer):
         elif init_lora_weights == "lora_ga":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.lora_ga_init(adapter_name, config.lora_ga_config)
+        elif init_lora_weights == "nora":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.nora_init(adapter_name)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
         # call this before init of the lora variants
@@ -2622,10 +2659,14 @@ class ParamWrapper(nn.Module, LoraLayer):
             if any(p.device == meta for p in adapter_layer.parameters()):
                 continue
 
+            item = adapter_layer[adapter_name]
+            requires_grad_before = getattr(item, "requires_grad", None)
             if param.dtype.is_floating_point or param.dtype.is_complex:
-                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device, dtype=param.dtype)
+                adapter_layer[adapter_name] = item.to(device, dtype=param.dtype)
             else:
-                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device)
+                adapter_layer[adapter_name] = item.to(device)
+            if requires_grad_before is not None:
+                adapter_layer[adapter_name].requires_grad = requires_grad_before
 
     def get_param(self):
         param = getattr(self.get_base_layer(), self.parameter_name)

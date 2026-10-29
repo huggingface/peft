@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import copy
-import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -33,14 +32,10 @@ from tests.testing_utils import hub_online_once
 @pytest.fixture(scope="module")
 def workdir(tmp_path_factory):
     """
-    Create a temp directory and chdir into it for the duration of the module.
+    Create a temp directory for the duration of the module.
     """
-    wd = tmp_path_factory.mktemp("arrow_workdir")
-    old_cwd = os.getcwd()
-    os.chdir(wd)
-    yield Path(wd)
-    os.chdir(old_cwd)
-    # (pytest will auto-delete wd)
+    return tmp_path_factory.mktemp("arrow_workdir")
+    # (pytest will auto-delete it)
 
 
 def _create_and_save_adapter(out_dir: Path, rank: int = 4):

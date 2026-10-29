@@ -63,7 +63,7 @@ from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .inc import dispatch_inc
-from .layer import LoraLayer, MultiheadAttention, ParamWrapper, _ConvNd, dispatch_default
+from .layer import Embedding, LoraLayer, MultiheadAttention, ParamWrapper, _ConvNd, dispatch_default
 from .te import dispatch_transformer_engine
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
@@ -127,38 +127,16 @@ def get_tp_plan_and_mesh(model, current_key: str):
     return plan_name, tp_mesh
 
 
-def add_lora_tp_hooks_dtensor(
-    tp_module: nn.Module, tp_plan_name: str, device_mesh, *, base_layer: nn.Module, module_name: str
-) -> None:
-    from torch.distributed.tensor import DTensor, Shard
+def add_lora_tp_hooks_dtensor(tp_module: nn.Module, tp_plan_name: str, device_mesh, *, module_name: str) -> None:
     from transformers.distributed.tensor_parallel import ALL_PARALLEL_STYLES
 
     style = ALL_PARALLEL_STYLES[tp_plan_name]
     if tp_plan_name not in ("colwise", "rowwise"):
         raise ValueError(f"Unsupported TP plan {tp_plan_name} for LoRA: only colwise and rowwise are supported.")
 
-    shard_dim = 0 if tp_plan_name == "colwise" else 1
-    for p_name, param in list(tp_module.named_parameters(recurse=False)):
+    for p_name, _ in list(tp_module.named_parameters(recurse=False)):
         style.validate_param(tp_module, p_name, device_mesh, parameter_name=f"{module_name}.{p_name}")
-        global_shape = list(param.shape)
-        global_shape[shard_dim] = base_layer.weight.shape[shard_dim]
-        if param.shape == torch.Size(global_shape):
-            # The adapter was initialized with global dimensions, so we can shard it directly.
-            style.shard_param(tp_module, p_name, device_mesh)
-        else:
-            # The adapter was initialized with local dimensions, so wrap it without sharding a second time.
-            global_stride = torch.empty(global_shape, device="meta").stride()
-            tp_module._parameters[p_name] = nn.Parameter(
-                DTensor.from_local(
-                    param,
-                    device_mesh,
-                    [Shard(shard_dim)],
-                    run_check=False,
-                    shape=torch.Size(global_shape),
-                    stride=global_stride,
-                ),
-                requires_grad=param.requires_grad,
-            )
+        style.shard_param(tp_module, p_name, device_mesh)
     style.install_forward(tp_module, device_mesh)
 
 
@@ -441,7 +419,6 @@ class LoraModel(BaseTuner):
                             tp_module,
                             tp_plan,
                             device_mesh,
-                            base_layer=base_layer,
                             module_name=tp_layer_name[0],
                         )
                     else:
@@ -724,6 +701,26 @@ class LoraModel(BaseTuner):
                 raise ValueError(
                     f"add_weighted_adapter does not support targeting nn.Parameter (problematic adapter '{adapter}')"
                 )
+            if self.peft_config[adapter].use_dora:
+                raise ValueError(f"add_weighted_adapter does not support DoRA (problematic adapter '{adapter}')")
+            if self.peft_config[adapter].kasa_config is not None:
+                raise ValueError(f"add_weighted_adapter does not support KaSA (problematic adapter '{adapter}')")
+
+        # the combined adapter needs lora_bias as soon as one source has it, but an embedding rejects it outright
+        bias_adapters = [adapter for adapter in adapters if self.peft_config[adapter].lora_bias]
+        if bias_adapters:
+            embedding_modules = [module for module in self.modules() if isinstance(module, Embedding)]
+            embedding_adapters = [
+                adapter
+                for adapter in adapters
+                if any(adapter in module.lora_embedding_A for module in embedding_modules)
+            ]
+            if embedding_adapters:
+                raise ValueError(
+                    f"add_weighted_adapter does not support lora_bias combined with nn.Embedding targeting: adapters "
+                    f"{bias_adapters} use lora_bias=True while adapters {embedding_adapters} target an nn.Embedding, "
+                    f"which does not support a bias. Leave either group out of the call."
+                )
 
         # If more than one of the adapters targets the same module with modules_to_save, raise an error, as these
         # modules cannot be merged. First, find the ModulesToSaveWrapper instances in the model, then check if they
@@ -872,6 +869,7 @@ class LoraModel(BaseTuner):
             r=new_rank,
             lora_alpha=new_rank,
             use_rslora=False,
+            lora_bias=any(self.peft_config[adapter].lora_bias for adapter in adapters),
             target_modules=new_target_modules,
             alpha_pattern={},
             rank_pattern={},
@@ -941,6 +939,14 @@ class LoraModel(BaseTuner):
                     target_lora_A.data, target_lora_B.data = self._generalized_task_arithmetic_weighted_adapter(
                         combination_type, adapters, weights, target, density, majority_sign_method
                     )
+
+                if target.lora_bias[adapter_name]:
+                    # the bias adds to the output independently of the lora_A/lora_B factorization
+                    new_bias = torch.zeros_like(target.lora_B[adapter_name].bias)
+                    for adapter, weight in zip(adapters, weights):
+                        if adapter in target.lora_B and target.lora_bias[adapter]:
+                            new_bias += weight * target.scaling[adapter] * target.lora_B[adapter].bias.data
+                    target.lora_B[adapter_name].bias.data = new_bias
 
     def _svd_generalized_task_arithmetic_weighted_adapter(
         self,

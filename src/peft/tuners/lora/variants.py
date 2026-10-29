@@ -995,7 +995,7 @@ class BdLoraLinearVariant(LoraVariant):
             r = module.lora_A[adapter_name].out_features
             base_layer = module.get_base_layer()
             layer = BlockDiagonalLinear(
-                base_layer.in_features,
+                module.in_features,
                 r,
                 nblocks=nblocks,
                 init_zero=False,
@@ -1008,7 +1008,7 @@ class BdLoraLinearVariant(LoraVariant):
             base_layer = module.get_base_layer()
             layer = BlockDiagonalLinear(
                 r,
-                base_layer.out_features,
+                module.out_features,
                 nblocks=nblocks,
                 init_zero=True,
                 dtype=base_layer.weight.dtype,

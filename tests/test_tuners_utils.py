@@ -580,7 +580,7 @@ class TestTargetedParameterNames:
         assert model.targeted_parameter_names == ["lin0.weight", "lin1.weight"]
 
     def test_realistic_example(self):
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
         config = LoraConfig(target_modules=[], task_type="CAUSAL_LM", target_parameters=["v_proj.weight"])
@@ -651,6 +651,52 @@ class TestExcludedModuleNames:
         model = get_peft_model(model, LoraConfig(target_modules=["lin0"]))
         with pytest.raises(NoMatchingPeftModuleError, match="Target modules .* not found in the base model"):
             model.add_adapter("other", LoraConfig(target_modules=["non_existent_module"]))
+
+    def test_failed_second_adapter_injection_does_not_leave_orphaned_parameters(self):
+        # Make the first target valid and the second target invalid for a Mamba model. The failed add_adapter call must
+        # not leave the valid target partially updated even though validation fails later in the target list.
+        class MambaLikeModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.safe = nn.Linear(4, 4, bias=False)
+                self.out_proj = nn.Linear(4, 4, bias=False)
+                self.config = type("Config", (), {"model_type": "mamba"})()
+
+            def forward(self, inputs):
+                return self.out_proj(self.safe(inputs))
+
+        model = get_peft_model(MambaLikeModel(), LoraConfig(target_modules=["safe"]))
+
+        with pytest.raises(ValueError, match="incompatible with Mamba-based models"):
+            model.add_adapter("other", LoraConfig(target_modules=["safe", "out_proj"]))
+
+        # Rolling back the config is not enough: the failed adapter must not remain in the model state dict either.
+        assert list(model.peft_config) == ["default"]
+        assert not any(".other." in key for key in model.state_dict())
+
+    def test_failed_initial_adapter_injection_does_not_mutate_model(self):
+        # Snapshot a plain base model before a later target rejects the initial adapter injection.
+        class MambaLikeModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.safe = nn.Linear(4, 4, bias=False)
+                self.out_proj = nn.Linear(4, 4, bias=False)
+                self.config = type("Config", (), {"model_type": "mamba"})()
+
+            def forward(self, inputs):
+                return self.out_proj(self.safe(inputs))
+
+        model = MambaLikeModel()
+        state_dict_before = deepcopy(model.state_dict())
+
+        with pytest.raises(ValueError, match="incompatible with Mamba-based models"):
+            get_peft_model(model, LoraConfig(target_modules=["safe", "out_proj"]))
+
+        # A failed first injection must leave both the model structure and its registered parameters unchanged.
+        assert not hasattr(model, "peft_config")
+        assert set(model.state_dict()) == set(state_dict_before)
+        for key, value in state_dict_before.items():
+            assert torch.equal(model.state_dict()[key], value)
 
     def test_second_adapter_only_modules_to_save_raises(self):
         # A second adapter is held to the same standard as a first one: if its target_modules match nothing, it
@@ -2625,6 +2671,37 @@ class TestRankAndAlphaPattern:
         assert model.module.foobar.scaling["default"] == 1.0
         assert model.module.module.foo.scaling["default"] == 0.125
         assert model.module.module.barfoo.scaling["default"] == 1.0
+
+    @pytest.mark.parametrize("pattern", ["rank_pattern", "alpha_pattern"])
+    def test_overlapping_pattern_keys_order_survives_save_load(self, model, pattern, tmp_path):
+        # When more than one key matches a module, the first key in dict order wins. The order used to be lost on
+        # save, since the keys were written sorted, so the reloaded adapter resolved to a different rank or alpha.
+        # See #3818. Here, the keys are not in alphabetical order.
+        base_model = deepcopy(model)
+        config = LoraConfig(
+            target_modules="all-linear", init_lora_weights=False, **{pattern: {"module.foo": 16, "foo": 4}}
+        )
+        model = get_peft_model(model, config)
+        model.save_pretrained(tmp_path)
+
+        with open(tmp_path / "adapter_config.json") as f:
+            assert list(json.load(f)[pattern]) == ["module.foo", "foo"]
+
+        # Before the fix, loading failed with a shape mismatch for rank_pattern, since module.foo was created with
+        # rank 4 instead of 16. For alpha_pattern, loading worked but the scaling of module.foo was incorrect.
+        loaded = PeftModel.from_pretrained(base_model, tmp_path)
+        for name in ["foo", "module.foo", "module.module.foo"]:
+            layer, layer_loaded = (
+                model.get_submodule(f"base_model.model.{name}"),
+                loaded.get_submodule(f"base_model.model.{name}"),
+            )
+            assert layer.r["default"] == layer_loaded.r["default"]
+            assert layer.scaling["default"] == layer_loaded.scaling["default"]
+
+        x = torch.rand(5, 1)
+        outer, outer_loaded = model.base_model.model, loaded.base_model.model
+        for name in ["foo", "module.foo", "module.module.foo"]:
+            assert torch.allclose(outer.get_submodule(name)(x), outer_loaded.get_submodule(name)(x))
 
 
 class TestTunerStateDictKeyPrefixes:

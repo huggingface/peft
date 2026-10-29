@@ -511,7 +511,7 @@ class TestDoraCaching:
     def test_dora_caching_linear(self):
         # ensure that the results don't change due to caching
         inputs = torch.arange(10).view(1, -1).to(self.device)
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         config = LoraConfig(init_lora_weights=False, use_dora=True)
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
@@ -520,7 +520,7 @@ class TestDoraCaching:
     def test_dora_caching_embedding(self):
         # ensure that the results don't change due to caching
         inputs = torch.arange(10).view(1, -1).to(self.device)
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         config = LoraConfig(init_lora_weights=False, use_dora=True, target_modules=["model.embed_tokens"])
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)

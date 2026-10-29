@@ -419,7 +419,7 @@ class TestActivatedLora:
         assert "Beam search not yet supported for aLoRA." in str(e.value)
 
     def test_gradient_checkpointing_double_forward_raises(self):
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
 
         with hub_online_once(model_id):
             base_model = AutoModelForCausalLM.from_pretrained(model_id)
@@ -438,7 +438,7 @@ class TestActivatedLora:
                 lora_model.forward(**inputs)
 
     def test_gradient_checkpointing_dpo_doesnt_raise(self):
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
 
         with hub_online_once(model_id):
             base_model = AutoModelForCausalLM.from_pretrained(model_id)
