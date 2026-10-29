@@ -164,4 +164,4 @@ class TestLoraIntruders:
                     module.lora_B["intruder_reduced"].weight,
                     full_module.lora_B["intruder_reduced"].weight,
                     atol=1e-5,
-                    )
+                )
