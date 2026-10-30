@@ -5000,19 +5000,26 @@ class TestInactiveAdapterHotSwapping:
         # adapter; incompatible configs should raise without changing any model parameters.
         base_model = nn.Sequential(nn.Linear(10, 5))
         current_config = LoraConfig(target_modules=["0"], r=2, init_lora_weights=False, **{config_key: value})
+        # Hotswap incompatibility is achieved by ignoring the additional config_key/value pair.
         incoming_config = deepcopy(current_config) if compatible else LoraConfig(target_modules=["0"], r=2)
+
         model = get_peft_model(deepcopy(base_model), LoraConfig(target_modules=["0"], r=2)).eval()
         model.add_adapter("other", current_config)
         model.eval()
+
+        incoming_path = tmp_path
         incoming = get_peft_model(deepcopy(base_model), incoming_config).eval()
-        incoming.save_pretrained(tmp_path)
+        incoming.save_pretrained(incoming_path)
+
         inputs = torch.randn(3, 10)
         with torch.inference_mode():
             active_output = model(inputs)
             incoming_output = incoming(inputs)
 
         if compatible:
-            hotswap_adapter(model, tmp_path, adapter_name="other", torch_device="cpu")
+            # Replacing inactive adapter "other" must preserve the active "default" output. After activating
+            # "other", its output must match "incoming" rather than the adapter weights it replaced.
+            hotswap_adapter(model, incoming_path, adapter_name="other", torch_device="cpu")
             assert model.active_adapters == ["default"]
             with torch.inference_mode():
                 torch.testing.assert_close(model(inputs), active_output)
@@ -5021,7 +5028,7 @@ class TestInactiveAdapterHotSwapping:
         else:
             before = {name: parameter.detach().clone() for name, parameter in model.named_parameters()}
             with pytest.raises(ValueError, match=f"Configs are incompatible: for {config_key}"):
-                hotswap_adapter(model, tmp_path, adapter_name="other", torch_device="cpu")
+                hotswap_adapter(model, incoming_path, adapter_name="other", torch_device="cpu")
             assert model.active_adapters == ["default"]
             for name, parameter in model.named_parameters():
                 torch.testing.assert_close(parameter, before[name])
