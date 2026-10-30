@@ -2353,24 +2353,41 @@ class MultiheadAttention(nn.Module, LoraLayer):
     # from accelerate.
     @skip_init_on_device
     def _restore_weights(self):
-        # Restore the weights as registered parameters on the base layer.
-        # This is necessary because the way that weights are merged/unmerged (which is necessary for forward to work
-        # correctly), the Module "forgets" these attributes. Therefore, we need to call register_parameter explicitly.
-        # We cannot call register_parameter for merging/unmerging because that cuts them off from the autograd graph.
-        # Note that this is hacky, since we need to ensure that _restore_weights is called by each method that needs it.
+        # Merging replaces the base parameters with tensors to preserve the LoRA autograd graph. A normal forward
+        # automatically merges and then unmerges again, which re-registers the parameters. After an explicit
+        # merge_adapter(), however, they remain unregistered and would be missing from state_dict() and
+        # named_parameters(). Restore them before saving, loading, converting, or enumerating parameters.
 
         # in_proj
         # TODO work with separate weights
         base_layer = self.get_base_layer()
         weight = base_layer.in_proj_weight
-        del base_layer.in_proj_weight
-        base_layer.register_parameter("in_proj_weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad))
+        # FSDP2 tracks parameter identities across module traversals. Only restore weights that merging replaced.
+        if not isinstance(weight, nn.Parameter):
+            del base_layer.in_proj_weight
+            base_layer.register_parameter(
+                "in_proj_weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad)
+            )
 
         # out_proj
         base_layer = base_layer.out_proj.get_base_layer()
         weight = base_layer.weight
-        del base_layer.weight
-        base_layer.register_parameter("weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad))
+        if not isinstance(weight, nn.Parameter):
+            del base_layer.weight
+            base_layer.register_parameter("weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad))
+
+    def _apply(self, fn, recurse=True):
+        # changes in dtype, device, etc.
+        self._restore_weights()
+        return super()._apply(fn, recurse=recurse)
+
+    def _load_from_state_dict(
+        self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+    ):
+        self._restore_weights()
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+        )
 
     def state_dict(self, *args, **kwargs):
         self._restore_weights()

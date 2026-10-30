@@ -702,7 +702,11 @@ class PeftCommonTester:
             model.eval()
             logits = model(**dummy_input)[0]
 
+            state_dict_keys = set(model.state_dict())
             model.merge_adapter()
+            # Merging must not drop weights from the state dict. This could for instance happen with LoRA MHA if not
+            # handled correctly.
+            assert set(model.state_dict()) == state_dict_keys
             logits_merged = model(**dummy_input)[0]
             model.unmerge_adapter()
             logits_unmerged = model(**dummy_input)[0]
@@ -851,6 +855,48 @@ class PeftCommonTester:
                 logits_merged_adapter_default = model_merged_adapter_default(**dummy_input)[0]
 
             assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=atol, rtol=rtol)
+
+    def _test_merge_layers_conversion(self, model_id, config_cls, config_kwargs, conversion_kwargs):
+        # Checks that after a merge, all expected state dict items are present and have the correct dtype and
+        # device. This could for instance be an issue when not correctly handled by LoRA's MHA layer.
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs)
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            model = get_peft_model(model, config_cls(base_model_name_or_path=model_id, **config_kwargs))
+            state_dict_before = model.state_dict()
+            model.merge_adapter()
+
+            model.to(**conversion_kwargs)
+            state_dict_after = model.state_dict()
+            assert state_dict_after.keys() == state_dict_before.keys()
+            for name, tensor in state_dict_before.items():
+                expected_dtype = tensor.dtype
+                if tensor.is_floating_point() or tensor.is_complex():
+                    expected_dtype = conversion_kwargs.get("dtype", expected_dtype)
+                expected_device = torch.device(conversion_kwargs.get("device", tensor.device))
+                assert state_dict_after[name].dtype == expected_dtype, name
+                assert state_dict_after[name].device == expected_device, name
+
+    def _test_merge_layers_load_state_dict(self, model_id, config_cls, config_kwargs):
+        # Checks that after a merge, all expected parameters are registered as expected. This could for instance be an
+        # issue when not correctly handled by LoRA's MHA layer.
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs)
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            model = get_peft_model(model, config_cls(base_model_name_or_path=model_id, **config_kwargs))
+            # Different values ensure that silently ignoring unregistered weights cannot pass.
+            state_dict = {name: torch.ones_like(tensor) for name, tensor in model.state_dict().items()}
+            model.merge_adapter()
+
+            model.load_state_dict(state_dict)
+            loaded_state_dict = model.state_dict()
+            assert loaded_state_dict.keys() == state_dict.keys()
+            for name, tensor in state_dict.items():
+                assert torch.equal(loaded_state_dict[name], tensor), name
 
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)

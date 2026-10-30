@@ -2689,6 +2689,21 @@ class TestPeftCustomModel(PeftCommonTester):
         self._test_merge_layers_fp16(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    @pytest.mark.parametrize(
+        "conversion_kwargs",
+        [{"dtype": torch.float64}, {"device": "meta"}],
+        ids=["dtype", "device"],
+    )
+    def test_merge_layers_conversion(self, test_name, model_id, config_cls, config_kwargs, conversion_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_merge_layers_conversion(model_id, config_cls, config_kwargs, conversion_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_merge_layers_load_state_dict(self, test_name, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_merge_layers_load_state_dict(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_is_idempotent(self, test_name, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
@@ -5207,6 +5222,22 @@ class TestPeftCustomModel(PeftCommonTester):
         model.base_model.model.mha._restore_weights()
         assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is True
         assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is True
+
+    @pytest.mark.parametrize("merged", [False, True])
+    def test_lora_mha_traversal_preserves_parameter_identity(self, merged):
+        model = get_peft_model(ModelMha(), LoraConfig(target_modules=["mha"]))
+        if merged:
+            model.merge_adapter()
+        model.state_dict()
+        mha = model.base_model.model.mha.base_layer
+        in_proj_weight = mha.in_proj_weight
+        out_proj_weight = mha.out_proj.base_layer.weight
+
+        model.state_dict()
+        list(model.named_modules())
+
+        assert mha.in_proj_weight is in_proj_weight
+        assert mha.out_proj.base_layer.weight is out_proj_weight
 
     def test_mha_merge_applies_delta_weight_once(self):
         # check for this bug: https://github.com/huggingface/peft/pull/3774
