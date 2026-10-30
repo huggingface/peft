@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import copy
+import math
 from typing import Any, Union
 
 import pytest
@@ -24,6 +25,10 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     DataCollatorForLanguageModeling,
+    GPT2Config,
+    GPT2LMHeadModel,
+    LlamaConfig,
+    LlamaForCausalLM,
     Trainer,
     TrainingArguments,
 )
@@ -374,6 +379,88 @@ def test_cpt_forward_loss_matches_reference(adapter_name, loss_type):
         weights[cpt_type_mask[:, 1:] == 4] = config.opt_loss_decay_factor
     expected_loss = (token_losses * weights)[keep[:, 1:]].mean()
     assert torch.allclose(output.loss, expected_loss, atol=1e-4, rtol=1e-4)
+
+
+@pytest.mark.parametrize(
+    "model_class, model_config",
+    [
+        pytest.param(
+            GPT2LMHeadModel,
+            GPT2Config(
+                vocab_size=32,
+                n_layer=1,
+                n_head=2,
+                n_embd=16,
+                n_positions=32,
+                resid_pdrop=0,
+                embd_pdrop=0,
+                attn_pdrop=0,
+            ),
+            id="gpt2",
+        ),
+        pytest.param(
+            LlamaForCausalLM,
+            LlamaConfig(
+                vocab_size=32,
+                num_hidden_layers=1,
+                num_attention_heads=2,
+                num_key_value_heads=2,
+                hidden_size=16,
+                intermediate_size=32,
+            ),
+            id="llama",
+        ),
+    ],
+)
+@pytest.mark.parametrize("prefix_types", [None, [1, 2, 3], [1, 2, 3, 4], [1, 2, 3, 4, 5]])
+@pytest.mark.parametrize("explicit_input_mask", [False, True])
+@pytest.mark.parametrize("weighted_loss", ["none", "decay"])
+def test_cpt_partial_context_keeps_input_labels(
+    model_class, model_config, prefix_types, explicit_input_mask, weighted_loss
+):
+    # CPT uses four token types per demonstration; only positive multiples of four contribute to the loss.
+    # Input types must be shifted past the context types without changing their roles. With an incomplete context,
+    # an offset not divisible by four masks input answers (#3899), yielding NaN when no context answer remains.
+    # Fixed logits let us write the expected answer losses explicitly for incomplete and complete contexts.
+    torch.manual_seed(0)
+    config_kwargs = (
+        {}
+        if prefix_types is None
+        else {"cpt_token_ids": list(range(len(prefix_types))), "cpt_tokens_type_mask": prefix_types}
+    )
+    config = CPTConfig(
+        task_type=TaskType.CAUSAL_LM,
+        opt_weighted_loss_type=weighted_loss,
+        opt_loss_decay_factor=0.95,
+        **config_kwargs,
+    )
+    model = get_peft_model(model_class(model_config), config).eval()
+    input_ids = torch.tensor([[5, 6, 7, 8], [8, 7, 6, 5]])
+    input_types = torch.tensor([[1, 2, 4, 4], [0, 4, 2, 4]]) if explicit_input_mask else torch.full_like(input_ids, 4)
+    kwargs = {"input_type_mask": input_types.clone()} if explicit_input_mask else {}
+
+    # Logit j is always j, so an answer token t has loss log(sum(exp(j), j=0..31)) - t.
+    with model.base_model.get_output_embeddings().register_forward_hook(
+        lambda module, inputs, output: torch.arange(32, device=output.device, dtype=output.dtype).expand_as(output)
+    ):
+        output = model(input_ids=input_ids, labels=input_ids.clone(), **kwargs)
+
+    log_normalizer = math.log(sum(math.exp(j) for j in range(32)))
+    if explicit_input_mask:
+        # The two samples select answers [7, 8] and [7, 5].
+        loss_sum = 4 * log_normalizer - (7 + 8 + 7 + 5)
+        label_count = 4
+    else:
+        # Without a mask, all four input tokens in each sample contribute.
+        loss_sum = 8 * log_normalizer - 2 * (5 + 6 + 7 + 8)
+        label_count = 8
+    if prefix_types in ([1, 2, 3, 4], [1, 2, 3, 4, 5]):
+        # Each sample also has one context answer, token 3, weighted by 0.95 only in decay mode.
+        context_weight = 0.95 if weighted_loss == "decay" else 1
+        loss_sum += 2 * context_weight * (log_normalizer - 3)
+        label_count += 2
+
+    torch.testing.assert_close(output.loss, output.loss.new_tensor(loss_sum / label_count))
 
 
 @pytest.mark.parametrize("decay_factor", [0.25, 0.5])
