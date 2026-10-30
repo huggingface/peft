@@ -75,7 +75,7 @@ from peft import (
     get_peft_model,
 )
 
-from .testing_common import PeftCommonTester, skip_non_prompt_learning
+from .testing_common import CONV1D_UNSUPPORTED_CONFIGS, PeftCommonTester, skip_non_prompt_learning
 from .testing_utils import device_count, hub_online_once, load_dataset_english_quotes, set_init_weights_false
 
 
@@ -463,25 +463,8 @@ ALL_CONFIGS = [
 
 
 def _skip_if_not_conv1d_supported(model_id, config_cls):
-    if "GPT2LMHeadModel" in model_id and config_cls in [
-        BeftConfig,
-        BOFTConfig,
-        GloraConfig,
-        HRAConfig,
-        OFTConfig,
-        OSFConfig,
-        PacaConfig,
-        RoadConfig,
-        ShiraConfig,
-        SupertuningConfig,
-        C3AConfig,
-        MissConfig,
-        DeloraConfig,
-        PsoftConfig,
-    ]:
-        pytest.skip(
-            "Skipping Beft/BOFT/GLoRA/HRA/OFT/PaCA/Road/SHiRA/Supertuning/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel"
-        )
+    if "GPT2LMHeadModel" in model_id and config_cls in CONV1D_UNSUPPORTED_CONFIGS:
+        pytest.skip("This PEFT method does not support Conv1D layers, skipping this test.")
 
 
 def _skip_alora_no_activation(config_cls, config_kwargs):
