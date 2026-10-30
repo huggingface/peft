@@ -47,6 +47,8 @@ from .peft_model import (
     get_model_status,
 )
 from .tuners import (
+    ActivationSteeringConfig,
+    ActivationSteeringModel,
     AdaLoraConfig,
     AdaLoraModel,
     AdamssConfig,
@@ -189,6 +191,8 @@ __all__ = [
     "PEFT_TYPE_TO_MIXED_MODEL_MAPPING",
     "PEFT_TYPE_TO_TUNER_MAPPING",
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
+    "ActivationSteeringConfig",
+    "ActivationSteeringModel",
     "AdaLoraConfig",
     "AdaLoraModel",
     "AdamssConfig",

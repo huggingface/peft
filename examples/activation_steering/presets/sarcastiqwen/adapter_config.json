@@ -1,0 +1,17 @@
+{
+  "base_model_name_or_path": "Qwen/Qwen3.5-4B",
+  "inference_mode": false,
+  "peft_type": "ACTIVATION_STEERING",
+  "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+  "steering_pattern": {
+    "layers.15": {
+      "indices": [
+        3920
+      ],
+      "init_val": 1.0,
+      "source_module": "mlp.down_proj",
+      "statistic": "median_l2"
+    }
+  },
+  "task_type": "CAUSAL_LM"
+}

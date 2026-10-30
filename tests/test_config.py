@@ -23,6 +23,7 @@ import warnings
 import pytest
 
 from peft import (
+    ActivationSteeringConfig,
     AdaLoraConfig,
     AdamssConfig,
     AdaptionPromptConfig,
@@ -93,6 +94,10 @@ PEFT_MODELS_TO_TEST = [("peft-internal-testing/tiny-opt-lora-revision", "test")]
 
 # Config classes and their mandatory parameters
 ALL_CONFIG_CLASSES = (
+    (
+        ActivationSteeringConfig,
+        {"steering_pattern": {"layers.0": {"source_module": "mlp.down_proj", "indices": [0], "init_val": 0.1}}},
+    ),
     (AdaLoraConfig, {"total_step": 1}),
     (AdamssConfig, {}),
     (AdaptionPromptConfig, {}),
@@ -205,6 +210,8 @@ class TestPeftConfig:
                 mandatory_config_kwargs = {"total_step": 1}
             elif expected_cls == CPTConfig:
                 mandatory_config_kwargs = {"task_type": TaskType.CAUSAL_LM}
+            elif expected_cls == ActivationSteeringConfig:
+                mandatory_config_kwargs = dict(ALL_CONFIG_CLASSES)[ActivationSteeringConfig]
 
             config = PeftConfig.from_peft_type(peft_type=peft_type, **mandatory_config_kwargs)
             assert type(config) is expected_cls
