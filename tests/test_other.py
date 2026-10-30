@@ -536,6 +536,45 @@ class TestModulesToSaveUnloadOriginalModule:
             assert unloaded.lin1 is trained_lin1
             assert torch.allclose(out_unloaded, out_peft, atol=1e-6, rtol=1e-6)
 
+    @pytest.mark.parametrize(
+        "active_adapter, adapter_names",
+        [
+            ("default", ["other"]),
+            ("default", []),
+            ("other", ["other", "default"]),
+        ],
+    )
+    def test_merge_modules_to_save_partial_selection(self, mlp, active_adapter, adapter_names):
+        x = torch.randn(4, 8)
+        original_lin1 = mlp.lin1
+        model = get_peft_model(mlp, LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])).eval()
+        model.add_adapter("other", LoraConfig(target_modules=["lin0"]))
+        saved_lin1 = model.base_model.model.lin1.modules_to_save["default"]
+        saved_lin1.reset_parameters()
+
+        expected_module = saved_lin1 if "default" in adapter_names else original_lin1
+        # Both backbone adapters are no-ops, so only the selected saved module affects the expected output.
+        expected = expected_module(model.base_model.model.lin0(x))
+        model.set_adapter(active_adapter)
+
+        merged = model.merge_and_unload(adapter_names=adapter_names)
+
+        assert merged.lin1 is expected_module
+        torch.testing.assert_close(merged(x), expected)
+
+    def test_merge_modules_to_save_ambiguous_selection_leaves_model_unchanged(self, mlp):
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_lora_weights=False)
+        model = get_peft_model(mlp, config).eval()
+        model.add_adapter("other", copy.deepcopy(config))
+        state_dict = {key: value.clone() for key, value in model.state_dict().items()}
+
+        with pytest.raises(ValueError, match="Only one adapter"):
+            model.merge_and_unload(adapter_names=["default", "other"])
+
+        assert model.state_dict().keys() == state_dict.keys()
+        for key, value in model.state_dict().items():
+            torch.testing.assert_close(value, state_dict[key])
+
     # Trainable tokens are used either alongside LoRA via trainable_token_indices, or as a standalone PEFT method
     @pytest.mark.parametrize(
         "config_cls, config_kwargs",

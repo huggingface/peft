@@ -802,6 +802,11 @@ class PeftCommonTester:
 
             torch.manual_seed(1)
             model.add_adapter("adapter-2", config)
+            # Saved modules must differ so exporting an inactive adapter also checks which copy is retained.
+            for module in model.modules():
+                if isinstance(module, ModulesToSaveWrapper):
+                    for parameter in module.modules_to_save["adapter-2"].parameters():
+                        torch.nn.init.normal_(parameter, std=0.1)
             model.set_adapter("adapter-2")
             model.eval()
 
@@ -830,14 +835,6 @@ class PeftCommonTester:
 
             model_copy = copy.deepcopy(model)
             model_copy_2 = copy.deepcopy(model)
-            model_merged_all = model.merge_and_unload(adapter_names=["adapter-2", "default"])
-
-            with torch.inference_mode():
-                logits_merged_all = model_merged_all(**dummy_input)[0]
-
-            assert not torch.allclose(logits_merged_all, logits_adapter_2, atol=atol, rtol=rtol)
-            assert not torch.allclose(logits_merged_all, logits_adapter_1, atol=atol, rtol=rtol)
-
             model_merged_adapter_2 = model_copy.merge_and_unload(adapter_names=["adapter-2"])
 
             with torch.inference_mode():
@@ -851,6 +848,17 @@ class PeftCommonTester:
                 logits_merged_adapter_default = model_merged_adapter_default(**dummy_input)[0]
 
             assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=atol, rtol=rtol)
+
+            if any(isinstance(module, ModulesToSaveWrapper) for module in model.modules()):
+                with pytest.raises(ValueError, match="Only one adapter"):
+                    model.merge_and_unload(adapter_names=["adapter-2", "default"])
+            else:
+                model_merged_all = model.merge_and_unload(adapter_names=["adapter-2", "default"])
+                with torch.inference_mode():
+                    logits_merged_all = model_merged_all(**dummy_input)[0]
+
+                assert not torch.allclose(logits_merged_all, logits_adapter_2, atol=atol, rtol=rtol)
+                assert not torch.allclose(logits_merged_all, logits_adapter_1, atol=atol, rtol=rtol)
 
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)

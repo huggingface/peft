@@ -47,6 +47,7 @@ from peft.utils.error import NoMatchingPeftModuleError
 from peft.utils.integrations import TpMeshDimRegistry, init_empty_weights
 from peft.utils.other import (
     AuxiliaryTrainingWrapper,
+    ModulesToSaveWrapper,
     _get_module_names_tied_with_embedding,
     _set_adapter,
     _set_layer_requires_grad,
@@ -722,6 +723,11 @@ class BaseTuner(nn.Module, ABC):
     ) -> None:
         if merge:
             self._check_merge_allowed()
+            if adapter_names:
+                # Reject ambiguous saved-module selections before merging or unloading any layers.
+                for module in self.model.modules():
+                    if isinstance(module, ModulesToSaveWrapper):
+                        module.check_set_adapter(adapter_names)
 
         # visit all modules except those inside tuner layers (e.g. lora_A), note that the tuner layers themselves must
         # be part of the list, as they are the ones being unloaded; a module lies inside a tuner layer if its parent
