@@ -816,6 +816,9 @@ class ShadowModel(BaseTuner):
 
     # ------------------------------------------------------------------------------------- PEFT tuner interface
 
+    def supports_multiple_active_adapters(self, adapter_names: list[str]) -> bool:
+        return len(adapter_names) <= 1
+
     def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
         adapter_names = [adapter_name] if isinstance(adapter_name, str) else adapter_name
         if len(adapter_names) != 1:

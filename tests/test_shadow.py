@@ -218,6 +218,10 @@ class TestShadowCausalLM:
         assert not torch.allclose(default_out, other_out, atol=1e-5)
         assert torch.allclose(default_out, default_again, atol=1e-6)
 
+        assert not tuner.supports_multiple_active_adapters(["default", "other"])
+        with pytest.raises(ValueError, match="does not support"):
+            model.set_adapter(["default", "other"])
+
         with pytest.raises(ValueError, match="exactly one active adapter"):
             model.base_model.set_adapter(["default", "other"])
         assert model.active_adapters == ["default"]

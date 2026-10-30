@@ -65,6 +65,9 @@ class LNTuningModel(BaseTuner):
     tuner_layer_cls = LNTuningLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING
 
+    def supports_multiple_active_adapters(self, adapter_names: list[str]) -> bool:
+        return len(adapter_names) <= 1
+
     def _create_and_replace(
         self,
         peft_config: PeftConfig,

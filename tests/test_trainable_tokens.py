@@ -674,6 +674,19 @@ class TestTrainableTokens:
         assert not torch.allclose(emb_image_orig[:, [0, 1]], emb_image_peft[:, [0, 1]])
         assert torch.allclose(emb_image_orig[:, [2]], emb_image_peft[:, [2]])
 
+    @pytest.mark.parametrize("other_indices, supported", [([1], False), ([2], True)])
+    def test_multiple_active_adapters_capability(self, other_indices, supported):
+        model = get_peft_model(ModelEmb(), TrainableTokensConfig(token_indices=[0, 1]))
+        model.add_adapter("other", TrainableTokensConfig(token_indices=other_indices))
+        assert model.base_model.supports_multiple_active_adapters(["default", "other"]) is supported
+        if supported:
+            model.set_adapter(["default", "other"])
+            assert torch.isfinite(model(torch.tensor([[0, 1, 2]]))).all()
+        else:
+            with pytest.raises(ValueError, match="does not support"):
+                model.set_adapter(["default", "other"])
+            assert model.active_adapters == ["default"]
+
     @pytest.fixture(params=[["default"], ["other"], ["default", "other"]])
     def disjoint_adapters(self, model_multi_embedding, request):
         active_adapters = request.param
@@ -683,7 +696,7 @@ class TestTrainableTokens:
         model.add_adapter("other", TrainableTokensConfig(target_modules=["emb_image"], token_indices=[0, 1]))
         self.simulate_training(model.model.emb_text)
         self.simulate_training(model.model.emb_image, "other")
-        model.base_model.set_adapter(active_adapters)
+        model.set_adapter(active_adapters)
 
         inputs = {"x_text": torch.tensor([[0, 1, 2]]), "x_image": torch.tensor([[0, 1, 2]])}
         return model, original_model, inputs

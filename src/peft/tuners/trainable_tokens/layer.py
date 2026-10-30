@@ -177,7 +177,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             index_set = set(self.token_indices[adapter_name])
             if len(indices.intersection(index_set)):
                 raise ValueError(
-                    f"Token indices of adapter {adapter_name} are already defined and would result in "
+                    f"Token indices of adapter '{adapter_name}' are already defined and would result in "
                     "undefined merging behavior. Only disjunct token indices are currently supported."
                 )
             indices.update(index_set)

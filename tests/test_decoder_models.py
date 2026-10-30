@@ -718,6 +718,11 @@ class TestDecoderModels(PeftCommonTester):
             frozen_config = config_cls(**{**config_kwargs, "inference_mode": True})
             model.add_adapter("frozen", frozen_config)
             assert not any(param.requires_grad for param in model.prompt_encoder["frozen"].parameters())
+            assert model.is_prompt_learning
+            model.set_adapter(["default"])
+            with pytest.raises(ValueError, match="does not support"):
+                model.set_adapter(["default", "frozen"])
+            assert model.active_adapters == ["default"]
             # Adding the inactive inference-only adapter leaves the default adapter trainable.
             assert any(param.requires_grad for param in model.prompt_encoder["default"].parameters())
 
@@ -930,7 +935,7 @@ class TestDecoderModels(PeftCommonTester):
             assert output.loss is not None
             assert torch.isfinite(output.loss)
 
-            num_virtual_tokens = model.active_peft_config.num_virtual_tokens
+            num_virtual_tokens = model.peft_config[model.active_adapter].num_virtual_tokens
             seq_len = inputs["input_ids"].shape[1]
             if config_cls == PrefixTuningConfig:
                 # prefix tuning extends the KV cache, not the input sequence
