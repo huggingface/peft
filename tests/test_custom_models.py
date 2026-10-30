@@ -5177,6 +5177,22 @@ class TestPeftCustomModel(PeftCommonTester):
         assert trainable_params1 == trainable_params2 == trainable_params3
         assert all_params1 == all_params2 == all_params3
 
+    @pytest.mark.parametrize("operation", ["named_modules", "state_dict", "_restore_weights"])
+    def test_mha_parameter_identity_is_stable(self, operation):
+        model = get_peft_model(ModelMha(), LoraConfig(target_modules=["mha"]))
+        mha = model.base_model.model.mha
+        base = mha.get_base_layer()
+        in_proj_weight = base.in_proj_weight
+        out_proj_weight = base.out_proj.get_base_layer().weight
+        if operation == "named_modules":
+            list(model.named_modules())
+        elif operation == "state_dict":
+            model.state_dict()
+        else:
+            mha._restore_weights()
+        assert base.in_proj_weight is in_proj_weight
+        assert base.out_proj.get_base_layer().weight is out_proj_weight
+
     @pytest.mark.parametrize("with_forward_call", [False, True])
     def test_mha_gradients_set_correctly(self, with_forward_call):
         # check for this bug: https://github.com/huggingface/peft/issues/761#issuecomment-1893804738
@@ -8794,8 +8810,9 @@ class TestPeftFsdpStateDict:
         X = torch.arange(90).view(9, 10).to(self.torch_device)
         return {"X": X}
 
+    @pytest.mark.parametrize("fsdp_version", [pytest.param(1, id="fsdp1"), pytest.param(2, id="fsdp2")])
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
-    def test_save_load_roundtrip_fsdp_wrapped(self, test_name, model_id, config_cls, config_kwargs):
+    def test_save_load_roundtrip_fsdp_wrapped(self, test_name, model_id, config_cls, config_kwargs, fsdp_version):
         # using get_peft_model_state_dict & set_peft_model_state_dict because instead of save_pretrained &
         # from_pretrained because:
         #   1. avoid disk, do everything in memory
@@ -8810,13 +8827,21 @@ class TestPeftFsdpStateDict:
         torch.manual_seed(0)
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         model = get_peft_model(model, config).eval()
-        model = FSDP(model, use_orig_params=True, device_id=self.torch_device)
+        if fsdp_version == 1:
+            model = FSDP(model, use_orig_params=True, device_id=self.torch_device)
 
         X = self.prepare_inputs_for_testing()
         with torch.no_grad():
             output_before = model(**X)
 
+        if fsdp_version == 2:
+            from torch.distributed.fsdp import fully_shard
+
+            # Save the sharded parameters without requiring every method to support FSDP2 forward hooks.
+            fully_shard(model, mesh=init_device_mesh(self.torch_device, (1,)))
+
         state_dict = get_peft_model_state_dict(model, save_embedding_layers=False)
+        assert not any(isinstance(tensor, DTensor) for tensor in state_dict.values())
         del model
 
         torch.manual_seed(0)

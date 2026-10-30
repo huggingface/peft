@@ -12,26 +12,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 import os
 import platform
+from datetime import timedelta
+from pathlib import Path
 
 import packaging.version
 import pytest
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
+from safetensors.torch import load_file as safe_load_file
 from torch import nn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.parallel import ColwiseParallel, RowwiseParallel, parallelize_module
 from transformers import AutoModelForCausalLM
 
-from peft import LoraConfig, get_peft_model
-from peft.import_utils import is_transformers_ge_v5_17_0
+from peft import IA3Config, LoraConfig, PeftModel, get_peft_model, get_peft_model_state_dict, set_peft_model_state_dict
+from peft.import_utils import is_transformers_dtensor_tp, is_transformers_ge_v5_17_0
 from peft.utils import infer_device
 from peft.utils.integrations import TpMeshDimRegistry
+from peft.utils.save_and_load import _gather_state_dict_for_save
 
-from .testing_utils import hub_online_once
+from .test_custom_models import MLP, ModelMha
+from .testing_utils import hub_online_once, set_init_weights_false
 
 
 @pytest.mark.skipif(platform.system() != "Linux", reason="Run distributed tests only on Linux")
@@ -196,3 +202,155 @@ def test_tp_mesh_dim_registry(monkeypatch):
     assert TpMeshDimRegistry.is_registered("model")
     assert TpMeshDimRegistry.is_registered("tp")
     assert not TpMeshDimRegistry.is_registered("fsdp")
+
+
+def test_gather_plain_state_dict_preserves_tensors():
+    weight = torch.arange(12, dtype=torch.float32).reshape(3, 4).t().requires_grad_()
+    extra_state = {"step": 1}
+    result = _gather_state_dict_for_save({"weight": weight, "extra_state": extra_state})
+    assert result["weight"] is weight
+    assert result["weight"].requires_grad
+    assert result["weight"].stride() == weight.stride()
+    assert result["extra_state"] is extra_state
+
+
+@pytest.mark.skipif(platform.system() != "Linux", reason="Run FSDP tests only on Linux")
+@pytest.mark.skipif(not dist.is_available() or not dist.is_gloo_available(), reason="Requires Gloo")
+class TestFsdp2StateDict:
+    @staticmethod
+    def _save_load(rank, world_size, root, device_type, config_cls, model_id="MLP"):
+        from torch.distributed.fsdp import fully_shard
+
+        torch.set_num_threads(1)
+        device = torch.device(device_type, rank) if device_type != "cpu" else torch.device("cpu")
+        if device_type != "cpu":
+            torch.get_device_module(device_type).set_device(device)
+        dist.init_process_group(
+            dist.get_default_backend_for_device(device_type),
+            init_method=Path(root, "rendezvous").as_uri(),
+            rank=rank,
+            world_size=world_size,
+            timeout=timedelta(seconds=60),
+        )
+        try:
+            torch.manual_seed(0)
+            base = {"MLP": MLP, "MHA": ModelMha}[model_id]().to(device).eval()
+            target, saved_module = ("lin0", "lin1") if model_id == "MLP" else ("mha", "lin0")
+            kwargs = set_init_weights_false(
+                config_cls, {"target_modules": [target], "modules_to_save": [saved_module]}
+            )
+            if config_cls == IA3Config:
+                kwargs["feedforward_modules"] = []
+            config = config_cls(**kwargs)
+            model = get_peft_model(copy.deepcopy(base), config)
+            model.add_adapter("selected", copy.deepcopy(config))
+            model.set_adapter("selected")
+            reference = copy.deepcopy(model).eval()
+            mesh_shape = (world_size,) if world_size == 2 else (2, 2)
+            mesh_names = ("shard",) if world_size == 2 else ("replicate", "shard")
+            mesh = init_device_mesh(device_type, mesh_shape, mesh_dim_names=mesh_names)
+            fully_shard(model.base_model.model.get_submodule(target), mesh=mesh)
+            fully_shard(model, mesh=mesh)
+            assert not getattr(model, "_tp_size", None)
+
+            inputs = torch.arange(90, device=device).view(9, 10).float()
+            optimizer = torch.optim.SGD(model.parameters(), lr=1e-3, foreach=False)
+            reference_optimizer = torch.optim.SGD(reference.parameters(), lr=1e-3, foreach=False)
+            for _ in range(2):
+                optimizer.zero_grad(set_to_none=True)
+                reference_optimizer.zero_grad(set_to_none=True)
+                actual_output = model(inputs)
+                reference_output = reference(inputs)
+                torch.testing.assert_close(actual_output, reference_output)
+                actual_output.sum().backward()
+                reference_output.sum().backward()
+                reference_params = dict(reference.named_parameters())
+                for name, param in model.named_parameters():
+                    if not param.requires_grad:
+                        continue
+                    assert param.grad is not None, name
+                    gradient = param.grad.full_tensor() if isinstance(param.grad, DTensor) else param.grad
+                    torch.testing.assert_close(gradient, reference_params[name].grad)
+                optimizer.step()
+                reference_optimizer.step()
+            expected = {
+                key: value.clone()
+                for key, value in get_peft_model_state_dict(reference, adapter_name="selected").items()
+            }
+
+            state_dict = model.state_dict(keep_vars=True)
+            gathered = []
+            full_tensor = DTensor.full_tensor
+
+            def spy_full_tensor(tensor, *args, **kwargs):
+                gathered.append(tensor)
+                return full_tensor(tensor, *args, **kwargs)
+
+            with pytest.MonkeyPatch.context() as monkeypatch:
+                monkeypatch.setattr(DTensor, "full_tensor", spy_full_tensor)
+                actual = get_peft_model_state_dict(model, state_dict=state_dict, adapter_name="selected")
+            assert actual.keys() == expected.keys()
+            unselected_ids = {id(value) for name, value in state_dict.items() if "selected" not in name.split(".")}
+            assert len(gathered) == len(expected)
+            assert not any(id(tensor) in unselected_ids for tensor in gathered)
+            for key in expected:
+                assert not isinstance(actual[key], DTensor)
+                assert actual[key].device.type == "cpu"
+                assert not actual[key].requires_grad
+                assert actual[key].is_contiguous()
+                torch.testing.assert_close(actual[key], expected[key].cpu())
+            # Check serialization and restoration exactly against the gathered distributed weights.
+            expected = {key: value.clone() for key, value in actual.items()}
+
+            for safe_serialization in (True, False):
+                destination = Path(root, "safe" if safe_serialization else "bin")
+                model.save_pretrained(
+                    destination,
+                    selected_adapters=["selected"],
+                    is_main_process=rank == 0,
+                    safe_serialization=safe_serialization,
+                )
+                dist.barrier()
+                adapter_path = destination / "selected"
+                saved = (
+                    safe_load_file(adapter_path / "adapter_model.safetensors")
+                    if safe_serialization
+                    else torch.load(adapter_path / "adapter_model.bin", weights_only=True, map_location="cpu")
+                )
+                assert saved.keys() == expected.keys()
+                for key in expected:
+                    assert not isinstance(saved[key], DTensor)
+                    torch.testing.assert_close(saved[key], expected[key].cpu(), rtol=0, atol=0)
+                reloaded = PeftModel.from_pretrained(copy.deepcopy(base), adapter_path).to(device).eval()
+                inputs = torch.arange(90, device=device).view(9, 10).float()
+                with torch.no_grad():
+                    torch.testing.assert_close(reloaded(inputs), reference(inputs))
+                    # Direct restoration into DTensors requires Transformers' DTensor loading support.
+                    if not is_transformers_dtensor_tp:
+                        continue
+                    # Make restoring into distributed parameters observable, rather than reloading unchanged weights.
+                    for name, param in model.named_parameters():
+                        if "selected" in name.split("."):
+                            param.to_local().zero_()
+                set_peft_model_state_dict(model, saved, adapter_name="selected")
+                restored = get_peft_model_state_dict(model, adapter_name="selected")
+                for key in expected:
+                    torch.testing.assert_close(restored[key], expected[key].cpu(), rtol=0, atol=0)
+        finally:
+            dist.destroy_process_group()
+
+    @pytest.mark.parametrize("world_size", [2, 4])
+    # LoRA and IA3 cover additive low-rank and multiplicative parameters; the FSDP method matrix covers other configs.
+    @pytest.mark.parametrize(
+        "model_id, config_cls",
+        [("MLP", LoraConfig), ("MLP", IA3Config), ("MHA", LoraConfig)],
+        ids=["mlp-lora", "mlp-ia3", "mha-lora"],
+    )
+    def test_save_load_without_tp_metadata(self, world_size, model_id, config_cls, tmp_path):
+        # Regression for #3802, including HSDP on a 2x2 CPU mesh and both checkpoint formats.
+        mp.spawn(
+            self._save_load,
+            args=(world_size, str(tmp_path), "cpu", config_cls, model_id),
+            nprocs=world_size,
+            join=True,
+        )
