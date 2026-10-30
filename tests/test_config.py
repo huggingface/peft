@@ -149,6 +149,14 @@ LAYER_INDEXING_CONFIG_CLASSES = [
 ]
 
 
+# Config classes that support selecting layers by index (`layers_to_transform`).
+LAYERS_TO_TRANSFORM_CONFIG_CLASSES = [
+    (config_class, mandatory_kwargs)
+    for config_class, mandatory_kwargs in ALL_CONFIG_CLASSES
+    if "layers_to_transform" in inspect.signature(config_class).parameters
+]
+
+
 class TestPeftConfig:
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
     def test_methods(self, config_class, mandatory_kwargs):
@@ -603,6 +611,19 @@ class TestPeftConfig:
         )
         assert config.layers_to_transform == 0
         assert config.layers_pattern == "model.layers"
+
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", LAYERS_TO_TRANSFORM_CONFIG_CLASSES)
+    def test_config_layers_to_transform_with_str_target_modules_raises(self, config_class, mandatory_kwargs):
+        # `layers_to_transform` has no effect when `target_modules` is a regex string, so it must be rejected
+        kwargs = {**mandatory_kwargs, "target_modules": r".*\.q_proj", "layers_to_transform": [0, 1]}
+        msg = "`layers_to_transform` cannot be used when `target_modules` is a str."
+        with pytest.raises(ValueError, match=msg):
+            config_class(**kwargs)
+
+    def test_config_layers_to_transform_with_all_linear_shorthand(self):
+        # "all-linear" is expanded to a list of modules later, so layers_to_transform still applies to it
+        config = LoHaConfig(target_modules="all-linear", layers_to_transform=[0])
+        assert config.layers_to_transform == [0]
 
     @pytest.mark.parametrize("version", ["0.10", "0.17.0", "1"])
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)

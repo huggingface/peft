@@ -27,7 +27,7 @@ from transformers.utils import PushToHubMixin, http_user_agent
 
 from peft import __version__
 
-from .utils import CONFIG_NAME, PeftType, TaskType
+from .utils import CONFIG_NAME, INCLUDE_LINEAR_LAYERS_SHORTHAND, PeftType, TaskType
 
 
 # we expect at least these keys to be present in a PEFT adapter_config.json
@@ -118,6 +118,17 @@ class PeftConfigMixin(PushToHubMixin):
             raise ValueError(
                 f"Invalid task type: '{self.task_type}'. Must be one of the following task types: {', '.join(TaskType)}."
             )
+
+        # `layers_to_transform` is ignored for a regex `target_modules` string; the "all-linear" shorthand is expanded to
+        # a list of modules later, so it can be combined with `layers_to_transform`
+        target_modules = getattr(self, "target_modules", None)
+        if (
+            isinstance(target_modules, str)
+            and target_modules.lower() != INCLUDE_LINEAR_LAYERS_SHORTHAND
+            and getattr(self, "layers_to_transform", None) is not None
+        ):
+            raise ValueError("`layers_to_transform` cannot be used when `target_modules` is a str.")
+
         if self.peft_version is None:
             self.peft_version = self._get_peft_version()
 
