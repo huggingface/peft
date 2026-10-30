@@ -329,15 +329,10 @@ class TestConvArguments:
 
     @pytest.mark.parametrize("config", CONFIGS.values(), ids=CONFIGS.keys())
     @pytest.mark.parametrize("conv_kwargs", conv_kwargs)
-    def test_unmerged_and_merged_forward_same_result(self, config, conv_kwargs, request):
+    def test_unmerged_and_merged_forward_same_result(self, config, conv_kwargs):
         # merging should not change the result
         if self.should_skip(config, conv_kwargs):
             pytest.skip("This method assumes square convolution kernels throughout its weight handling")
-
-        if isinstance(config, AdaLoraConfig) and conv_kwargs.get("padding_mode", "zeros") != "zeros":
-            request.node.add_marker(
-                pytest.mark.xfail(reason="AdaLoRA's adapter branch ignores padding_mode", strict=True)
-            )
 
         torch.manual_seed(0)
         model = self.get_conv_model(**conv_kwargs)

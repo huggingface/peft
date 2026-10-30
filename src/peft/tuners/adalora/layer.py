@@ -235,8 +235,8 @@ class SVDConv2d(nn.Module, AdaLoraLayer):
 
         base = self.get_base_layer()
         k = base.kernel_size[0] * base.kernel_size[1]
-        # Right singular vectors: (r, in_channels * kH * kW)
-        self.lora_A[adapter_name] = nn.Parameter(torch.randn(r, self.in_features * k))
+        # Right singular vectors: (r, in_channels // groups * kH * kW)
+        self.lora_A[adapter_name] = nn.Parameter(torch.randn(r, self.in_features // base.groups * k))
         # Singular values: (r, 1)
         self.lora_E[adapter_name] = nn.Parameter(torch.randn(r, 1))
         # Left singular vectors: (out_channels, r)
@@ -332,14 +332,7 @@ class SVDConv2d(nn.Module, AdaLoraLayer):
                 delta_w = (lora_B @ (lora_A * lora_E) * scaling / ranknum).reshape(base.weight.shape)
                 # Use in-place add so result keeps its original dtype (matches SVDLinear);
                 # otherwise result would be upcast to lora_A.dtype and break subsequent fp16/bf16 ops.
-                result += nn.functional.conv2d(
-                    dropout(x),
-                    delta_w,
-                    stride=base.stride,
-                    padding=base.padding,
-                    dilation=base.dilation,
-                    groups=base.groups,
-                )
+                result += base._conv_forward(dropout(x), delta_w, None)
         return result
 
     def __repr__(self) -> str:

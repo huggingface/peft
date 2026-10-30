@@ -1405,6 +1405,18 @@ TEST_CASES = [
         AdaLoraConfig,
         {"target_modules": ["conv2d", "lin0"], "init_lora_weights": False, "total_step": 1},
     ),
+    (
+        "Conv2d Groups AdaLoRA",
+        "Conv2dGroups",
+        AdaLoraConfig,
+        {"target_modules": ["conv2d"], "init_lora_weights": False, "total_step": 1},
+    ),
+    (
+        "Conv2d Groups2 AdaLoRA",
+        "Conv2dGroups2",
+        AdaLoraConfig,
+        {"target_modules": ["conv2d"], "init_lora_weights": False, "total_step": 1},
+    ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 ALL_PEFT_CONFIG_CASES = [
@@ -3605,12 +3617,12 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
             atol, rtol = 1e-3, 1e-3
 
-        if issubclass(config_cls, (LoHaConfig, LoKrConfig)) and model_id in (
+        if issubclass(config_cls, (AdaLoraConfig, LoHaConfig, LoKrConfig)) and model_id in (
             "Conv1dGroups",
             "Conv2dGroups",
             "Conv2dGroups2",
         ):
-            # Grouped LoHa/LoKr merges need a wider tolerance than a LoRA `B @ A` merge.
+            # Grouped AdaLoRA/LoHa/LoKr merges need a wider tolerance than a LoRA `B @ A` merge.
             atol, rtol = 1e-3, 1e-3
 
         if issubclass(config_cls, OFTConfig):
