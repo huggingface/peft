@@ -5841,7 +5841,7 @@ class TestMultipleActiveAdapters:
 
         peft_model = get_peft_model(model, config(), adapter_name="adapter_1").eval()
         peft_model.add_adapter("adapter_2", config())
-        self.set_multiple_active_adapters(peft_model, ["adapter_1", "adapter_2"])
+        peft_model.set_adapter(["adapter_1", "adapter_2"])
 
         with torch.inference_mode():
             expected = peft_model(**X)
