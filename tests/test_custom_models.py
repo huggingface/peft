@@ -2681,6 +2681,19 @@ class TestPeftCustomModel(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
+    @pytest.mark.parametrize(
+        "test_name, model_id, config_cls, config_kwargs",
+        # Keep the first saved-module configuration per method, including future methods added to the matrix.
+        list(
+            {
+                case[2]: case for case in reversed(TEST_CASES) if case[1] == "MLP" and case[3].get("modules_to_save")
+            }.values()
+        ),
+    )
+    def test_merge_layers_modules_to_save_selection(self, test_name, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_merge_layers_multi(model_id, config_cls, config_kwargs)
+
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)

@@ -857,21 +857,19 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
     ) -> torch.nn.Module:
         """Return the module that replaces this wrapper when unloading the PEFT model.
 
-        When merging, this is the modules_to_save copy of the active adapter, so that the trained weights are kept. If
-        that copy is itself a tuner layer, it is merged first. Without merging, or if no adapter is active on this
-        wrapper, the original module is returned, i.e. the base model is restored.
+        When merging, retain the selected adapter's modules_to_save copy, defaulting to the active adapter. If that
+        copy is itself a tuner layer, it is merged first. Without merging, or if no selected adapter targets this
+        wrapper, return the original module.
         """
-        if not self.active_adapters:
-            # none of the modules_to_save adapters of this module are active, e.g. because the model's active adapter
-            # does not use modules_to_save on this module; like in forward, the original module is used in this case
-            return self.original_module
-
         if not merge:
-            # without merging, unloading should give back the base model, so the original module is returned instead
-            # of the trained modules_to_save copy
             return self.original_module
 
-        new_module = self.modules_to_save[self.active_adapter]
+        selected_adapters = self.active_adapters if adapter_names is None else adapter_names
+        adapter_name = self.check_set_adapter(selected_adapters) if selected_adapters else None
+        if adapter_name is None:
+            return self.original_module
+
+        new_module = self.modules_to_save[adapter_name]
 
         # TODO: not sure if this is still a sensible thing to do. We would basically have to
         # do the same checks as `_unload_and_optionally_merge` to support MHA, for example.
