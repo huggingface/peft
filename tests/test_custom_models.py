@@ -2657,8 +2657,10 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip("Merging with target_parameters is not supported for all PEFT methods.")
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
 
-        # Explicitly set is_custom_modle=True to allow this test to run on MacOS CI. The monkey-patch from
-        # allow_custom_models is not active here
+        # Explicitly set is_custom_model=True because the test would otherwise be skipped on MacOS CI (the model id is
+        # not detected to be 'tiny' and big models are skipped on MacOS). There is a monkey-patch fixture,
+        # allow_custom_models, which enables this. But the patch is only working inside of testing_common.py, so we need
+        # to set it explicitly here.
         with hub_online_once(model_id, is_custom_model=True):
             base = self.transformers_class.from_pretrained(model_id)
             config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
