@@ -458,7 +458,7 @@ class TestActivatedLora:
 
 
 class TestKasaRegularization:
-    """Tests for the KaSA auxiliary regularization loss (LoraModel._get_kasa_loss)."""
+    """Tests for the KaSA auxiliary regularization loss (via LoraModel.get_peft_loss)."""
 
     class MLP(nn.Module):
         def __init__(self, in_features=16, hidden=12, out_features=10, bias=False):
@@ -475,7 +475,7 @@ class TestKasaRegularization:
     def test_kasa_loss_zero_when_no_kasa_layers(self):
         torch.manual_seed(0)
         model = get_peft_model(self.MLP(), LoraConfig(target_modules=["lin0"], r=4))
-        assert model._get_kasa_loss() == 0.0
+        assert model.get_peft_loss() == 0.0
 
     def test_kasa_loss_l2_matches_closed_form(self):
         # With gamma=0 the loss reduces to beta * sum(lora_diag**2).
@@ -489,7 +489,7 @@ class TestKasaRegularization:
 
         expected_per_layer = beta * (1.0**2 + 2.0**2 + 3.0**2 + 4.0**2)  # = beta * 30
         expected = 2 * expected_per_layer  # two layers
-        loss = model._get_kasa_loss()
+        loss = model.get_peft_loss()
         assert pytest.approx(loss.item(), rel=1e-5) == expected
 
     def test_kasa_orthogonal_reg_zero_for_orthonormal_factors(self):
@@ -513,7 +513,7 @@ class TestKasaRegularization:
                     module.lora_B["default"].weight.copy_(qb)
                     module.lora_diag["default"].zero_()  # kill L2 so we isolate L3
 
-        loss_ortho = model._get_kasa_loss()
+        loss_ortho = model.get_peft_loss()
         assert loss_ortho.item() < 1e-4
 
         # Now make B clearly non-orthonormal and confirm the penalty becomes strictly positive.
@@ -521,7 +521,7 @@ class TestKasaRegularization:
             for module in model.modules():
                 if isinstance(module, LoraLinear):
                     module.lora_B["default"].weight.mul_(3.0)
-        loss_non_ortho = model._get_kasa_loss()
+        loss_non_ortho = model.get_peft_loss()
         assert loss_non_ortho.item() > 1e-3
 
     def test_kasa_loss_has_gradients(self):
@@ -533,7 +533,7 @@ class TestKasaRegularization:
         )
         model = get_peft_model(self.MLP(), config)
 
-        loss = model._get_kasa_loss()
+        loss = model.get_peft_loss()
         loss.backward()
         for module in model.modules():
             if isinstance(module, LoraLinear):

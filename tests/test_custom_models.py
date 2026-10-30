@@ -2939,6 +2939,29 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_training_custom_models(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training(model_id, config_cls, config_kwargs)
 
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_peft_training_hooks(self, test_name, model_id, config_cls, config_kwargs, monkeypatch):
+        self._test_peft_training_hooks(model_id, config_cls, config_kwargs, monkeypatch)
+
+    @pytest.mark.parametrize("steps", [[0, 2, 9], [9]])
+    @pytest.mark.parametrize("update_method", ["update_and_allocate", "on_peft_optimizer_step"])
+    def test_adalora_allocation_skipped_final_step(self, steps, update_method):
+        torch.manual_seed(0)
+        model = get_peft_model(
+            MLP(),
+            AdaLoraConfig(target_modules=["lin0"], init_r=8, target_r=2, total_step=10, tfinal=2),
+        )
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+        kwargs = {"training_context": object()} if update_method == "on_peft_optimizer_step" else {}
+        for step in steps:
+            model(torch.randn(2, 10)).square().mean().backward()
+            optimizer.step()
+            getattr(model, update_method)(step, **kwargs)
+            optimizer.zero_grad()
+
+        assert sum(sum(mask) for mask in model.peft_config["default"].rank_pattern.values()) <= 2
+        assert not model.rankallocator.exp_avg_ipt
+
     # Note: skipping _test_training_layer_indexing because layer indexing only works when layer names conform to a
     # specific pattern, which is not guaranteed here. Therefore, this test is not performed.
 
@@ -3285,9 +3308,7 @@ class TestPeftCustomModel(PeftCommonTester):
         for _ in range(n_train_steps):
             optimizer.zero_grad()
             y_pred = model(**X)
-            loss = y_pred.sum()
-            if is_monteclora:
-                loss = loss + model._get_monteclora_loss()
+            loss = y_pred.sum() + model.get_peft_loss()
             loss.backward()
             optimizer.step()
 
@@ -3391,9 +3412,7 @@ class TestPeftCustomModel(PeftCommonTester):
         for _ in range(3):
             optimizer.zero_grad()
             y_pred = model(**X)
-            loss = y_pred.sum()
-            if is_monteclora:
-                loss = loss + model._get_monteclora_loss()
+            loss = y_pred.sum() + model.get_peft_loss()
             loss.backward()
             optimizer.step()
 
@@ -5280,11 +5299,14 @@ class TestPeftCustomModel(PeftCommonTester):
         _ = model(input_data)
 
         sampler_count = sum(1 for module in model.modules() if isinstance(module, MontecloraSampler))
-        variational_loss = model._get_monteclora_loss()
+        variational_loss = model.get_peft_loss()
 
         assert sampler_count > 0, "No Monteclora samplers found for variational loss computation"
         assert variational_loss > 0, "Variational loss should be positive"
         assert not torch.isnan(variational_loss), "Variational loss contains NaN"
+
+        model.base_model.disable_adapter_layers()
+        assert model.get_peft_loss() == 0.0
 
     def test_monteclora_variational_loss_computation_eval_mode(self):
         config = LoraConfig(
@@ -5301,7 +5323,7 @@ class TestPeftCustomModel(PeftCommonTester):
             _ = model(input_data)
 
         sampler_count = sum(1 for module in model.modules() if isinstance(module, MontecloraSampler))
-        variational_loss = model._get_monteclora_loss()
+        variational_loss = model.get_peft_loss()
 
         assert sampler_count > 0, "No Monteclora samplers found for variational loss computation"
         # In eval mode, `MontecloraSampler.get_variational_loss` returns (0.0, 0.0) for every sampler, so the

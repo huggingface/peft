@@ -13,20 +13,32 @@
 # limitations under the License.
 
 
+from unittest.mock import Mock
+
 import pytest
 import torch
 from diffusers import StableDiffusionPipeline
 from torch import nn
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 
-from peft import LoraConfig, get_peft_model
+from peft import (
+    AdaLoraConfig,
+    AdamssConfig,
+    KasaConfig,
+    LoraConfig,
+    TaskType,
+    get_peft_model,
+)
 from peft.helpers import (
     DoraCaching,
     MontecloraTrainerMixin,
+    PeftTrainerMixin,
     check_if_peft_model,
     disable_input_dtype_casting,
     rescale_adapter_scale,
 )
+from peft.tuners.adamss.asa_callback import AdamssAsaCallback
+from peft.tuners.adamss.layer import AdamssLayer
 from peft.tuners.lora.config import MontecloraConfig
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.lora.monteclora import MontecloraSampler
@@ -694,6 +706,7 @@ class TestKappaTuneSelector:
 
 
 class TestMontecloraTrainerMixin:
+    # TODO remove MontecloraTrainerMixin and this warning after Oct 2027
     def test_mixin_adds_variational_loss_to_trainer(self, tmp_path):
         class MontecloraTrainer(MontecloraTrainerMixin, Trainer):
             pass
@@ -717,7 +730,8 @@ class TestMontecloraTrainerMixin:
                 use_cpu=True,
             )
             vanilla_trainer = Trainer(model=model, args=training_args)
-            monteclora_trainer = MontecloraTrainer(model=model, args=training_args)
+            with pytest.warns(FutureWarning, match="MontecloraTrainerMixin is deprecated"):
+                monteclora_trainer = MontecloraTrainer(model=model, args=training_args)
 
             torch.manual_seed(0)
             input_ids = torch.randint(0, base_model.config.vocab_size, (2, 8))
@@ -730,3 +744,220 @@ class TestMontecloraTrainerMixin:
 
             assert total_loss.item() != task_loss.item()
             total_loss.backward()
+
+
+class TestPeftTrainerMixin:
+    @pytest.fixture
+    def base_model(self):
+        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            yield model
+
+    @pytest.fixture
+    def inputs(self):
+        input_ids = torch.arange(8).reshape(2, 4)
+        return {"input_ids": input_ids, "labels": input_ids.clone()}
+
+    def make_trainer(self, model, tmp_path, **kwargs):
+        class PeftTrainer(PeftTrainerMixin, Trainer):
+            pass
+
+        args = TrainingArguments(
+            output_dir=str(tmp_path),
+            per_device_train_batch_size=1,
+            gradient_accumulation_steps=2,
+            max_steps=3,
+            learning_rate=0.01,
+            max_grad_norm=0,
+            optim="sgd",
+            save_strategy="no",
+            logging_strategy="no",
+            report_to=[],
+            disable_tqdm=True,
+            use_cpu=True,
+        )
+        dataset = [{"input_ids": torch.arange(4), "labels": torch.arange(4)} for _ in range(6)]
+        return PeftTrainer(model=model, args=args, train_dataset=dataset, **kwargs)
+
+    @pytest.mark.parametrize("return_outputs", [False, True])
+    @pytest.mark.parametrize("variant", ["lora", "kasa", "monteclora", "adalora"])
+    def test_compute_loss(self, base_model, inputs, tmp_path, variant, return_outputs):
+        kwargs = {}
+        if variant == "kasa":
+            kwargs["kasa_config"] = KasaConfig()
+        elif variant == "monteclora":
+            kwargs["monteclora_config"] = MontecloraConfig(num_samples=2)
+
+        config = (
+            AdaLoraConfig(target_modules=["q_proj"], total_step=3, task_type=TaskType.CAUSAL_LM)
+            if variant == "adalora"
+            else LoraConfig(target_modules=["q_proj"], r=2, **kwargs)
+        )
+
+        model = get_peft_model(base_model, config).train()
+        trainer = self.make_trainer(model, tmp_path)
+        result = trainer.compute_loss(model, inputs.copy(), return_outputs=return_outputs)
+        loss, outputs = result if return_outputs else (result, None)
+        assert loss.ndim == 0
+        if return_outputs:
+            torch.testing.assert_close(loss, outputs.loss + model.get_peft_loss())
+
+        loss.backward()
+        assert any(param.grad is not None for param in model.parameters() if param.requires_grad)
+
+        model.eval()
+        loss, outputs = trainer.compute_loss(model, inputs.copy(), return_outputs=True)
+        torch.testing.assert_close(loss, outputs.loss)
+
+    def test_get_peft_loss_kwargs_forwarded(self, base_model, monkeypatch):
+        model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]))
+        context = object()
+        result = torch.tensor(0.5, requires_grad=True)
+        hook = Mock(return_value=result)
+        monkeypatch.setattr(model.base_model, "get_peft_loss", hook)
+
+        assert model.get_peft_loss(adapter_names="default", training_context=context) is result
+        hook.assert_called_once_with(adapter_names="default", training_context=context)
+
+    def test_on_peft_optimizer_step_kwargs_forwarded(self, base_model, monkeypatch):
+        model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]))
+        context = object()
+        result = None
+        hook = Mock(return_value=result)
+        monkeypatch.setattr(model.base_model, "on_peft_optimizer_step", hook)
+
+        assert model.on_peft_optimizer_step(3, training_context=context) is None
+        hook.assert_called_once_with(3, training_context=context)
+
+    def test_plain_lora_ignores_training_context(self, base_model):
+        model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]))
+        assert model.get_peft_loss(training_context=object()) == 0.0
+        assert model.on_peft_optimizer_step(0, training_context=object()) is None
+
+    @pytest.mark.parametrize("normalized", [False, True])
+    @pytest.mark.parametrize("accumulation_steps", [1, 2])
+    def test_accumulation_normalizes_auxiliary_gradients(
+        self, base_model, inputs, tmp_path, normalized, accumulation_steps
+    ):
+        model = get_peft_model(
+            base_model, LoraConfig(target_modules=["q_proj"], r=2, kasa_config=KasaConfig(beta=0.1, gamma=0.1))
+        )
+        trainer = self.make_trainer(model, tmp_path)
+        # sanity check, as we rely in Trainer attributes here
+        assert trainer.loss_is_scaled_for_ga is None
+        assert trainer.model_accepts_loss_kwargs
+        assert getattr(trainer, "current_gradient_accumulation_steps", None) is None
+
+        trainer.loss_is_scaled_for_ga = normalized
+        trainer.model_accepts_loss_kwargs = normalized
+        trainer.current_gradient_accumulation_steps = accumulation_steps
+
+        expected_loss = model.get_peft_loss()
+        params = [param for param in model.parameters() if param.requires_grad]
+        assert params
+        expected_grads = torch.autograd.grad(expected_loss, params, allow_unused=True)
+
+        # sequence length 4, shift by 1 -> 3, batch size 2 -> 6; None -> let the model calculate it
+        num_items_in_batch = 3 * 2 * accumulation_steps if normalized else None
+        for _ in range(accumulation_steps):
+            # loss including PEFT loss
+            loss = trainer.compute_loss(model, inputs.copy(), num_items_in_batch=num_items_in_batch)
+            # original loss without PEFT contribution
+            orig_loss = Trainer.compute_loss(trainer, model, inputs.copy(), num_items_in_batch=num_items_in_batch)
+            assert not torch.allclose(loss, orig_loss)
+
+            auxiliary_loss = loss - orig_loss
+            if not normalized:
+                auxiliary_loss = auxiliary_loss / accumulation_steps
+            auxiliary_loss.backward()
+
+        for param, expected in zip(params, expected_grads):
+            if expected is not None:
+                torch.testing.assert_close(param.grad, expected)
+
+    @pytest.mark.parametrize("method", ["adalora", "adamss"])
+    def test_updates_after_accumulation_before_zero_grad(self, base_model, tmp_path, monkeypatch, method):
+        if method == "adalora":
+            config = AdaLoraConfig(target_modules=["q_proj"], init_r=4, target_r=2, total_step=3)
+        else:
+            config = AdamssConfig(
+                target_modules=["q_proj"],
+                r=4,
+                num_subspaces=2,
+                subspace_rank=1,
+                use_asa=True,
+                asa_target_subspaces=1,
+                init_warmup=0,
+                final_warmup=10,
+                mask_interval=10,
+            )
+        model = get_peft_model(base_model, config)
+        trainer = self.make_trainer(model, tmp_path)
+        steps = []
+        update = model.on_peft_optimizer_step
+
+        def record_update(step):
+            assert any(param.grad is not None for param in model.parameters() if param.requires_grad)
+            steps.append(step)
+            update(step)
+
+        monkeypatch.setattr(model, "on_peft_optimizer_step", record_update)
+        trainer.train()
+        assert steps == [0, 1, 2]
+        if method == "adalora":
+            assert model.rankallocator.exp_avg_ipt
+        else:
+            layers = [module for module in model.modules() if isinstance(module, AdamssLayer)]
+            assert any(value is not None for layer in layers for value in layer.exp_avg_ipt_A["default"])
+
+    def test_skipped_optimizer_update(self, base_model, tmp_path, monkeypatch):
+        # When scaling the gradient leads to non-finite values, the gradient step is skipped. Check that AMP overflow
+        # also skips AdaLoRA’s optimizer-step hook.
+        model = get_peft_model(
+            base_model, AdaLoraConfig(target_modules=["q_proj"], init_r=4, target_r=2, total_step=3)
+        )
+        trainer = self.make_trainer(model, tmp_path)
+        trainer.accelerator.scaler = torch.amp.GradScaler("cpu")
+        scale_before = trainer.accelerator.scaler.get_scale()
+        steps = []
+        update = model.on_peft_optimizer_step
+        backward_calls = 0
+
+        def overflow_first_backward(grad):
+            nonlocal backward_calls
+            backward_calls += 1
+            return torch.full_like(grad, float("inf")) if backward_calls == 1 else grad
+
+        def record_update(step):
+            steps.append(step)
+            update(step)
+
+        parameter = next(param for name, param in model.named_parameters() if "lora_E" in name)
+        parameter.register_hook(overflow_first_backward)
+        monkeypatch.setattr(model, "on_peft_optimizer_step", record_update)
+        trainer.train()
+
+        assert steps == [1, 2]  # step 0 overflows
+        assert trainer.accelerator.scaler.get_scale() < scale_before  # reduce scale on overlow
+        assert all(torch.isfinite(value).all() for value in model.rankallocator.exp_avg_ipt.values())
+
+    def test_legacy_callback_does_not_duplicate_updates(self, base_model, tmp_path, monkeypatch):
+        # TODO remove AdamssAsaCallback and this test after Oct 2027
+        model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]))
+        with pytest.warns(FutureWarning, match="AdamssAsaCallback is deprecated"):
+            callback = AdamssAsaCallback()
+
+        trainer = self.make_trainer(model, tmp_path, callbacks=[callback])
+        update = Mock()
+        monkeypatch.setattr(model, "on_peft_optimizer_step", update)
+        trainer.train()
+        assert update.call_count == 3
+
+    def test_legacy_callback_added_after_initialization(self, base_model, tmp_path):
+        model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]))
+        trainer = self.make_trainer(model, tmp_path)
+        with pytest.warns(FutureWarning, match="already handles optimizer-step updates"):
+            trainer.add_callback(AdamssAsaCallback)
+
+        assert not any(isinstance(callback, AdamssAsaCallback) for callback in trainer.callback_handler.callbacks)

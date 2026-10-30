@@ -46,7 +46,7 @@ from transformers import (
 )
 
 from peft import AdamssConfig, get_peft_model
-from peft.tuners.adamss.asa_callback import AdamssAsaCallback
+from peft.helpers import PeftTrainerMixin
 
 
 # Hyperparameters from Table 18 in the paper
@@ -111,6 +111,12 @@ DATASET_CONFIGS = {
 
 
 # Global preprocessing functions (to avoid closure issues with set_transform)
+
+
+class PeftTrainer(PeftTrainerMixin, Trainer):
+    pass
+
+
 def _preprocess_images(examples, img_col, transforms):
     """Apply image transformations."""
     examples["pixel_values"] = [transforms(img.convert("RGB")) for img in examples[img_col]]
@@ -342,12 +348,9 @@ def main():
     print(f"AdaMSS Adapter Params:  {adamss_params:,}")
     print(f"Total Trainable Params: {trainable_params:,}")
 
-    # Setup ASA callback if enabled
-    callbacks = []
+    # Report ASA training updates if enabled
     if args.use_asa:
-        print("\nSetting up ASA callback...")
-        asa_callback = AdamssAsaCallback()
-        callbacks.append(asa_callback)
+        print("\nUsing PEFT training updates for ASA...")
 
     # Metrics
     metric = evaluate.load("accuracy")
@@ -398,7 +401,7 @@ def main():
     optimizer = AdamW(optimizer_grouped_parameters, weight_decay=hp["wd"])
 
     # Create trainer
-    trainer = Trainer(
+    trainer = PeftTrainer(
         model=model,
         args=training_args,
         train_dataset=train_ds,
@@ -406,7 +409,6 @@ def main():
         data_collator=collate_fn,
         compute_metrics=compute_metrics,
         optimizers=(optimizer, None),
-        callbacks=callbacks,
     )
 
     # GPU memory monitoring

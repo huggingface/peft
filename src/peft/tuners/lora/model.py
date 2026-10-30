@@ -21,7 +21,7 @@ import warnings
 from contextlib import contextmanager
 from dataclasses import replace
 from functools import partial, reduce
-from typing import Literal, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 import packaging.version
 import torch
@@ -1226,6 +1226,30 @@ class LoraModel(BaseTuner):
             peft_model.delete_adapter(initial_adapter_name)
         return output_state_dict
 
+    def get_peft_loss(
+        self, adapter_names: Optional[Union[str, list[str]]] = None, **kwargs: Any
+    ) -> torch.Tensor | float:
+        """Return the configured auxiliary losses for the selected LoRA adapters during training."""
+        if not self.training:
+            return 0.0
+
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+        elif isinstance(adapter_names, str):
+            adapter_names = [adapter_names]
+
+        # We could just unconditionally call self._get_monteclora_loss etc. but these calls have some overhead, as they
+        # loop through each layer. Checking the LoraConfigs will almost always be cheaper
+        monteclora_adapters = [name for name in adapter_names if self.peft_config[name].monteclora_config is not None]
+        kasa_adapters = [name for name in adapter_names if self.peft_config[name].kasa_config is not None]
+
+        loss: torch.Tensor | float = 0.0
+        if monteclora_adapters:
+            loss = loss + self._get_monteclora_loss(monteclora_adapters)
+        if kasa_adapters:
+            loss = loss + self._get_kasa_loss(kasa_adapters)
+        return loss
+
     def _get_monteclora_loss(self, adapter_names: Optional[Union[str, list[str]]] = None) -> torch.Tensor | float:
         """
         Compute the MonteCLoRA variational regularization loss.
@@ -1233,7 +1257,8 @@ class LoraModel(BaseTuner):
         Iterates over all `LoraLayer` modules in the model and, for each layer, collects the KL-divergence and entropy
         components from the `MontecloraSampler`s that correspond to the requested adapters. The aggregated loss is
         normalized by the number of contributing samplers. Returns `0.0` if no matching MonteCLoRA samplers are present
-        (e.g. MonteCLoRA is not used, or none of the requested adapters use MonteCLoRA).
+        (e.g. MonteCLoRA is not used, or none of the requested adapters use MonteCLoRA). Disabled adapter layers are
+        excluded.
 
         Only samplers belonging to `adapter_names` are considered. This matters when multiple LoRA adapters are
         attached to the model but only a subset is active: the regularization loss is then computed only for those
@@ -1263,7 +1288,7 @@ class LoraModel(BaseTuner):
         var_loss_sum: torch.Tensor | float = 0.0
         num_monte_layers = 0
         for module in self.modules():
-            if not isinstance(module, LoraLayer):
+            if not isinstance(module, LoraLayer) or module.disable_adapters:
                 continue
             samplers = getattr(module, "lora_monteclora_sampler", None)
             if samplers is None:
@@ -1288,7 +1313,7 @@ class LoraModel(BaseTuner):
         an orthogonal regularization `||B^T B - I||_F + ||A A^T - I||_F` on the adapter factors (weighted by `gamma`),
         which softly enforces the semi-orthogonality assumed by the SVD parametrization. The coefficients are taken
         from the `KasaConfig` of each adapter. Returns `0.0` if no matching KaSA layers are present (e.g. KaSA is not
-        used, or none of the requested adapters use KaSA).
+        used, or none of the requested adapters use KaSA). Disabled adapter layers are excluded.
 
         Typical usage during training (after computing the task loss):
 
@@ -1315,7 +1340,7 @@ class LoraModel(BaseTuner):
 
         total: torch.Tensor | float = 0.0
         for module in self.modules():
-            if not isinstance(module, LoraLayer):
+            if not isinstance(module, LoraLayer) or module.disable_adapters:
                 continue
             lora_diag = getattr(module, "lora_diag", None)
             if lora_diag is None:

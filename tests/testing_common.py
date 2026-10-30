@@ -22,6 +22,7 @@ import tempfile
 import warnings
 from dataclasses import replace
 from operator import attrgetter
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -68,7 +69,7 @@ from peft.import_utils import is_transformers_ge_v5
 from peft.mapping import PEFT_TYPE_TO_TUNER_MAPPING
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.lora import LoraLayer
-from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import (
     AuxiliaryTrainingWrapper,
     ModulesToSaveWrapper,
@@ -1263,7 +1264,7 @@ class PeftCommonTester:
 
             # check if `training` works
             output = model(**inputs)[0]
-            loss = output.sum()
+            loss = output.sum() + model.get_peft_loss(training_context=object())
             loss.backward()
 
             if issubclass(config_cls, PromptLearningConfig):
@@ -1286,6 +1287,60 @@ class PeftCommonTester:
                         assert param.grad is None
                 else:
                     assert param.grad is None
+
+    def _test_peft_training_hooks(self, model_id, config_cls, config_kwargs, monkeypatch):
+        # check get_peft_loss and on_peft_optmizer_step are being called in the right circumstances
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(**config_kwargs)
+            model = get_peft_model(model, config).eval()
+            model = model.to(self.torch_device)
+
+            # these methods take arbitrary arguments, call with real methods
+            assert model.get_peft_loss(foobar=123) == 0.0
+            assert model.on_peft_optimizer_step(0, foobar=456) is None
+
+            # monkeypatch the methods to test their calling logic
+            fake_get_peft_loss = Mock(return_value=1.23)
+            fake_on_peft_optimizer_step = Mock()
+
+            if isinstance(model.base_model, BaseTuner):
+                # BaseTuners have this method, prompt learning methods don't
+                monkeypatch.setattr(model.base_model, "get_peft_loss", fake_get_peft_loss)
+                monkeypatch.setattr(model.base_model, "on_peft_optimizer_step", fake_on_peft_optimizer_step)
+                expected_call_count = 1
+                expected_loss = 1.23
+            else:
+                expected_call_count = 0
+                expected_loss = 0.0
+
+            model.train()
+            peft_loss = model.get_peft_loss()
+            model.on_peft_optimizer_step(1)
+            assert peft_loss == expected_loss
+            assert fake_get_peft_loss.call_count == expected_call_count
+            assert fake_on_peft_optimizer_step.call_count == expected_call_count
+
+            model.get_peft_loss()
+            model.on_peft_optimizer_step(1)
+            expected_call_count *= 2
+            assert fake_get_peft_loss.call_count == expected_call_count
+            assert fake_on_peft_optimizer_step.call_count == expected_call_count
+
+            # not called in eval mode
+            model.eval()
+            model.get_peft_loss()
+            model.on_peft_optimizer_step(1)
+            assert fake_get_peft_loss.call_count == expected_call_count
+            assert fake_on_peft_optimizer_step.call_count == expected_call_count
+
+            # not called with disabled adapters
+            model.train()
+            with model.disable_adapter():
+                model.get_peft_loss()
+                model.on_peft_optimizer_step(1)
+                assert fake_get_peft_loss.call_count == expected_call_count
+                assert fake_on_peft_optimizer_step.call_count == expected_call_count
 
     def _test_inference_safetensors(self, model_id, config_cls, config_kwargs):
         if (config_cls == PrefixTuningConfig) and ("deberta" in model_id.lower()):
