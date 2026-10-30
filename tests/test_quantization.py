@@ -404,6 +404,7 @@ def _bnb_4bit_cpu_quantization_available() -> bool:
 
     return packaging.version.parse(bnb.__version__) >= packaging.version.parse("0.46.0")
 
+
 # LoRA writes its own 4-bit merge/unmerge, every other method goes through the shared QuantizationBackend.
 LORA_CASE = (LoraConfig, {"r": 8, "lora_alpha": 16, "target_modules": ["q_proj", "v_proj"]})
 ADAPTER_CASES = [LORA_CASE, *TEST_CASES]
@@ -421,7 +422,8 @@ class TestBnb4bitMergeUnmerge:
     # only thing that can still move the weight.
     delta = 3e-5
 
-    def _build(self, config_cls, config_kwargs, adapter_names=("default",)):
+    def _build_model_with_perturbed_adapters(self, config_cls, config_kwargs, adapter_names=("default",)):
+        """Load the quantized model the way a user would, attach the adapters and give them a small delta."""
         quant_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_use_double_quant=False,
@@ -435,7 +437,14 @@ class TestBnb4bitMergeUnmerge:
         model = get_peft_model(model, config_cls(**config_kwargs))
         for adapter_name in adapter_names[1:]:
             model.add_adapter(adapter_name, config_cls(**config_kwargs))
-        # A freshly initialized adapter is the identity transform, so give it a small delta first.
+        # A freshly initialized adapter is the identity transform, so it needs a delta before merging it
+        # changes anything. Perturb the parameters rather than passing `init_weights=False` (as
+        # `set_init_weights_false` does): that leaves the adapter parameters randomly initialized, which
+        # on this model makes the delta 0.3x to 50x the size of the base weight. At that magnitude the
+        # error that re-quantizing the codes unavoidably introduces dominates, and 28% to 91% of the
+        # entries still move even with the fix, so the test could not tell a fixed layer from an unfixed
+        # one. With the perturbation below the unfixed path moves 50% to 92% of the entries and the fixed
+        # one none, which is what makes this a regression test.
         with torch.no_grad():
             torch.manual_seed(SEED)
             for param in model.parameters():
@@ -477,7 +486,7 @@ class TestBnb4bitMergeUnmerge:
     def _changed_fraction(self, config_cls, config_kwargs, *, how="one"):
         """Fraction of the dequantized base weights that one merge/unmerge round trip changes."""
         adapter_names = ("default",) if how == "one" else ("default", "second")
-        model = self._build(config_cls, config_kwargs, adapter_names=adapter_names)
+        model = self._build_model_with_perturbed_adapters(config_cls, config_kwargs, adapter_names=adapter_names)
         layers = self._bnb_layers(model)
         before = [self._dequantize(layer) for layer in layers]
 
