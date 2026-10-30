@@ -418,6 +418,13 @@ class TestPeftFeatureExtractionModel(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_load_adapter_no_warning(self, model_id, config_cls, config_kwargs):
+        deberta_beft_tests(config_cls, model_id, config_kwargs)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_load_no_warning(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
         deberta_beft_tests(config_cls, model_id, config_kwargs)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)

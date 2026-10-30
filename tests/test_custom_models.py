@@ -2609,6 +2609,11 @@ class TestPeftCustomModel(PeftCommonTester):
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_load_adapter_no_warning(self, test_name, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_load_no_warning(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_save_pretrained_failure(self, test_name, model_id, config_cls, config_kwargs, tmp_path):
         self._test_save_pretrained_failure(model_id, config_cls, config_kwargs, tmp_path)
 

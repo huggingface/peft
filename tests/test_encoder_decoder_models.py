@@ -441,6 +441,12 @@ class TestEncoderDecoderModels(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_load_adapter_no_warning(self, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_load_no_warning(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_pickle(self, model_id, config_cls, config_kwargs):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs, safe_serialization=False)
