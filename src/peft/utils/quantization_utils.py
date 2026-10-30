@@ -173,9 +173,10 @@ class Bnb4bitBackend(QuantizationBackend):
     layer_type = "linear"
 
     def __init__(self) -> None:
-        # Quantization states of the base weights that have been merged away, most recent last, so that
-        # unmerge can put them back. See set_base_weight.
-        self._unmerged_quant_states: list = []
+        # Per-block quantization state of the base weight from before the first merge, kept alive until
+        # the last adapter is unmerged so that unmerge can re-quantize on the grid that weight used.
+        # `None` when there is nothing to restore. See set_base_weight.
+        self._unmerged_quant_state = None
 
     def get_base_weight(self, base_layer: nn.Module) -> torch.Tensor:
         weight = base_layer.weight
@@ -202,15 +203,16 @@ class Bnb4bitBackend(QuantizationBackend):
 
         # Quantizing `weight_data` above computes a fresh per-block scale. Using it on unmerge rescales
         # every value of a block even when its codes come back unchanged, so the base weight drifts.
-        # Keep the scale the weight had before the merge and put it back when the adapter is removed.
-        # One state is kept per merged adapter so that unmerging several adapters in turn restores each
-        # intermediate weight on the grid it was stored with.
+        # Remember the scale the base weight had before the first merge and reuse it once the last
+        # adapter is gone. `unmerge` always removes every adapter, so the target is always that same
+        # weight and a single saved state is enough, no matter how many adapters were merged.
         if context == "merge":
-            self._unmerged_quant_states.append(weight.quant_state)
-        elif context == "unmerge" and self._unmerged_quant_states:
-            state = self._unmerged_quant_states.pop()
-            new_weight.quant_state = state
-            base_layer.quant_state = state
+            if self._unmerged_quant_state is None:
+                self._unmerged_quant_state = weight.quant_state
+        elif context == "unmerge" and self._unmerged_quant_state is not None and not peft_layer.merged_adapters:
+            new_weight.quant_state = self._unmerged_quant_state
+            base_layer.quant_state = self._unmerged_quant_state
+            self._unmerged_quant_state = None
 
         base_layer.weight = new_weight
 
