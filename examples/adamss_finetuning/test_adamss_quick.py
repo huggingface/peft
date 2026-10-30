@@ -4,9 +4,6 @@ Quick test for AdaMSS example - runs 1 epoch on small subset
 
 import sys
 
-
-sys.path.insert(0, "/Users/onelong/Documents/WorkSpace/CodeSpace/AdaMSS-main/peft-main/src")
-
 import evaluate
 import torch
 from datasets import load_dataset
@@ -21,7 +18,8 @@ from torchvision.transforms import (
 )
 from transformers import AutoImageProcessor, AutoModelForImageClassification, Trainer, TrainingArguments
 
-from peft import AdaMSSConfig, ASACallback, get_peft_model
+from peft import AdamssConfig, get_peft_model
+from peft.tuners.adamss.asa_callback import AdamssAsaCallback
 
 
 print("=" * 80)
@@ -30,7 +28,7 @@ print("=" * 80)
 
 # Load small subset
 print("\n📦 Loading CIFAR-10 (small subset for testing)...")
-dataset = load_dataset("cifar10")
+dataset = load_dataset("uoft-cs/cifar10")
 train_val = dataset["train"].train_test_split(test_size=0.1, seed=42)
 train_ds = train_val["train"].select(range(100))  # Only 100 samples
 val_ds = train_val["test"].select(range(50))
@@ -90,13 +88,16 @@ model = AutoModelForImageClassification.from_pretrained(
 
 # Configure AdaMSS
 print("\n⚙️  Applying AdaMSS...")
-config = AdaMSSConfig(
+config = AdamssConfig(
     r=100,
     num_subspaces=10,
     subspace_rank=3,
-    target_modules=["query", "value"],
+    target_modules=["q_proj", "v_proj"],
     use_asa=True,
-    target_kk=5,
+    asa_target_subspaces=5,
+    init_warmup=5,
+    final_warmup=20,
+    mask_interval=10,
     modules_to_save=["classifier"],
 )
 
@@ -106,12 +107,7 @@ model.print_trainable_parameters()
 
 # Setup ASA callback
 print("\n🔥 Setting up ASA callback...")
-asa_callback = ASACallback(
-    target_kk=5,
-    init_warmup=5,
-    final_warmup=20,
-    mask_interval=10,
-)
+asa_callback = AdamssAsaCallback()
 
 # Metrics
 metric = evaluate.load("accuracy")
