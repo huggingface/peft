@@ -421,6 +421,11 @@ class TestBnb4bitMergeUnmerge:
     # Small enough for the 4-bit codes to survive a round trip, which leaves the per-block scale as the
     # only thing that can still move the weight.
     delta = 3e-5
+    # Reusing the scale makes unmerge reproduce the dequantized weight exactly, so both tolerances are
+    # only there to tolerate values that are re-quantized onto a different code. `changed_tolerance`
+    # catches a handful of those, `mae_tolerance` a small but global rescale, which would stay below it.
+    changed_tolerance = 0.01
+    mae_tolerance = 1e-6
 
     def _build_model_with_perturbed_adapters(self, config_cls, config_kwargs, adapter_names=("default",)):
         """Load the quantized model the way a user would, attach the adapters and give them a small delta."""
@@ -477,14 +482,19 @@ class TestBnb4bitMergeUnmerge:
         if how == "one":
             model.merge_adapter()
         elif how == "together":
+            # merge_adapter() merges the active adapters, and add_adapter() leaves the first one active.
             model.base_model.set_adapter(["default", "second"])
             model.merge_adapter()
         else:  # "sequentially": merge the second adapter on top of the first
             model.merge_adapter(adapter_names=["default"])
             model.merge_adapter(adapter_names=["second"])
 
-    def _changed_fraction(self, config_cls, config_kwargs, *, how="one"):
-        """Fraction of the dequantized base weights that one merge/unmerge round trip changes."""
+    def _get_changed_fraction(self, config_cls, config_kwargs, *, how="one"):
+        """Measure how far one merge/unmerge round trip moves the dequantized base weights.
+
+        Returns the fraction of values that changed and their mean absolute change relative to the mean
+        absolute value of the unmerged weight, so that the error is dimensionless.
+        """
         adapter_names = ("default",) if how == "one" else ("default", "second")
         model = self._build_model_with_perturbed_adapters(config_cls, config_kwargs, adapter_names=adapter_names)
         layers = self._bnb_layers(model)
@@ -499,22 +509,31 @@ class TestBnb4bitMergeUnmerge:
         assert all(not layer.merged_adapters for layer in layers)
 
         changed = 0
+        deviation = 0.0
+        magnitude = 0.0
         numel = 0
         for layer, weight in zip(layers, before):
-            changed += (self._dequantize(layer) != weight).sum().item()
+            after = self._dequantize(layer).float()
+            weight = weight.float()
+            changed += (after != weight).sum().item()
+            deviation += (after - weight).abs().sum().item()
+            magnitude += weight.abs().sum().item()
             numel += weight.numel()
-        return changed / numel
+        return changed / numel, deviation / magnitude
 
     @pytest.mark.parametrize("config_cls,config_kwargs", ADAPTER_CASES, ids=_peft_id)
-    def test_merge_unmerge_keeps_base_weight_unchanged(self, config_cls, config_kwargs):
+    def test_merge_unmerge_keeps_base_weight_almost_unchanged(self, config_cls, config_kwargs):
         # Unmerging re-quantizes the weight and bitsandbytes recomputes the per-block scale while doing
         # so. A fresh scale rescales every value of a block even when the codes are restored, so the
-        # base weight drifts. Unmerge now reuses the scale the unmerged weight had.
-        changed = self._changed_fraction(config_cls, config_kwargs)
-        assert changed < 0.01, changed
+        # base weight drifts. Unmerge now reuses the scale the unmerged weight had. The codes are still
+        # re-quantized from the merged weight, so a few values can land on a different code.
+        changed, mae = self._get_changed_fraction(config_cls, config_kwargs)
+        assert changed < self.changed_tolerance, changed
+        assert mae < self.mae_tolerance, mae
 
     @pytest.mark.parametrize("how", ["together", "sequentially"])
     @pytest.mark.parametrize("config_cls,config_kwargs", ADAPTER_CASES, ids=_peft_id)
-    def test_merge_unmerge_two_adapters_keeps_base_weight_unchanged(self, config_cls, config_kwargs, how):
-        changed = self._changed_fraction(config_cls, config_kwargs, how=how)
-        assert changed < 0.01, changed
+    def test_merge_unmerge_two_adapters_keeps_base_weight_almost_unchanged(self, config_cls, config_kwargs, how):
+        changed, mae = self._get_changed_fraction(config_cls, config_kwargs, how=how)
+        assert changed < self.changed_tolerance, changed
+        assert mae < self.mae_tolerance, mae
