@@ -144,6 +144,8 @@ class LoraLayer(BaseTunerLayer):
         self.lora_bias: dict[str, bool] = {}
         self.lora_magnitude_vector = torch.nn.ModuleDict()  # for DoRA
         self._caches: dict[str, Any] = {}  # small ad hoc cache; values are not part of the state_dict
+        # base weight entries that unmerging an adapter would not restore exactly, see _add_delta_inplace
+        self._unmerge_residuals: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
         self.ephemeral_gpu_offload: bool = ephemeral_gpu_offload
         # flag to enable/disable casting of input to weight dtype during forward call
         self.cast_input_dtype_enabled: bool = True
@@ -158,6 +160,52 @@ class LoraLayer(BaseTunerLayer):
     def delete_adapter(self, adapter_name: str) -> None:
         super().delete_adapter(adapter_name)
         self.lora_variant.pop(adapter_name, None)
+        self.__dict__.get("_unmerge_residuals", {}).pop(adapter_name, None)
+
+    def _add_delta_inplace(self, adapter_name: str, weight: torch.Tensor, delta: torch.Tensor) -> None:
+        """`weight += delta`, inside `temporarily_merge_adapter` also remembering what unmerging will not restore.
+
+        Unmerging subtracts `delta.to(weight.dtype)` again, but in float16/bfloat16 the two roundings do not always
+        cancel, so a merge/unmerge round trip changes some base weights, and repeated round trips, like weight syncs
+        to an inference engine, make them drift. The entries the unmerge will get wrong are recorded here and
+        written back by `_restore_unmerge_residual`.
+        """
+        residuals = self.__dict__.setdefault("_unmerge_residuals", {})
+        residuals.pop(adapter_name, None)
+        record = (
+            self.__dict__.get("_exact_unmerge", False)
+            and type(weight) is torch.Tensor
+            and weight.dtype in (torch.float16, torch.bfloat16)
+            and weight.is_contiguous()
+            and weight.dim() > 0
+        )
+        if not record:
+            weight += delta
+            return
+
+        rows = weight.shape[0]
+        weight_2d = weight.view(rows, -1)
+        chunk = max(1, (1 << 24) // max(1, weight_2d.shape[1]))
+        index_dtype = torch.int32 if weight.numel() < 2**31 else torch.int64
+        indices, values = [], []
+        for start in range(0, rows, chunk):
+            weight_chunk = weight_2d[start : start + chunk]
+            delta_chunk = delta[start : start + chunk].reshape(weight_chunk.shape)
+            before = weight_chunk.clone()
+            weight_chunk += delta_chunk
+            wrong = ((weight_chunk - delta_chunk.to(weight.dtype)) != before).view(-1).nonzero().squeeze(-1)
+            if wrong.numel():
+                indices.append((wrong + start * weight_2d.shape[1]).to(index_dtype))
+                values.append(before.view(-1)[wrong])
+        if indices:
+            residuals[adapter_name] = (torch.cat(indices), torch.cat(values))
+
+    def _restore_unmerge_residual(self, adapter_name: str, weight: torch.Tensor) -> None:
+        residual = self.__dict__.get("_unmerge_residuals", {}).pop(adapter_name, None)
+        if residual is None or not weight.is_contiguous():
+            return
+        indices, values = residual
+        weight.view(-1)[indices.to(weight.device)] = values.to(weight.device)
 
     def _get_in_out_features(self, module: nn.Module) -> tuple[int, int] | tuple[None, None]:
         return _get_in_out_features(module)
@@ -1090,7 +1138,7 @@ class Linear(nn.Module, LoraLayer):
                     orig_dtype = orig_weight.dtype
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
                         delta_weight = self.get_delta_weight(active_adapter)
-                        orig_weight += delta_weight.to(orig_dtype)
+                        self._add_delta_inplace(active_adapter, orig_weight, delta_weight.to(orig_dtype))
                     else:
                         orig_weight = self.lora_variant[active_adapter].merge_safe(self, active_adapter, orig_weight)
 
@@ -1118,7 +1166,7 @@ class Linear(nn.Module, LoraLayer):
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
                         delta_weight = self.get_delta_weight(active_adapter)
-                        base_layer.weight.data += delta_weight
+                        self._add_delta_inplace(active_adapter, base_layer.weight.data, delta_weight)
                     else:
                         self.lora_variant[active_adapter].merge_unsafe(self, active_adapter, base_layer.weight)
 
@@ -1147,6 +1195,7 @@ class Linear(nn.Module, LoraLayer):
                     orig_dtype = weight.dtype
                     delta_weight = self.get_delta_weight(active_adapter)
                     weight.data -= delta_weight.to(orig_dtype)
+                    self._restore_unmerge_residual(active_adapter, weight.data)
                 else:
                     unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
                     weight.data = unmerged
@@ -1468,7 +1517,8 @@ class Embedding(nn.Module, LoraLayer):
                     # because of the copy operation.
                     orig_weight = base_layer.weight.data.clone()
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
-                        orig_weight += self.get_delta_weight(active_adapter).to(orig_dtype)
+                        delta_weight = self.get_delta_weight(active_adapter).to(orig_dtype)
+                        self._add_delta_inplace(active_adapter, orig_weight, delta_weight)
                     else:
                         orig_weight = self.lora_variant[active_adapter].merge_safe(self, active_adapter, orig_weight)
 
@@ -1480,7 +1530,8 @@ class Embedding(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weight
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
-                        base_layer.weight.data += self.get_delta_weight(active_adapter).to(orig_dtype)
+                        delta_weight = self.get_delta_weight(active_adapter).to(orig_dtype)
+                        self._add_delta_inplace(active_adapter, base_layer.weight.data, delta_weight)
                     else:
                         self.lora_variant[active_adapter].merge_unsafe(self, active_adapter, base_layer.weight)
                 self.merged_adapters.append(active_adapter)
@@ -1499,6 +1550,7 @@ class Embedding(nn.Module, LoraLayer):
                 weight = self.get_base_layer().weight
                 if active_adapter not in self.lora_variant:  # vanilla LoRA
                     weight.data -= self.get_delta_weight(active_adapter).to(orig_dtype)
+                    self._restore_unmerge_residual(active_adapter, weight.data)
                 else:
                     unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
                     weight.data = unmerged
@@ -1811,7 +1863,7 @@ class _ConvNd(nn.Module, LoraLayer):
                     orig_weight = base_layer.weight.data.clone()
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
                         delta_weight = self.get_delta_weight(active_adapter)
-                        orig_weight += delta_weight.to(orig_dtype)
+                        self._add_delta_inplace(active_adapter, orig_weight, delta_weight.to(orig_dtype))
                     else:
                         orig_weight = self.lora_variant[active_adapter].merge_safe(self, active_adapter, orig_weight)
 
@@ -1839,7 +1891,7 @@ class _ConvNd(nn.Module, LoraLayer):
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
                         delta_weight = self.get_delta_weight(active_adapter)
-                        base_layer.weight.data += delta_weight
+                        self._add_delta_inplace(active_adapter, base_layer.weight.data, delta_weight)
                     else:
                         self.lora_variant[active_adapter].merge_unsafe(self, active_adapter, base_layer.weight)
 
@@ -1867,6 +1919,7 @@ class _ConvNd(nn.Module, LoraLayer):
                     orig_dtype = weight.dtype
                     delta_weight = self.get_delta_weight(active_adapter)
                     weight.data -= delta_weight.to(orig_dtype)
+                    self._restore_unmerge_residual(active_adapter, weight.data)
                 else:
                     unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
                     weight.data = unmerged
@@ -2799,7 +2852,7 @@ class ParamWrapper(nn.Module, LoraLayer):
                     orig_weight = param.data.clone()
                     orig_dtype = orig_weight.dtype
                     delta_weight = self.get_delta_weight(active_adapter)
-                    orig_weight += delta_weight.to(orig_dtype)
+                    self._add_delta_inplace(active_adapter, orig_weight, delta_weight.to(orig_dtype))
 
                     if not torch.isfinite(orig_weight).all():
                         raise ValueError(
@@ -2810,7 +2863,7 @@ class ParamWrapper(nn.Module, LoraLayer):
 
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
-                    param.data += delta_weight
+                    self._add_delta_inplace(active_adapter, param.data, delta_weight)
 
                 self.merged_adapters.append(active_adapter)
 
@@ -2826,6 +2879,7 @@ class ParamWrapper(nn.Module, LoraLayer):
                 orig_dtype = param.dtype
                 delta_weight = self.get_delta_weight(active_adapter)
                 param.data -= delta_weight.to(orig_dtype)
+                self._restore_unmerge_residual(active_adapter, param.data)
 
     def _check_forward_args(self, x, *args, **kwargs):
         """Check if the arguments are compatible with the configs and state of the model"""
