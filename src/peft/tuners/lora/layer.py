@@ -19,7 +19,7 @@ import math
 import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
-from typing import Any, Optional, Union
+from typing import Any, Optional, Self, Union
 
 import torch
 import torch.distributed as dist
@@ -2376,18 +2376,14 @@ class MultiheadAttention(nn.Module, LoraLayer):
             del base_layer.weight
             base_layer.register_parameter("weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad))
 
-    def _apply(self, fn, recurse=True):
+    def _apply(self, *args, **kwargs) -> Self:
         # changes in dtype, device, etc.
         self._restore_weights()
-        return super()._apply(fn, recurse=recurse)
+        return super()._apply(*args, **kwargs)
 
-    def _load_from_state_dict(
-        self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
-    ):
+    def _load_from_state_dict(self, *args, **kwargs) -> None:
         self._restore_weights()
-        super()._load_from_state_dict(
-            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
-        )
+        super()._load_from_state_dict(*args, **kwargs)
 
     def state_dict(self, *args, **kwargs):
         self._restore_weights()
