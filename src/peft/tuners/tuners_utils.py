@@ -22,7 +22,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from contextlib import contextmanager, nullcontext
-from typing import Any, Optional, Union, overload
+from typing import Any, Literal, Optional, Union, overload
 
 import torch
 from accelerate.hooks import AlignDevicesHook
@@ -1963,13 +1963,18 @@ class BaseTunerLayer(ABC):
             return self.quantization_backend.get_base_weight(self.get_base_layer())
         return self.get_base_layer().weight.data
 
-    def set_base_weight(self, weight_data: torch.Tensor) -> None:
+    def set_base_weight(
+        self,
+        weight_data: torch.Tensor,
+        context: Literal["merge", "unmerge"] | None = None,
+    ) -> None:
         """Sets the base weight of the base layer to the new tensor
 
-        This works also with quantized weights.
+        This works also with quantized weights. `context` tells the quantization backend whether the weight is being
+        stored as part of a merge or an unmerge, which some backends need to preserve their quantization state.
         """
         if self.quantization_backend is not None:
-            self.quantization_backend.set_base_weight(self, weight_data)
+            self.quantization_backend.set_base_weight(self, weight_data, context=context)
         else:
             self.get_base_layer().weight.data = weight_data
 

@@ -406,13 +406,14 @@ def _bnb_4bit_cpu_quantization_available() -> bool:
 
 
 # Methods that merge 4-bit layers through the shared QuantizationBackend, rather than through LoRA's
-# own implementation. VeRA is missing because it has no delta until the user sets vera_A / vera_B.
+# own implementation.
 GENERIC_BACKEND_CASES = [
     (BOFTConfig, {"boft_block_size": 4, "target_modules": ["q_proj", "v_proj"]}),
     (OFTConfig, {"oft_block_size": 4, "target_modules": ["q_proj", "v_proj"]}),
     (MissConfig, {"r": 2, "target_modules": ["q_proj", "v_proj"]}),
     (PacaConfig, {"r": 8, "random_seed": 42, "target_modules": ["q_proj", "v_proj"]}),
     (ShiraConfig, {"r": 8, "random_seed": 42, "target_modules": ["q_proj", "v_proj"]}),
+    (VeraConfig, {"r": 8, "target_modules": ["q_proj", "v_proj"]}),
 ]
 
 

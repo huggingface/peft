@@ -192,11 +192,11 @@ class Linear(nn.Module, VeraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.set_base_weight(weight)
+                    self.set_base_weight(weight, context="merge")
                 else:
                     weight = self.get_base_weight()
                     weight += self.get_delta_weight(active_adapter)
-                    self.set_base_weight(weight)
+                    self.set_base_weight(weight, context="merge")
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -209,7 +209,7 @@ class Linear(nn.Module, VeraLayer):
             if active_adapter in self.vera_lambda_d.keys():
                 weight = self.get_base_weight()
                 weight -= self.get_delta_weight(active_adapter)
-                self.set_base_weight(weight)
+                self.set_base_weight(weight, context="unmerge")
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """

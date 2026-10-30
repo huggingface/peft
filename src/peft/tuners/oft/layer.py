@@ -573,7 +573,7 @@ class Linear(nn.Module, OFTLayer):
                                 f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
 
-                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
+                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype), context="merge")
                 else:
                     # Non-quantized unsafe merge: write the result directly into the
                     # existing weight storage to avoid the extra copy that
@@ -607,7 +607,7 @@ class Linear(nn.Module, OFTLayer):
                 orig_weight = torch.mm(torch.linalg.inv(oft_mat).to(previous_dtype), orig_weight.to(previous_dtype))
                 orig_weight = torch.transpose(orig_weight, 0, 1)
 
-                self.set_base_weight(orig_weight.to(orig_dtype))
+                self.set_base_weight(orig_weight.to(orig_dtype), context="unmerge")
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -818,7 +818,7 @@ class Conv2d(nn.Module, OFTLayer):
                                 f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
 
-                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
+                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype), context="merge")
                 else:
                     # Non-quantized unsafe merge: write the result directly into the
                     # existing weight storage to avoid the extra copy that
@@ -865,7 +865,7 @@ class Conv2d(nn.Module, OFTLayer):
                     base_layer.kernel_size[0],
                 )
 
-                self.set_base_weight(orig_weight.to(orig_dtype))
+                self.set_base_weight(orig_weight.to(orig_dtype), context="unmerge")
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -1044,7 +1044,7 @@ class Embedding(nn.Module, OFTLayer):
                                 f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
 
-                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
+                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype), context="merge")
                 else:
                     # Non-quantized unsafe merge: write the result directly into the
                     # existing weight storage to avoid the extra copy that
@@ -1076,7 +1076,7 @@ class Embedding(nn.Module, OFTLayer):
                 orig_dtype = orig_weight.dtype
                 orig_weight = torch.mm(orig_weight.to(oft_mat.dtype), torch.linalg.inv(oft_mat))
 
-                self.set_base_weight(orig_weight.to(orig_dtype))
+                self.set_base_weight(orig_weight.to(orig_dtype), context="unmerge")
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
