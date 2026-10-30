@@ -4017,7 +4017,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # adding the adapter is fine
         model.add_adapter("other", config1)
 
-        msg = "Only one adapter can be set at a time for TrainableTokensWrapper"
+        msg = "Token indices of adapter 'other' are already defined"
         with pytest.raises(ValueError, match=msg):
             model.set_adapter(["default", "other"])
 
