@@ -389,6 +389,33 @@ class PeftCommonTester:
             with open(successful_save_dir / "adapter_config.json", encoding="utf-8") as file:
                 assert json.load(file)["inference_mode"] is True
 
+    def _test_load_no_warning(self, model_id, config_cls, config_kwargs):
+        # A valid checkpoint must load without any warning about missing or unexpected adapter keys, whether it is
+        # loaded through `from_pretrained` or `load_adapter`. This guards against false alarms in the adapter key check
+        # for every PEFT method (see issue 3804).
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+            model = get_peft_model(model, config)
+            model = model.to(self.torch_device)
+
+            with tempfile.TemporaryDirectory() as tmp_dirname:
+                model.save_pretrained(tmp_dirname)
+
+                base_model = self.transformers_class.from_pretrained(model_id)
+                with warnings.catch_warnings(record=True) as recs:
+                    warnings.simplefilter("always")
+                    PeftModel.from_pretrained(base_model, tmp_dirname)
+                assert not any("adapter keys" in str(rec.message) for rec in recs)
+
+                base_model = self.transformers_class.from_pretrained(model_id)
+                config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+                model = get_peft_model(base_model, config)
+                with warnings.catch_warnings(record=True) as recs:
+                    warnings.simplefilter("always")
+                    model.load_adapter(tmp_dirname, adapter_name="default")
+                assert not any("adapter keys" in str(rec.message) for rec in recs)
+
     def _test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs, safe_serialization=True):
         if issubclass(config_cls, AdaLoraConfig):
             # AdaLora does not support adding more than 1 adapter
