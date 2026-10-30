@@ -492,8 +492,8 @@ class TestBnb4bitMergeUnmerge:
     def _get_changed_fraction(self, config_cls, config_kwargs, *, how="one"):
         """Measure how far one merge/unmerge round trip moves the dequantized base weights.
 
-        Returns the fraction of values that changed and their mean absolute change relative to the mean
-        absolute value of the unmerged weight, so that the error is dimensionless.
+        Returns the fraction of values that changed and their mean absolute change relative to the mean absolute value
+        of the unmerged weight, so that the error is dimensionless.
         """
         adapter_names = ("default",) if how == "one" else ("default", "second")
         model = self._build_model_with_perturbed_adapters(config_cls, config_kwargs, adapter_names=adapter_names)
