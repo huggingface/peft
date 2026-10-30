@@ -136,6 +136,7 @@ TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING["gpt2"] = ["mlp.c_proj"]
 
 TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_SUPERTUNING_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
+TRANSFORMERS_MODELS_TO_PACA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING["phi"] = ["q_proj", "v_proj"]
 
 TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
@@ -411,9 +412,6 @@ DUMMY_MODEL_CONFIG = {"model_type": "custom"}
 # otherwise there is no point in optimizing and there is a small chance of bugs in the optimization algorithm, so no
 # point in taking unnecessary risks. See #2045 for more context.
 MIN_TARGET_MODULES_FOR_OPTIMIZATION = 20
-# Device mesh dimension names used for tensor parallelism without a Transformers TP plan (e.g. `parallelize_module`), see
-# `_get_in_out_features`.
-TP_MESH_DIM_NAMES = {"tp"}
 # dtypes that are allowed to be used for adapter computation
 ALLOWED_COMPUTE_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 # float dtypes that should be upcast in the adapter for computation

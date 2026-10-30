@@ -47,6 +47,7 @@ A few directories exist for specific purposes and are run separately from the ma
 3. Does it concern a library feature (configs, saving, injection, ...)? Extend the corresponding cross-cutting file.
 4. Does it need a GPU or a quantization backend? It goes to `test_gpu_examples.py` / `test_common_gpu.py` / `test_quantization.py` with the appropriate marker or decorator.
 5. Does the test extend an existing test class? Put the test next to similar test methods (e.g. a new merging test should follow existing merging tests); if there are no similar test methods, put it at the end of the test class.
+6. Can an existing test be slightly modified to cover this case, e.g. by adding a parametrization? Prefer extending the test over writing a completely new one.
 
 Do not add standalone test scripts or new files that duplicate what the matrix already covers. If in doubt, search for a similar existing test (e.g. an older, comparable bug fix) and put the new test next to it.
 
@@ -55,7 +56,7 @@ Do not add standalone test scripts or new files that duplicate what the matrix a
 When adding a new method, coverage means adding it to the existing matrices rather than writing a separate suite:
 
 1. Add test cases to `TEST_CASES` and `MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES` in `test_custom_models.py` first; this covers most of the PEFT functionality and is quick to iterate on.
-2. Add entries to the model-architecture files (`test_decoder_models.py` etc.) as applicable to the method's task types.
+2. Add entries to the model-architecture files (`test_decoder_models.py` etc.) as applicable to the method's task types. If the method supports `nn.Conv2d`, also extend `test_vision_models.py`.
 3. Add the config class to `ALL_CONFIG_CLASSES` in `test_config.py` and to the cases in `test_initialization.py` where applicable.
 4. If the method supports quantization, extend `test_quantization.py`.
 5. Only add `test_<method>.py` for genuinely method-specific behavior.
@@ -69,7 +70,7 @@ Tip: A recently merged PR that adds a new PEFT method is the best template. Chec
 - `hub_online_once(model_id)`: a context manager that allows the first download of a given model id and forces offline mode afterwards, so repeated hub access for the same model is caught and CI does not hammer the HF hub. Wrap model loading in it. If the test also loads a tokenizer, extend the cache key (e.g. `hub_online_once(model_id + "_tokenizer")`) so it does not share the cache pool with tests that only load the model.
 - `require_*` decorators (`require_torch_gpu`, `require_bitsandbytes`, `require_multi_accelerator`, ...): skip tests when the hardware or optional package is missing. Use these rather than ad hoc skips.
 - Cached data loaders (`load_dataset_english_quotes`, `load_cat_image`) for tests that need real inputs; `temp_seed` for local determinism.
-- Most PEFT methods like LoRA are initialzed in a way that they don't have an effect before training them. This can be a hindrance for testing, as many tests require the adapter to affect the output to work properly. Therefore, most PEFT methods offer a config option `init_weights=False` which initializes their weights to have a non-zero effect. The name of the argument is not fully consistent, e.g. for LoRA we need to pass `init_lora_weights=False`. There is a helper function, `set_init_weights_false`, which updates the `kwargs` accordingly.
+- Most PEFT methods like LoRA are initialzed in a way that they don't have an effect before training them. This can be a hindrance for testing, as many tests require the adapter to affect the output to work properly. Therefore, most PEFT methods offer a config option `init_weights=False` which initializes their weights to have a non-zero effect. The name of the argument is not fully consistent, e.g. for LoRA we need to pass `init_lora_weights=False`. There is a helper function, `set_init_weights_false`, which updates the `kwargs` accordingly. Always prefer this approach to manually overriding weights.
 - Normal CI is tested on Ubuntu and Windows and with the four oldest Python versions that are still maintained (i.e. not EOL).
 - Normal CI tests will generally run with the latest release of PyTorch, Transformers, Diffusers, Accelerate, etc. Nightly tests run on the main branch of Transformers and Accelerate.
 

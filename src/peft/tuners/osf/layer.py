@@ -22,7 +22,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from peft.tuners._buffer_dict import BufferDict
-from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 from .config import OSFConfig
 from .utils import (
@@ -249,8 +249,9 @@ class OSFLayer(BaseTunerLayer):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
         """
-        if adapter_names is None:
-            adapter_names = self.active_adapters
+        adapter_names = check_adapters_to_merge(self, adapter_names)
+        if not adapter_names:
+            return
 
         for active_adapter in adapter_names:
             if active_adapter in self.osf_svd_params.keys():

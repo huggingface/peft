@@ -548,7 +548,7 @@ class LoraConfig(PeftConfig):
             use the original default value of `lora_alpha/r`.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
-        init_lora_weights (`bool` | `Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "astra", "loftq", "orthogonal", "mica"]`):
+        init_lora_weights (`bool` | `Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "astra", "loftq", "orthogonal", "mica", "nora"]`):
             How to initialize the weights of the adapter layers. Passing True (default) results in the default
             initialization from the reference implementation from Microsoft, with the LoRA B weight being set to 0.
             This means that without further training, the LoRA adapter will be a no-op. Setting the initialization to
@@ -577,7 +577,13 @@ class LoraConfig(PeftConfig):
             href='https://arxiv.org/abs/2604.01694' >Minor Component Adaptation (MiCA)</a>, which initializes B from
             the r left singular vectors of the base weight associated with the smallest singular values, sets A to
             zero, and freezes B during training; only A is updated. Currently supported for linear and embedding
-            layers.
+            layers. Passing `"nora"` results in the initialization of <a
+            href='https://huggingface.co/papers/2608.31036' >Normalized Low-Rank Adaptation (NoRA)</a>, which
+            normalizes each column of the randomly initialized LoRA A weight to unit L2 norm and sets the LoRA B weight
+            to zero. Normalization is applied only at initialization; the base weights are unchanged and both A and B
+            remain trainable. The recommended setting is `lora_alpha` equal to `r` with `use_rslora=False`, which keeps
+            a 1:1 ratio and a scaling factor of 1. Currently supported for linear layers and for `nn.Parameter`s
+            targeted with `target_parameters`.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -608,7 +614,10 @@ class LoraConfig(PeftConfig):
         loftq_config (`Optional[LoftQConfig]`):
             The configuration of LoftQ. If this is not None, then LoftQ will be used to quantize the backbone weights
             and initialize Lora layers. Also pass `init_lora_weights='loftq'`. Note that you should not pass a
-            quantized model in this case, as LoftQ will quantize the model itself.
+            quantized model in this case, as LoftQ will quantize the model itself. LoftQ is only applied to linear
+            layers, including those targeted via `target_parameters`. Embedding and convolutional layers are not
+            supported and use the default LoRA initialization instead. `nn.MultiheadAttention` layers are not supported
+            and raise an error.
         eva_config (`Optional[EvaConfig]`):
             The configuration of EVA. At a minimum the dataset argument needs to be set (use the same dataset as for
             finetuning).
@@ -757,6 +766,7 @@ class LoraConfig(PeftConfig):
             "loftq",
             "orthogonal",
             "mica",
+            "nora",
         ]
     ) = field(
         default=True,
@@ -781,7 +791,13 @@ class LoraConfig(PeftConfig):
                 "Pass `'orthogonal'` for orthogonal initialization of LoRA A and B. "
                 "Pass `'mica'` to use MiCA initialization, where B is set to the r left singular vectors of the "
                 "base weight associated with the smallest singular values, A is set to zero, and B is frozen during "
-                "training (only A is updated)."
+                "training (only A is updated). "
+                "Pass 'nora' to use NoRA initialization, which normalizes each column of the randomly initialized "
+                "LoRA A weight to unit L2 norm and sets the LoRA B weight to zero. Normalization is applied only at "
+                "initialization; the base weights are unchanged and both A and B remain trainable. The recommended "
+                "setting is lora_alpha equal to r with use_rslora=False, which keeps a 1:1 ratio and a scaling "
+                "factor of 1. Currently supported for linear layers and for nn.Parameters targeted with "
+                "target_parameters."
             ),
             # lora_variants: lists the string values (or prefixes) of init_lora_weights
             # that activate a LoRA variant (e.g. "mica" activates MiCALinearVariant).
@@ -867,7 +883,10 @@ class LoraConfig(PeftConfig):
         metadata={
             "help": (
                 "The configuration of LoftQ. If this is passed, then LoftQ will be used to quantize the backbone "
-                "weights and initialize Lora layers. Also set `init_lora_weights='loftq'` in this case."
+                "weights and initialize Lora layers. Also set `init_lora_weights='loftq'` in this case. "
+                "LoftQ is only applied to linear layers, including those targeted via `target_parameters`. Embedding "
+                "and convolutional layers are not supported and use the default LoRA initialization instead. "
+                "`nn.MultiheadAttention` layers are not supported and raise an error."
             )
         },
     )

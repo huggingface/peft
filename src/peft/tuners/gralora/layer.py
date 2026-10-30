@@ -330,11 +330,12 @@ class Linear(nn.Linear, GraloraLayer):
             result = self.base_layer(x, *args, **kwargs)
             torch_result_dtype = result.dtype
 
-            # Handle 2D input: [batch, features] -> [batch, 1, features]
-            # This is common for MLPs and other non-sequence models
-            x_is_2d = x.ndim == 2
-            if x_is_2d:
+            # Bring the input of shape [*, F] to [B, L, F]. 2D inputs are common for MLPs and other non-sequence
+            # models, inputs with more than 3 dims e.g. for channels-last image models.
+            if x.ndim == 2:
                 x = x.unsqueeze(1)  # [B, F] -> [B, 1, F]
+            elif x.ndim > 3:
+                x = x.flatten(0, -3)  # [B_1, ..., B_n, L, F] -> [B_1 * ... * B_n, L, F]
 
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.gralora_A.keys():
@@ -372,15 +373,13 @@ class Linear(nn.Linear, GraloraLayer):
                     gralora_B,
                 ).reshape(B, L, -1)
 
-                # Squeeze back to 2D if input was 2D
-                if x_is_2d:
-                    output = output.squeeze(1)  # [B, 1, F] -> [B, F]
+                # Restore the leading dims of the input
+                output = output.reshape(result.shape)
 
                 result += scaling * output.to(torch_result_dtype)
                 if hybrid_r > 0:
                     hybrid_output = gralora_B_general(gralora_A_general(dropout(x.to(gralora_dtype))))
-                    if x_is_2d:
-                        hybrid_output = hybrid_output.squeeze(1)
+                    hybrid_output = hybrid_output.reshape(result.shape)
                     result += scaling * hybrid_output.to(torch_result_dtype)
 
         result = result.to(previous_dtype)

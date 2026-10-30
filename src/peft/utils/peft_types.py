@@ -16,7 +16,7 @@ import enum
 from typing import Optional
 
 
-class PeftType(str, enum.Enum):
+class PeftType(str, enum.Enum):  # noqa: UP042
     """
     Enum class for the different types of adapters in PEFT.
 
@@ -45,6 +45,7 @@ class PeftType(str, enum.Enum):
     - MISS
     - RANDLORA
     - SHIRA
+    - PACA
     - C3A
     - ROAD
     - WAVEFT
@@ -101,9 +102,10 @@ class PeftType(str, enum.Enum):
     SHADOW = "SHADOW"
     SUPERTUNING = "SUPERTUNING"
     DEFT = "DEFT"
+    PACA = "PACA"
 
 
-class TaskType(str, enum.Enum):
+class TaskType(str, enum.Enum):  # noqa: UP042
     """
     Enum class for the different types of tasks supported by PEFT.
 

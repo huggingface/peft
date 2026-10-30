@@ -24,7 +24,7 @@ from collections.abc import Sequence
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal, Optional, Self, Union
 
 import packaging.version
 import torch
@@ -448,7 +448,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         low_cpu_mem_usage: bool = False,
         key_mapping: Optional[dict[str, str]] = None,
         **kwargs: Any,
-    ) -> PeftModel:
+    ) -> Self:
         r"""
         Instantiate a PEFT model from a pretrained model and loaded PEFT weights.
 
@@ -735,6 +735,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             raise ValueError("Not supported")
 
         prompt_encoder = prompt_encoder.to(self.device)
+        if config.inference_mode:
+            prompt_encoder.requires_grad_(False)
         self.prompt_encoder.update(torch.nn.ModuleDict({adapter_name: prompt_encoder}))
         self.prompt_tokens[adapter_name] = torch.arange(
             config.num_virtual_tokens * config.num_transformer_submodules
@@ -1087,18 +1089,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     "This is most likely unintentional. After exiting the disable_adapter context, all adapters "
                     "will be enabled"
                 )
-            try:
-                self.base_model.disable_adapter_layers()
-                self._adapters_disabled = True
-                yield
-            finally:
-                if model_status.enabled is not False:
-                    # model_status.enabled is `True` or `"irregular"`
-                    # with FSDP2, re-enabling has to reach the sharded parameters; it decides the final state, so
-                    # disabling doesn't need to reshard
-                    self._reshard_fsdp_modules()
-                    self.base_model.enable_adapter_layers()
-                self._adapters_disabled = was_disabled
+            # model_status.enabled is `True`, `False` or `"irregular"`
+            reenable = model_status.enabled is not False
+            with self._reenable_on_fsdp_shards(reenable):
+                try:
+                    self.base_model.disable_adapter_layers()
+                    self._adapters_disabled = True
+                    yield
+                finally:
+                    if reenable:
+                        self.base_model.enable_adapter_layers()
+                    self._adapters_disabled = was_disabled
 
     def get_base_model(self) -> torch.nn.Module:
         """
@@ -1706,7 +1707,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         Sets the active adapter.
 
-        Only one adapter can be active at a time.
+        Only one adapter can be active at a time because not all PEFT methods support multiple active adapters. To
+        activate multiple adapters for supported methods, use `model.base_model.set_adapter(adapter_names)`.
 
         Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True) unless
         inference_mode is True.
@@ -1717,11 +1719,30 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             inference_mode (`bool`, optional):
                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
+        if not isinstance(adapter_name, str):
+            raise TypeError(
+                "PeftModel.set_adapter only supports a single adapter name as a string. "
+                "To activate multiple adapters, use model.base_model.set_adapter(adapter_names) "
+                "if the PEFT method supports it."
+            )
         if adapter_name not in self.peft_config:
             raise ValueError(f"Adapter {adapter_name} not found.")
+        is_prompt_learning = self.peft_config[adapter_name].is_prompt_learning
+        # Prompt learning methods have no BaseTunerLayer modules, so they can never be merged; skip the check.
+        if not is_prompt_learning and any(
+            isinstance(module, BaseTunerLayer) and module.merged for module in self.modules()
+        ):
+            # Unmerge before resharding. FSDP2 can't reshard an FSDP unit that still holds a merge (it would
+            # drop the merged weights), so _reshard_fsdp_modules() below would skip it, and the requires_grad
+            # change that follows would then land on a transient unsharded copy that the next reshard silently
+            # drops, leaving the newly active adapter frozen (#3872). base_model.set_adapter() below already
+            # unmerges a merged layer before setting it active, but only after the reshard attempt already ran,
+            # and by unmerging here first, that call never sees a merged layer to warn about, so warn here instead.
+            warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
+            self.base_model.unmerge_adapter()
         self._reshard_fsdp_modules()
         self.active_adapter = adapter_name
-        if not self.peft_config[adapter_name].is_prompt_learning:
+        if not is_prompt_learning:
             # _set_adapter does not need to be called, since it's called through the BaseTuner class.
             self.base_model.set_adapter(adapter_name, inference_mode=inference_mode)
         else:
@@ -1778,6 +1799,34 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 if not sharded_modules.isdisjoint(merged_modules):
                     continue
             fsdp_module.reshard()
+
+    @contextmanager
+    def _reenable_on_fsdp_shards(self, reenable: bool):
+        """
+        Context manager for `disable_adapter()` that makes re-enabling the adapter layers at its end reach the FSDP2
+        shards.
+
+        The parameters registered on entry are the shards, or unsharded copies with the same `requires_grad`. If they
+        are still registered after re-enabling, with unchanged `requires_grad`, re-enabling already reached the shards.
+        Otherwise, as when a forward inside the context replaced them, the FSDP2 modules are resharded and the adapter
+        layers are enabled again.
+        """
+        check_fsdp_params = reenable and bool(get_fsdp_modules(self))
+        if not check_fsdp_params:
+            yield
+            return
+
+        entry_params = {name: (param, param.requires_grad) for name, param in self.named_parameters()}
+        try:
+            yield
+        finally:
+            params = dict(self.named_parameters())
+            if any(
+                params.get(name) is not param or param.requires_grad != requires_grad
+                for name, (param, requires_grad) in entry_params.items()
+            ):
+                self._reshard_fsdp_modules()
+                self.base_model.enable_adapter_layers()
 
     @property
     def base_model_torch_dtype(self):
@@ -2325,7 +2374,8 @@ class PeftModelForCausalLM(PeftModel):
             # Generate prefix type mask and shift input type mask values to avoid conflicts
             prefix_type_mask = torch.Tensor(cpt_tokens_type_mask).long().view(1, -1)
             prefix_type_mask = prefix_type_mask.repeat(batch_size, 1).to(labels.device)
-            adjusted_input_type_mask = input_type_mask
+            # copy before shifting so the caller-provided mask is not modified in place
+            adjusted_input_type_mask = input_type_mask.clone()
             adjusted_input_type_mask[adjusted_input_type_mask > 0] += prefix_type_mask.max()
             # Concatenate prefix and shifted input type masks
             cpt_type_mask = torch.cat((prefix_type_mask, adjusted_input_type_mask), dim=1)
@@ -2342,9 +2392,7 @@ class PeftModelForCausalLM(PeftModel):
         else:
             # Calculate the loss using the custom CPT loss function
             cpt_embedding = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
-            base_model_output = cpt_embedding.calculate_loss(
-                base_model_output, cpt_labels, cpt_type_mask, self.peft_config["default"]
-            )
+            base_model_output = cpt_embedding.calculate_loss(base_model_output, cpt_labels, cpt_type_mask, peft_config)
             return base_model_output
 
     def generate(self, *args, **kwargs):
@@ -2452,6 +2500,9 @@ class PeftModelForCausalLM(PeftModel):
                     # 2d attention mask
                     model_kwargs["attention_mask"] = torch.cat((prefix_attention_mask, attention_mask), dim=1)
 
+            if peft_config.peft_type not in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
+                # `generate` builds position_ids itself; prompt learning methods ignore them
+                model_kwargs["position_ids"] = None
             self._adjust_prompt_learning_kwargs(
                 peft_config,
                 kwargs=model_kwargs,
