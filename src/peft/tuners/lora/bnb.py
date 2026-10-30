@@ -342,6 +342,10 @@ if is_bnb_4bit_available():
                 lora_alpha=lora_alpha,
                 config=config,
             )
+            # Per-block quantization scale of the unmerged base weight, kept alive between merge and
+            # unmerge so that unmerge can re-quantize on the grid the unmerged weight used. If None,
+            # unmerge falls back to letting bitsandbytes pick a fresh scale.
+            self._unmerged_quant_state = None
 
         def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
             if config.velora_config is not None:
@@ -390,6 +394,10 @@ if is_bnb_4bit_available():
                 # Refer to https://gist.github.com/ChrisHayduk/1a53463331f52dca205e55982baf9930
                 weight = self.get_base_layer().weight
                 kwargs = weight.__dict__
+
+                if self._unmerged_quant_state is None:
+                    # remember the scale the unmerged weight was quantized with, see unmerge()
+                    self._unmerged_quant_state = weight.quant_state
 
                 output = dequantize_bnb_weight(weight, state=weight.quant_state)
                 if active_adapter not in self.lora_variant:  # vanilla LoRA
@@ -461,7 +469,17 @@ if is_bnb_4bit_available():
                     kwargs["bnb_quantized"] = False
                 kwargs["requires_grad"] = False
                 kwargs.pop("data", None)
-                self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
+                new_weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
+
+                base_layer = self.get_base_layer()
+                if self._unmerged_quant_state is not None and not self.merged_adapters:
+                    # Quantizing `w_data` above computed a fresh per-block scale. Using it would
+                    # rescale every value of a block even when its codes are restored correctly, so
+                    # reuse the scale the unmerged weight had instead. See merge().
+                    new_weight.quant_state = self._unmerged_quant_state
+                    base_layer.quant_state = self._unmerged_quant_state
+                    self._unmerged_quant_state = None
+                base_layer.weight = new_weight
 
                 if self.lora_bias[active_adapter]:
                     self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias * self.scaling[active_adapter]

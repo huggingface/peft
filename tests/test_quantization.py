@@ -18,12 +18,22 @@ Test PEFT method x quantization method matrix, focusing on basic tests.
 
 from dataclasses import dataclass
 
+import packaging.version
 import pytest
 import torch
 from accelerate.utils.memory import clear_device_cache
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig, TorchAoConfig
 
-from peft import BOFTConfig, MissConfig, OFTConfig, PacaConfig, ShiraConfig, VeraConfig, get_peft_model
+from peft import (
+    BOFTConfig,
+    LoraConfig,
+    MissConfig,
+    OFTConfig,
+    PacaConfig,
+    ShiraConfig,
+    VeraConfig,
+    get_peft_model,
+)
 from peft.import_utils import (
     is_bnb_4bit_available,
     is_bnb_available,
@@ -384,3 +394,146 @@ class TestQuantization:
             out_unloaded = model(dummy_input).logits
 
         check_outputs_similar(out_before, out_unloaded)
+
+
+def _bnb_4bit_cpu_quantization_available() -> bool:
+    # bitsandbytes only got CPU (de)quantization kernels in 0.46.0
+    if not is_bnb_available():
+        return False
+    import bitsandbytes as bnb
+
+    return packaging.version.parse(bnb.__version__) >= packaging.version.parse("0.46.0")
+
+
+# LoRA writes its own 4-bit merge/unmerge, every other method goes through the shared QuantizationBackend.
+LORA_CASE = (LoraConfig, {"r": 8, "lora_alpha": 16, "target_modules": ["q_proj", "v_proj"]})
+ADAPTER_CASES = [LORA_CASE, *TEST_CASES]
+
+
+@pytest.mark.skipif(
+    not _bnb_4bit_cpu_quantization_available(),
+    reason="requires bitsandbytes >= 0.46.0 for CPU 4-bit quantization",
+)
+class TestBnb4bitMergeUnmerge:
+    """Merging adapters into a 4-bit layer and unmerging them must leave the base weight where it was."""
+
+    model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+    # Small enough for the 4-bit codes to survive a round trip, which leaves the per-block scale as the
+    # only thing that can still move the weight.
+    delta = 3e-5
+    # Reusing the scale makes unmerge reproduce the dequantized weight exactly, so both tolerances are
+    # only there to tolerate values that are re-quantized onto a different code. `changed_tolerance`
+    # catches a handful of those, `mae_tolerance` a small but global rescale, which would stay below it.
+    changed_tolerance = 0.01
+    mae_tolerance = 1e-6
+
+    def _build_model_with_perturbed_adapters(self, config_cls, config_kwargs, adapter_names=("default",)):
+        """Load the quantized model the way a user would, attach the adapters and give them a small delta."""
+        quant_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=False,
+            bnb_4bit_compute_dtype=torch.float32,
+        )
+        with hub_online_once(self.model_id):
+            model = AutoModelForCausalLM.from_pretrained(
+                self.model_id, quantization_config=quant_config, device_map={"": DEVICE}
+            )
+        torch.manual_seed(SEED)
+        model = get_peft_model(model, config_cls(**config_kwargs))
+        for adapter_name in adapter_names[1:]:
+            model.add_adapter(adapter_name, config_cls(**config_kwargs))
+        # A freshly initialized adapter is the identity transform, so it needs a delta before merging it
+        # changes anything. Perturb the parameters rather than passing `init_weights=False` (as
+        # `set_init_weights_false` does): that leaves the adapter parameters randomly initialized, which
+        # on this model makes the delta 0.3x to 50x the size of the base weight. At that magnitude the
+        # error that re-quantizing the codes unavoidably introduces dominates, and 28% to 91% of the
+        # entries still move even with the fix, so the test could not tell a fixed layer from an unfixed
+        # one. With the perturbation below the unfixed path moves 50% to 92% of the entries and the fixed
+        # one none, which is what makes this a regression test.
+        with torch.no_grad():
+            torch.manual_seed(SEED)
+            for param in model.parameters():
+                if param.requires_grad:
+                    param.add_(torch.randn_like(param) * self.delta)
+        return model
+
+    @staticmethod
+    def _bnb_layers(model):
+        import bitsandbytes as bnb
+
+        layers = [
+            module
+            for module in model.modules()
+            if isinstance(module, BaseTunerLayer) and isinstance(module.get_base_layer(), bnb.nn.Linear4bit)
+        ]
+        assert len(layers) == 10  # (q_proj, v_proj) x 5 layers
+        return layers
+
+    @staticmethod
+    def _dequantize(layer):
+        from bitsandbytes.functional import dequantize_4bit
+
+        weight = layer.get_base_layer().weight
+        state = weight.quant_state
+        return dequantize_4bit(weight.data, state, quant_type=state.quant_type, blocksize=state.blocksize)
+
+    @staticmethod
+    def _merge(model, how):
+        if how == "one":
+            model.merge_adapter()
+        elif how == "together":
+            # merge_adapter() merges the active adapters, and add_adapter() leaves the first one active.
+            model.base_model.set_adapter(["default", "second"])
+            model.merge_adapter()
+        else:  # "sequentially": merge the second adapter on top of the first
+            model.merge_adapter(adapter_names=["default"])
+            model.merge_adapter(adapter_names=["second"])
+
+    def _get_changed_fraction(self, config_cls, config_kwargs, *, how="one"):
+        """Measure how far one merge/unmerge round trip moves the dequantized base weights.
+
+        Returns the fraction of values that changed and their mean absolute change relative to the mean absolute value
+        of the unmerged weight, so that the error is dimensionless.
+        """
+        adapter_names = ("default",) if how == "one" else ("default", "second")
+        model = self._build_model_with_perturbed_adapters(config_cls, config_kwargs, adapter_names=adapter_names)
+        layers = self._bnb_layers(model)
+        before = [self._dequantize(layer) for layer in layers]
+
+        self._merge(model, how)
+        merged = [self._dequantize(layer) for layer in layers]
+        model.unmerge_adapter()
+
+        # The adapters have to actually move the base weight, otherwise this proves nothing.
+        assert any(not torch.equal(after, original) for after, original in zip(merged, before))
+        assert all(not layer.merged_adapters for layer in layers)
+
+        changed = 0
+        deviation = 0.0
+        magnitude = 0.0
+        numel = 0
+        for layer, weight in zip(layers, before):
+            after = self._dequantize(layer).float()
+            weight = weight.float()
+            changed += (after != weight).sum().item()
+            deviation += (after - weight).abs().sum().item()
+            magnitude += weight.abs().sum().item()
+            numel += weight.numel()
+        return changed / numel, deviation / magnitude
+
+    @pytest.mark.parametrize("config_cls,config_kwargs", ADAPTER_CASES, ids=_peft_id)
+    def test_merge_unmerge_keeps_base_weight_almost_unchanged(self, config_cls, config_kwargs):
+        # Unmerging re-quantizes the weight and bitsandbytes recomputes the per-block scale while doing
+        # so. A fresh scale rescales every value of a block even when the codes are restored, so the
+        # base weight drifts. Unmerge now reuses the scale the unmerged weight had. The codes are still
+        # re-quantized from the merged weight, so a few values can land on a different code.
+        changed, mae = self._get_changed_fraction(config_cls, config_kwargs)
+        assert changed < self.changed_tolerance, changed
+        assert mae < self.mae_tolerance, mae
+
+    @pytest.mark.parametrize("how", ["together", "sequentially"])
+    @pytest.mark.parametrize("config_cls,config_kwargs", ADAPTER_CASES, ids=_peft_id)
+    def test_merge_unmerge_two_adapters_keeps_base_weight_almost_unchanged(self, config_cls, config_kwargs, how):
+        changed, mae = self._get_changed_fraction(config_cls, config_kwargs, how=how)
+        assert changed < self.changed_tolerance, changed
+        assert mae < self.mae_tolerance, mae

@@ -525,7 +525,7 @@ class Linear(nn.Module, BOFTLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
+                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype), context="merge")
                 else:
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
                     orig_weight = torch.transpose(orig_weight, 0, 1)
@@ -533,7 +533,7 @@ class Linear(nn.Module, BOFTLayer):
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = orig_weight * boft_s
 
-                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
+                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype), context="merge")
 
                 self.merged_adapters.append(active_adapter)
 
@@ -556,7 +556,7 @@ class Linear(nn.Module, BOFTLayer):
                 orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight.to(butterfly_oft_mat.dtype))
                 orig_weight = torch.transpose(orig_weight, 0, 1)
 
-                self.set_base_weight((orig_weight * (1 / boft_s)).to(orig_dtype))
+                self.set_base_weight((orig_weight * (1 / boft_s)).to(orig_dtype), context="unmerge")
 
     def get_delta_weight(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -843,7 +843,7 @@ class Conv2d(nn.Module, BOFTLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
+                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype), context="merge")
                 else:
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
 
@@ -858,7 +858,7 @@ class Conv2d(nn.Module, BOFTLayer):
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
                     )
 
-                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
+                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype), context="merge")
 
                 self.merged_adapters.append(active_adapter)
 
@@ -892,7 +892,7 @@ class Conv2d(nn.Module, BOFTLayer):
                     base_layer.kernel_size[0],
                 )
 
-                self.set_base_weight(orig_weight.to(orig_dtype))
+                self.set_base_weight(orig_weight.to(orig_dtype), context="unmerge")
 
     def get_delta_weight(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
         """

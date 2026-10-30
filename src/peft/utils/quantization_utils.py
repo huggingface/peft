@@ -73,7 +73,12 @@ class QuantizationBackend(ABC):
         """
         raise NotImplementedError
 
-    def set_base_weight(self, peft_layer, weight_data: torch.Tensor) -> None:
+    def set_base_weight(
+        self,
+        peft_layer,
+        weight_data: torch.Tensor,
+        context: Literal["merge", "unmerge"] | None = None,
+    ) -> None:
         """Store the (modified) weight back into the base layer, re-quantizing as needed.
 
         Some backends (e.g. HQQ) replace `peft_layer.base_layer` entirely with a new module.
@@ -84,6 +89,10 @@ class QuantizationBackend(ABC):
                 replacing `peft_layer.base_layer` when needed (e.g. HQQ).
             weight_data:
                 The modified weight tensor to store.
+            context:
+                What the stored weight represents: `"merge"` when an adapter is being merged into the base weight,
+                `"unmerge"` when an adapter is being removed again, `None` when it is neither. Backends whose
+                quantization state depends on the history of the weight use this to preserve or restore it.
         """
         raise NotImplementedError
 
@@ -114,7 +123,12 @@ class ForwardOnlyQuantizationBackend(QuantizationBackend):
             f"Dequantization is not supported for {self.backend_name} layers. Merging/unmerging is not available."
         )
 
-    def set_base_weight(self, peft_layer, weight_data: torch.Tensor) -> None:
+    def set_base_weight(
+        self,
+        peft_layer,
+        weight_data: torch.Tensor,
+        context: Literal["merge", "unmerge"] | None = None,
+    ) -> None:
         raise TypeError(
             f"Requantization is not supported for {self.backend_name} layers. Merging/unmerging is not available."
         )
@@ -135,7 +149,12 @@ class Bnb8bitBackend(QuantizationBackend):
 
         return dequantize_bnb_weight(weight, state=state)
 
-    def set_base_weight(self, peft_layer, weight_data: torch.Tensor) -> None:
+    def set_base_weight(
+        self,
+        peft_layer,
+        weight_data: torch.Tensor,
+        context: Literal["merge", "unmerge"] | None = None,
+    ) -> None:
         import bitsandbytes as bnb
 
         base_layer = peft_layer.get_base_layer()
@@ -153,11 +172,22 @@ class Bnb4bitBackend(QuantizationBackend):
     backend_name = "bnb 4bit"
     layer_type = "linear"
 
+    def __init__(self) -> None:
+        # Per-block quantization state of the base weight from before the first merge, kept alive until
+        # the last adapter is unmerged so that unmerge can re-quantize on the grid that weight used.
+        # `None` when there is nothing to restore. See set_base_weight.
+        self._unmerged_quant_state = None
+
     def get_base_weight(self, base_layer: nn.Module) -> torch.Tensor:
         weight = base_layer.weight
         return dequantize_bnb_weight(weight, state=weight.quant_state)
 
-    def set_base_weight(self, peft_layer, weight_data: torch.Tensor) -> None:
+    def set_base_weight(
+        self,
+        peft_layer,
+        weight_data: torch.Tensor,
+        context: Literal["merge", "unmerge"] | None = None,
+    ) -> None:
         import bitsandbytes as bnb
 
         base_layer = peft_layer.get_base_layer()
@@ -169,7 +199,22 @@ class Bnb4bitBackend(QuantizationBackend):
         kwargs.pop("data", None)
         # torch.compile can introduce attributes preceded by '_', remove them
         kwargs = {k: v for k, v in kwargs.items() if not k.startswith("_")}
-        base_layer.weight = bnb.nn.Params4bit(weight_data.to("cpu"), **kwargs).to(weight.device)
+        new_weight = bnb.nn.Params4bit(weight_data.to("cpu"), **kwargs).to(weight.device)
+
+        # Quantizing `weight_data` above computes a fresh per-block scale. Using it on unmerge rescales
+        # every value of a block even when its codes come back unchanged, so the base weight drifts.
+        # Remember the scale the base weight had before the first merge and reuse it once the last
+        # adapter is gone. `unmerge` always removes every adapter, so the target is always that same
+        # weight and a single saved state is enough, no matter how many adapters were merged.
+        if context == "merge":
+            if self._unmerged_quant_state is None:
+                self._unmerged_quant_state = weight.quant_state
+        elif context == "unmerge" and self._unmerged_quant_state is not None and not peft_layer.merged_adapters:
+            new_weight.quant_state = self._unmerged_quant_state
+            base_layer.quant_state = self._unmerged_quant_state
+            self._unmerged_quant_state = None
+
+        base_layer.weight = new_weight
 
     def maybe_clone_base_result(self, x: torch.Tensor) -> torch.Tensor:
         # As per Tim Dettmers, for 4bit bnb, we need to defensively clone here. The reason is that in some cases, an
@@ -189,7 +234,12 @@ class HqqBackend(QuantizationBackend):
     def get_base_weight(self, base_layer: nn.Module) -> torch.Tensor:
         return base_layer.dequantize()
 
-    def set_base_weight(self, peft_layer, weight_data: torch.Tensor) -> None:
+    def set_base_weight(
+        self,
+        peft_layer,
+        weight_data: torch.Tensor,
+        context: Literal["merge", "unmerge"] | None = None,
+    ) -> None:
         from hqq.core.quantize import HQQLinear
 
         base_layer = peft_layer.get_base_layer()
@@ -231,7 +281,12 @@ class TorchaoBackend(QuantizationBackend):
             raise NotImplementedError(msg) from exc
         return dequantized
 
-    def set_base_weight(self, peft_layer, weight_data: torch.Tensor) -> None:
+    def set_base_weight(
+        self,
+        peft_layer,
+        weight_data: torch.Tensor,
+        context: Literal["merge", "unmerge"] | None = None,
+    ) -> None:
         from torchao import quantize_
 
         base_layer = peft_layer.get_base_layer()
