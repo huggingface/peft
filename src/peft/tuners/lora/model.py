@@ -397,7 +397,11 @@ class LoraModel(BaseTuner):
 
             _SUPPORTED_TP_PLANS = ("colwise", "rowwise", "embedding_rowwise")
 
-            if tp_plan not in _SUPPORTED_TP_PLANS:
+            if tp_plan == "colwise_gather_output" and is_transformers_dtensor_tp:
+                # The input and output of the base layer (e.g. lm_head) are replicated, so the LoRA layers are
+                # replicated as well and don't need hooks
+                pass
+            elif tp_plan not in _SUPPORTED_TP_PLANS:
                 warnings.warn(
                     f'TP plan "{tp_plan}" on the base layer is not supported for LoRA. '
                     "LoRA adapters will be created without tensor parallel hooks."
