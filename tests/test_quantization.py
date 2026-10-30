@@ -404,17 +404,9 @@ def _bnb_4bit_cpu_quantization_available() -> bool:
 
     return packaging.version.parse(bnb.__version__) >= packaging.version.parse("0.46.0")
 
-
-# Methods that merge 4-bit layers through the shared QuantizationBackend, rather than through LoRA's
-# own implementation.
-GENERIC_BACKEND_CASES = [
-    (BOFTConfig, {"boft_block_size": 4, "target_modules": ["q_proj", "v_proj"]}),
-    (OFTConfig, {"oft_block_size": 4, "target_modules": ["q_proj", "v_proj"]}),
-    (MissConfig, {"r": 2, "target_modules": ["q_proj", "v_proj"]}),
-    (PacaConfig, {"r": 8, "random_seed": 42, "target_modules": ["q_proj", "v_proj"]}),
-    (ShiraConfig, {"r": 8, "random_seed": 42, "target_modules": ["q_proj", "v_proj"]}),
-    (VeraConfig, {"r": 8, "target_modules": ["q_proj", "v_proj"]}),
-]
+# LoRA writes its own 4-bit merge/unmerge, every other method goes through the shared QuantizationBackend.
+LORA_CASE = (LoraConfig, {"r": 8, "lora_alpha": 16, "target_modules": ["q_proj", "v_proj"]})
+ADAPTER_CASES = [LORA_CASE, *TEST_CASES]
 
 
 @pytest.mark.skipif(
@@ -422,12 +414,14 @@ GENERIC_BACKEND_CASES = [
     reason="requires bitsandbytes >= 0.46.0 for CPU 4-bit quantization",
 )
 class TestBnb4bitMergeUnmerge:
-    """Merging an adapter into a 4-bit layer and unmerging it must leave the base weight where it was."""
+    """Merging adapters into a 4-bit layer and unmerging them must leave the base weight where it was."""
 
     model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+    # Small enough for the 4-bit codes to survive a round trip, which leaves the per-block scale as the
+    # only thing that can still move the weight.
+    delta = 3e-5
 
-    def _load_model(self, config):
-        # Quantize on the fly, like a user would.
+    def _build(self, config_cls, config_kwargs, adapter_names=("default",)):
         quant_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_use_double_quant=False,
@@ -438,7 +432,16 @@ class TestBnb4bitMergeUnmerge:
                 self.model_id, quantization_config=quant_config, device_map={"": DEVICE}
             )
         torch.manual_seed(SEED)
-        return get_peft_model(model, config)
+        model = get_peft_model(model, config_cls(**config_kwargs))
+        for adapter_name in adapter_names[1:]:
+            model.add_adapter(adapter_name, config_cls(**config_kwargs))
+        # A freshly initialized adapter is the identity transform, so give it a small delta first.
+        with torch.no_grad():
+            torch.manual_seed(SEED)
+            for param in model.parameters():
+                if param.requires_grad:
+                    param.add_(torch.randn_like(param) * self.delta)
+        return model
 
     @staticmethod
     def _bnb_layers(model):
@@ -461,73 +464,48 @@ class TestBnb4bitMergeUnmerge:
         return dequantize_4bit(weight.data, state, quant_type=state.quant_type, blocksize=state.blocksize)
 
     @staticmethod
-    def _changed_fraction(model, layers, before):
-        numel = sum(weight.numel() for weight in before)
-        changed = sum((TestBnb4bitMergeUnmerge._dequantize(layer) != weight).sum().item() for layer, weight in zip(layers, before))
-        return changed / numel
+    def _merge(model, how):
+        if how == "one":
+            model.merge_adapter()
+        elif how == "together":
+            model.base_model.set_adapter(["default", "second"])
+            model.merge_adapter()
+        else:  # "sequentially": merge the second adapter on top of the first
+            model.merge_adapter(adapter_names=["default"])
+            model.merge_adapter(adapter_names=["second"])
 
-    def _lora_model(self):
-        model = self._load_model(
-            LoraConfig(r=8, lora_alpha=16, target_modules=["q_proj", "v_proj"], init_lora_weights=False)
-        )
-        # A delta small enough that the 4-bit codes survive a round trip unchanged, which leaves the
-        # stale block scale as the only source of drift.
-        torch.manual_seed(SEED)
-        with torch.no_grad():
-            for name, param in model.named_parameters():
-                if "lora_A" in name:
-                    param.normal_(0.0, 1.0)
-                elif "lora_B" in name:
-                    param.normal_(0.0, 1e-5)
-        return model
-
-    def _drifted_fraction(self, *, keep_scale):
-        """Fraction of the dequantized base weights that one LoRA merge/unmerge round trip changes."""
-        model = self._lora_model()
+    def _changed_fraction(self, config_cls, config_kwargs, *, how="one"):
+        """Fraction of the dequantized base weights that one merge/unmerge round trip changes."""
+        adapter_names = ("default",) if how == "one" else ("default", "second")
+        model = self._build(config_cls, config_kwargs, adapter_names=adapter_names)
         layers = self._bnb_layers(model)
         before = [self._dequantize(layer) for layer in layers]
 
-        model.merge_adapter()
-        if not keep_scale:
-            for layer in layers:
-                layer._unmerged_quant_state = None
-        model.unmerge_adapter()
-
-        return self._changed_fraction(model, layers, before)
-
-    def test_merge_unmerge_keeps_base_weight_unchanged(self):
-        # Unmerging re-quantizes the weight and bitsandbytes recomputes the per-block scale while doing
-        # so. A fresh scale rescales every value of a block even when the codes are restored, so the
-        # base weight drifts. Unmerge now reuses the scale the unmerged weight had.
-        drift_fixed = self._drifted_fraction(keep_scale=True)
-        drift_legacy = self._drifted_fraction(keep_scale=False)
-
-        assert drift_legacy > 0.5, f"expected the previous behaviour to drift, got {drift_legacy}"
-        assert drift_fixed < drift_legacy / 10, (drift_fixed, drift_legacy)
-        assert drift_fixed < 0.01, drift_fixed
-
-    @pytest.mark.parametrize("config_cls,config_kwargs", GENERIC_BACKEND_CASES, ids=_peft_id)
-    def test_merge_unmerge_keeps_base_weight_unchanged_generic_backend(self, config_cls, config_kwargs):
-        """The same has to hold for the methods that merge through the shared QuantizationBackend."""
-        model = self._load_model(config_cls(**config_kwargs))
-        # A freshly initialized adapter is the identity transform, so give it a small delta first, one
-        # small enough that the 4-bit codes survive a round trip unchanged and the stale block scale is
-        # the only source of drift.
-        with torch.no_grad():
-            torch.manual_seed(SEED)
-            for param in model.parameters():
-                if param.requires_grad:
-                    param.add_(torch.randn_like(param) * 3e-5)
-
-        layers = self._bnb_layers(model)
-        before = [self._dequantize(layer) for layer in layers]
-
-        model.merge_adapter()
+        self._merge(model, how)
         merged = [self._dequantize(layer) for layer in layers]
         model.unmerge_adapter()
 
-        # The adapter has to actually move the base weight, otherwise this test proves nothing.
+        # The adapters have to actually move the base weight, otherwise this proves nothing.
         assert any(not torch.equal(after, original) for after, original in zip(merged, before))
+        assert all(not layer.merged_adapters for layer in layers)
 
-        changed = self._changed_fraction(model, layers, before)
+        changed = 0
+        numel = 0
+        for layer, weight in zip(layers, before):
+            changed += (self._dequantize(layer) != weight).sum().item()
+            numel += weight.numel()
+        return changed / numel
+
+    @pytest.mark.parametrize("config_cls,config_kwargs", ADAPTER_CASES, ids=_peft_id)
+    def test_merge_unmerge_keeps_base_weight_unchanged(self, config_cls, config_kwargs):
+        # Unmerging re-quantizes the weight and bitsandbytes recomputes the per-block scale while doing
+        # so. A fresh scale rescales every value of a block even when the codes are restored, so the
+        # base weight drifts. Unmerge now reuses the scale the unmerged weight had.
+        changed = self._changed_fraction(config_cls, config_kwargs)
+        assert changed < 0.01, changed
+
+    @pytest.mark.parametrize("how", ["together", "sequentially"])
+    @pytest.mark.parametrize("config_cls,config_kwargs", ADAPTER_CASES, ids=_peft_id)
+    def test_merge_unmerge_two_adapters_keeps_base_weight_unchanged(self, config_cls, config_kwargs, how):
+        changed = self._changed_fraction(config_cls, config_kwargs, how=how)
         assert changed < 0.01, changed

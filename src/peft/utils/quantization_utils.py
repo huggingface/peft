@@ -207,7 +207,7 @@ class Bnb4bitBackend(QuantizationBackend):
         # intermediate weight on the grid it was stored with.
         if context == "merge":
             self._unmerged_quant_states.append(weight.quant_state)
-        elif context == "unmerge":
+        elif context == "unmerge" and self._unmerged_quant_states:
             state = self._unmerged_quant_states.pop()
             new_weight.quant_state = state
             base_layer.quant_state = state
