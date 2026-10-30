@@ -75,3 +75,15 @@ tests_training:
 	accelerate launch --config_file tests/training/fsdp_config.yaml tests/training/adapters.py
 	accelerate launch --config_file tests/training/tp_config.yaml tests/training/lora_tp.py
 	accelerate launch --config_file tests/training/fsdp2_config.yaml tests/training/adapters_fsdp2_reshard_false.py
+	$(MAKE) tests_training_cortex
+
+.PHONY: tests_training_cortex
+
+tests_training_cortex:
+	@set -eu; \
+	cortex_output="$${CORTEX_TRAINING_OUTPUT:-$$(mktemp -d "$${TMPDIR:-/tmp}/peft-cortex-training.XXXXXX")}"; \
+	echo "Cortex training reports: $$cortex_output"; \
+	for engine in ddp zero0 zero1 zero2 zero3; do \
+		python -m torch.distributed.run --standalone --nproc_per_node="$${CORTEX_NPROC:-2}" \
+			--module tests.training.cortex_distributed --engine "$$engine" --output "$$cortex_output/$$engine"; \
+	done

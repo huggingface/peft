@@ -14,6 +14,7 @@
 import copy
 import platform
 import re
+from copy import deepcopy
 
 import pytest
 import torch
@@ -31,6 +32,7 @@ from transformers import (
 
 from peft import (
     AdaLoraConfig,
+    CortexConfig,
     FrodConfig,
     IA3Config,
     LoKrConfig,
@@ -53,7 +55,8 @@ from peft import (
 from peft.tuners import lora
 from peft.utils import ModulesToSaveWrapper
 
-from .testing_utils import hub_online_once
+from .testing_utils import activate_branches, hub_online_once
+from .testing_utils import create_tiny_causal_lm as tiny_model
 
 
 class DummyModel(torch.nn.Module):
@@ -978,3 +981,118 @@ class TestStateDictFsdpShapeValidation:
         peft_model = get_peft_model(DummyModel(), LoraConfig(target_modules=["linear"], r=4))
         peft_model.save_pretrained(tmp_path / "ok-adapter")
         assert (tmp_path / "ok-adapter" / "adapter_config.json").exists()
+
+
+class TestCortexPackedInjection:
+    @pytest.fixture(autouse=True)
+    def deterministic_cpu(self):
+        previous_threads = torch.get_num_threads()
+        torch.manual_seed(123)
+        torch.set_num_threads(1)
+        yield
+        torch.set_num_threads(previous_threads)
+
+    @pytest.mark.parametrize("kind", ["qwen3_moe", "gpt_oss"])
+    def test_state_dict_driven_direct_injection(self, kind):
+        from peft import inject_adapter_in_model, set_peft_model_state_dict
+
+        base = tiny_model(kind).eval()
+        clean = deepcopy(base)
+        model = get_peft_model(base, CortexConfig(k=3, moe_target="routed", task_type="CAUSAL_LM")).eval()
+        activate_branches(model)
+        state = get_peft_model_state_dict(model.get_base_model(), save_embedding_layers=False)
+        config = deepcopy(model.peft_config["default"])
+        restored = inject_adapter_in_model(config, clean, adapter_name="restored", state_dict=state)
+        result = set_peft_model_state_dict(restored, state, adapter_name="restored")
+        assert not result.unexpected_keys
+        tokens = torch.randint(3, 32, (1, 5))
+        torch.testing.assert_close(restored(tokens, use_cache=False).logits, model(tokens, use_cache=False).logits)
+
+
+class TestCortexCheckpointTargets:
+    @pytest.mark.parametrize("targets", [["model.layers.1.mlp"], ["model.layers.0.mlp", "model.layers.1.mlp"]])
+    @pytest.mark.parametrize("checkpoint_prefix", ["", "_orig_mod."])
+    @pytest.mark.parametrize("saved_roles", [False, True])
+    def test_checkpoint_targets_override_config(self, targets, checkpoint_prefix, saved_roles, tmp_path):
+        from peft.tuners.cortex.layer import CortexLayer
+
+        base = tiny_model("llama")
+        config = CortexConfig(k=2, target_modules={"model.layers.0.mlp"})
+        if saved_roles:
+            config.target_roles = {path: "dense" for path in targets}
+        state = {checkpoint_prefix + path + ".cortex_up.weight": torch.zeros(2, 16) for path in targets}
+        model = inject_adapter_in_model(config, base, state_dict=state)
+        assert {name for name, module in model.named_modules() if isinstance(module, CortexLayer)} == set(targets)
+        assert config.target_roles == {path: "dense" for path in targets}
+        # Persist the resolved physical targets for subsequent normal loading.
+        config.save_pretrained(tmp_path)
+        restored_config = CortexConfig.from_pretrained(tmp_path)
+        restored = inject_adapter_in_model(restored_config, tiny_model("llama"))
+        assert {name for name, module in restored.named_modules() if isinstance(module, CortexLayer)} == set(targets)
+
+    def test_invalid_checkpoint_target_is_rejected_before_any_replacement(self):
+        from peft.tuners.cortex.layer import CortexLayer
+
+        base = tiny_model("llama")
+        parameters = dict(base.named_parameters())
+        state = {path + ".cortex_up.weight": torch.zeros(2, 16) for path in ("model.layers.0.mlp", "lm_head")}
+        with pytest.raises(ValueError, match="Unsupported Cortex target"):
+            inject_adapter_in_model(CortexConfig(k=2, target_modules={"model.layers.0.mlp"}), base, state_dict=state)
+        assert not any(isinstance(module, CortexLayer) for module in base.modules())
+        assert dict(base.named_parameters()).keys() == parameters.keys()
+        assert all(base.get_parameter(name) is value for name, value in parameters.items())
+
+    def test_missing_checkpoint_moe_role_is_rejected_before_any_replacement(self):
+        from peft.tuners.cortex.layer import CortexLayer
+
+        base = tiny_model("qwen3_moe")
+        first, second = [f"model.layers.{i}.mlp.experts" for i in range(2)]
+        config = CortexConfig(k=2, target_modules={first}, target_roles={first: "routed"})
+        state = {path + ".cortex_up.weight": torch.zeros(3, 2, 16) for path in (first, second)}
+        parameters = dict(base.named_parameters())
+        with pytest.raises(ValueError, match="target_roles.*" + second):
+            inject_adapter_in_model(config, base, state_dict=state)
+        assert not any(isinstance(module, CortexLayer) for module in base.modules())
+        assert all(base.get_parameter(name) is value for name, value in parameters.items())
+        assert not any(check for module in base.modules() for check in module._forward_pre_hooks.values())
+
+    @pytest.mark.parametrize("selection", ["automatic", "parent", "leaf"])
+    @pytest.mark.parametrize("mode", ["shared", "routed", ["shared", "routed"]])
+    def test_checkpoint_uses_unambiguous_moe_config_roles(self, selection, mode):
+        from peft.tuners.cortex.layer import CortexLayer
+
+        base = tiny_model("qwen3_moe")
+        parent = "model.layers.1.mlp"
+        target = parent + ".experts"
+        targets = {"automatic": None, "parent": {parent}, "leaf": {target}}[selection]
+        config = CortexConfig(k=2, target_modules=targets, moe_target=mode)
+        state = {target + ".cortex_up.weight": torch.empty(0)}
+        inject_adapter_in_model(config, base, state_dict=state)
+        role = (
+            "routed" if selection == "leaf" or mode == "routed" else "public" if mode == "shared" else "routed_public"
+        )
+        assert config.target_roles == {target: role}
+        assert isinstance(base.get_submodule(target), CortexLayer)
+        assert not isinstance(base.model.layers[0].mlp.experts, CortexLayer)
+
+    def test_checkpoint_overrides_an_incompatible_config_target(self):
+        from peft.tuners.cortex.layer import CortexLayer
+
+        base = tiny_model("llama")
+        target = "model.layers.1.mlp"
+        config = CortexConfig(k=2, target_modules={"lm_head"})
+        inject_adapter_in_model(config, base, state_dict={target + ".cortex_up.weight": torch.empty(0)})
+        assert config.target_roles == {target: "dense"}
+        assert isinstance(base.get_submodule(target), CortexLayer)
+
+    @pytest.mark.parametrize("role", ["routed", "public", "routed_public"])
+    def test_checkpoint_moe_metadata_overrides_config_targets(self, role):
+        from peft.tuners.cortex.layer import CortexLayer
+
+        base = tiny_model("qwen3_moe")
+        target = "model.layers.1.mlp.experts"
+        config = CortexConfig(k=2, target_modules={"model.layers.0.mlp"}, target_roles={target: role})
+        inject_adapter_in_model(config, base, state_dict={target + ".cortex_up.weight": torch.empty(0)})
+        assert config.target_roles == {target: role}
+        assert base.get_submodule(target).role == role
+        assert not isinstance(base.model.layers[0].mlp.experts, CortexLayer)

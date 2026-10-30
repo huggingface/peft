@@ -14,6 +14,7 @@
 import json
 import platform
 import tempfile
+from copy import deepcopy
 from unittest.mock import Mock, call, patch
 
 import pytest
@@ -37,6 +38,7 @@ from peft import (
     BOFTConfig,
     C3AConfig,
     CartridgeConfig,
+    CortexConfig,
     CPTConfig,
     DeftConfig,
     DeloraConfig,
@@ -53,6 +55,7 @@ from peft import (
     OFTConfig,
     OSFConfig,
     PacaConfig,
+    PeftConfig,
     PeftModel,
     PrefixTuningConfig,
     PromptEmbedding,
@@ -73,10 +76,19 @@ from peft import (
     VeraConfig,
     WaveFTConfig,
     get_peft_model,
+    get_peft_model_state_dict,
 )
+from peft.tuners.cortex.layer import CortexLayer
 
 from .testing_common import PeftCommonTester, skip_non_prompt_learning
-from .testing_utils import device_count, hub_online_once, load_dataset_english_quotes, set_init_weights_false
+from .testing_utils import (
+    activate_branches,
+    device_count,
+    hub_online_once,
+    load_dataset_english_quotes,
+    set_init_weights_false,
+)
+from .testing_utils import create_tiny_causal_lm as tiny_model
 
 
 # Note: some models from peft-internal-testing are just the safetensors versions of hf-internal-testing
@@ -1687,3 +1699,291 @@ class TestDecoderModels(PeftCommonTester):
             inputs = torch.arange(10).view(1, -1).to(self.torch_device)
             with pytest.raises(ValueError, match="skipped every layer"):
                 model(inputs)
+
+
+class TestCortexDecoderModels(PeftCommonTester):
+    """Run the common battery on local tiny models with complete gated FFNs."""
+
+    transformers_class = AutoModelForCausalLM
+
+    def prepare_inputs_for_testing(self):
+        ids = torch.tensor([[1, 3, 4], [1, 5, 6]], device=self.torch_device)
+        return {"input_ids": ids, "attention_mask": torch.ones_like(ids)}
+
+    @pytest.mark.parametrize("architecture", ["llama", "qwen2"])
+    @pytest.mark.parametrize(
+        "check",
+        [
+            "_test_model_attr",
+            "_test_prepare_for_training",
+            "_test_save_pretrained",
+            "_test_merge_layers",
+            "_test_disable_adapter",
+            "_test_load_model_low_cpu_mem_usage",
+            "_test_training",
+            "_test_generate",
+            "_test_training_gradient_checkpointing",
+        ],
+    )
+    def test_common(self, architecture, check, tmp_path):
+        from transformers import AutoConfig
+
+        from peft import CortexConfig
+
+        config = AutoConfig.for_model(
+            architecture,
+            vocab_size=32,
+            hidden_size=16,
+            intermediate_size=24,
+            num_hidden_layers=2,
+            num_attention_heads=2,
+            num_key_value_heads=1,
+            max_position_embeddings=64,
+            pad_token_id=0,
+            bos_token_id=1,
+            eos_token_id=2,
+            tie_word_embeddings=False,
+        )
+        model_id = str(tmp_path / architecture)
+        AutoModelForCausalLM.from_config(config).save_pretrained(model_id)
+        kwargs = {"k": 4, "task_type": "CAUSAL_LM", "init_weights": False}
+        getattr(self, check)(model_id, CortexConfig, kwargs)
+
+
+LIFECYCLE_CASES = [
+    ("llama", "shared"),
+    ("qwen2", "shared"),
+    ("qwen3", "shared"),
+    ("qwen3_moe", "shared"),
+    ("qwen3_moe", "routed"),
+    ("gpt_oss", "shared"),
+    ("gpt_oss", "routed"),
+]
+
+
+def validation_tensor_dtypes(model) -> dict:
+    """Record lightweight dtype metadata, including frozen DeepSpeed casts."""
+    return {
+        "parameters": {name: str(tensor.dtype) for name, tensor in model.named_parameters()},
+        "buffers": {name: str(tensor.dtype) for name, tensor in model.named_buffers() if tensor.is_floating_point()},
+    }
+
+
+def match_validation_dtypes(model, expected: dict) -> None:
+    """Reproduce the training-end tensor dtypes for numerical comparison.
+
+    Load adapters with PEFT's default FP32 promotion first, so FP32 checkpoints are not rounded through a low-precision
+    adapter allocation before this step. Matching includes frozen parameters and buffers: DeepSpeed ZeRO-0 casts the
+    full module, including FP32 rotary buffers. This is validation policy, not a change to the training precision or a
+    claim about default inference dtypes.
+    """
+    actual = {
+        "parameters": dict(model.named_parameters()),
+        "buffers": {name: tensor for name, tensor in model.named_buffers() if tensor.is_floating_point()},
+    }
+    for group, tensors in actual.items():
+        if tensors.keys() != expected[group].keys():
+            raise RuntimeError(f"Reloaded {group} do not match the trained model.")
+        for name, tensor in tensors.items():
+            dtype = getattr(torch, expected[group][name].removeprefix("torch."))
+            if tensor.dtype != dtype:
+                tensor.data = tensor.data.to(dtype=dtype)
+    if validation_tensor_dtypes(model) != expected:
+        raise RuntimeError("Could not restore the training model's validation dtypes.")
+
+
+def adapter_state_for_validation(model) -> dict:
+    """Keep only adapter tensors on CPU for an exact checkpoint round trip."""
+    from peft import get_peft_model_state_dict
+
+    return {name: tensor.detach().cpu().clone() for name, tensor in get_peft_model_state_dict(model).items()}
+
+
+def assert_adapter_reloaded(model, expected: dict) -> None:
+    """Check saved values independently of floating-point forward tolerances."""
+    from peft import get_peft_model_state_dict
+
+    actual = get_peft_model_state_dict(model)
+    if actual.keys() != expected.keys():
+        raise RuntimeError("Reloaded adapter tensor names do not match the saved adapter.")
+    for name, tensor in actual.items():
+        torch.testing.assert_close(tensor.detach().cpu(), expected[name], rtol=0, atol=0)
+
+
+class TestCortexNativeDecoderModels:
+    @pytest.fixture(autouse=True)
+    def deterministic_cpu(self):
+        previous_threads = torch.get_num_threads()
+        torch.manual_seed(123)
+        torch.set_num_threads(1)
+        yield
+        torch.set_num_threads(previous_threads)
+
+    @pytest.mark.parametrize("kind,mode", LIFECYCLE_CASES)
+    def test_train_disable_save_reload_and_generate(self, kind, mode, tmp_path):
+        base = tiny_model(kind).eval()
+        clean = deepcopy(base)
+        base_parameters = [(p, p.detach().clone()) for p in base.parameters()]
+        tokens = torch.randint(3, 32, (2, 6))
+        with torch.no_grad():
+            reference = base(tokens, use_cache=False).logits
+        model = get_peft_model(
+            base, CortexConfig(k=3, moe_target=mode, task_type="CAUSAL_LM", adapter_bias=True)
+        ).eval()
+        torch.testing.assert_close(model(tokens, use_cache=False).logits, reference, rtol=0, atol=0)
+        trainable = [p for p in model.parameters() if p.requires_grad]
+        assert trainable and all(not p.requires_grad for p, _ in base_parameters)
+        optimizer = torch.optim.AdamW(trainable, lr=0.03)
+        model.train()
+        for _ in range(3):
+            optimizer.zero_grad()
+            loss = model(input_ids=tokens, labels=tokens, use_cache=False).loss
+            assert torch.isfinite(loss)
+            loss.backward()
+            # Checks the gradient path through later frozen base layers.
+            first = next(m for m in model.modules() if isinstance(m, CortexLayer))
+            assert first.cortex_down["default"].weight.grad.abs().sum() > 0
+            optimizer.step()
+        for parameter, before in base_parameters:
+            assert parameter.grad is None
+            torch.testing.assert_close(parameter, before, rtol=0, atol=0)
+        model.eval()
+        expected = model(tokens, use_cache=False).logits.detach()
+        assert not torch.allclose(expected, reference)
+        with model.disable_adapter():
+            torch.testing.assert_close(model(tokens, use_cache=False).logits, reference, rtol=0, atol=0)
+        state = get_peft_model_state_dict(model, save_embedding_layers=False)
+        assert state and all("cortex_" in key and ".default." not in key for key in state)
+        model.save_pretrained(tmp_path, save_embedding_layers=False)
+        assert isinstance(PeftConfig.from_pretrained(tmp_path), CortexConfig)
+        restored = PeftModel.from_pretrained(clean, tmp_path, adapter_name="renamed").eval()
+        assert not any(p.requires_grad for p in restored.parameters())
+        torch.testing.assert_close(restored(tokens, use_cache=False).logits, expected)
+        assert restored.generate(tokens[:1, :2], max_new_tokens=2, do_sample=False).shape[1] <= 4
+
+    @pytest.mark.parametrize("kind,mode", LIFECYCLE_CASES)
+    def test_multiple_adapters_save_only_selected_and_unload(self, kind, mode, tmp_path):
+        original = tiny_model(kind).eval()
+        clean = deepcopy(original)
+        model = get_peft_model(original, CortexConfig(k=3, moe_target=mode, task_type="CAUSAL_LM")).eval()
+        activate_branches(model)
+        tokens = torch.randint(3, 32, (1, 5))
+        first = model(tokens, use_cache=False).logits.detach()
+        model.add_adapter("second", CortexConfig(k=5, moe_target=mode, task_type="CAUSAL_LM"))
+        model.set_adapter("second")
+        torch.testing.assert_close(model(tokens, use_cache=False).logits, clean(tokens, use_cache=False).logits)
+        model.set_adapter("default")
+        torch.testing.assert_close(model(tokens, use_cache=False).logits, first)
+        state = get_peft_model_state_dict(model, adapter_name="default", save_embedding_layers=False)
+        assert all("second" not in key and 5 not in tensor.shape for key, tensor in state.items())
+        model.save_pretrained(tmp_path, selected_adapters=["default"], save_embedding_layers=False)
+        restored = PeftModel.from_pretrained(deepcopy(clean), tmp_path).eval()
+        torch.testing.assert_close(restored(tokens, use_cache=False).logits, first)
+        unloaded = model.unload().eval()
+        assert not any(isinstance(m, CortexLayer) for m in unloaded.modules())
+        torch.testing.assert_close(unloaded(tokens, use_cache=False).logits, clean(tokens, use_cache=False).logits)
+
+    def test_exclude_modules_and_checkpointed_training(self):
+        model = get_peft_model(
+            tiny_model("qwen3"),
+            CortexConfig(k=3, moe_target="shared", task_type="CAUSAL_LM", exclude_modules=["model.layers.1.mlp"]),
+        )
+        assert sum(isinstance(m, CortexLayer) for m in model.modules()) == 1
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        tokens = torch.randint(3, 32, (1, 5))
+        model(tokens, labels=tokens, use_cache=False).loss.backward()
+        first = next(m for m in model.modules() if isinstance(m, CortexLayer))
+        assert first.cortex_down["default"].weight.grad.abs().sum() > 0
+
+    @pytest.mark.parametrize("mode", ["shared", "routed"])
+    def test_low_memory_reload_and_loading_inactive_adapter(self, mode, tmp_path):
+        base = tiny_model("qwen3_moe")
+        clean = deepcopy(base)
+        model = get_peft_model(base, CortexConfig(k=3, moe_target=mode, task_type="CAUSAL_LM")).eval()
+        activate_branches(model)
+        model.save_pretrained(tmp_path, save_embedding_layers=False)
+        tokens = torch.randint(3, 32, (1, 5))
+        expected = model(tokens, use_cache=False).logits
+        loaded = PeftModel.from_pretrained(clean, tmp_path, low_cpu_mem_usage=True).eval()
+        assert not any(p.is_meta for p in loaded.parameters())
+        torch.testing.assert_close(loaded(tokens, use_cache=False).logits, expected)
+        model.load_adapter(tmp_path, "loaded", is_trainable=False)
+        model.set_adapter("loaded")
+        torch.testing.assert_close(model(tokens, use_cache=False).logits, expected)
+        model.delete_adapter("default")
+        torch.testing.assert_close(model(tokens, use_cache=False).logits, expected)
+
+
+class TestCortexBiasCheckpoint:
+    @pytest.fixture(autouse=True)
+    def deterministic_cpu(self):
+        previous_threads = torch.get_num_threads()
+        torch.set_num_threads(1)
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(917)
+            yield
+        torch.set_num_threads(previous_threads)
+
+    @pytest.mark.parametrize("kind", ["qwen3", "gpt_oss"])
+    @pytest.mark.parametrize("low_cpu_mem_usage", [False, True])
+    def test_auto_bias_checkpoint_reload_and_merge_preserve_trained_values(self, kind, low_cpu_mem_usage, tmp_path):
+        base = tiny_model(kind).eval()
+        clean = deepcopy(base)
+        model = get_peft_model(base, CortexConfig(k=3, moe_target=["shared", "routed"])).eval()
+        with torch.no_grad():
+            for name, parameter in model.named_parameters():
+                if "cortex_" in name:
+                    parameter.uniform_(-0.2, 0.2)
+        tokens = torch.tensor([[1, 2, 3, 4]])
+        expected = model(tokens).logits.detach()
+        assert not torch.equal(expected, clean(tokens).logits)
+        state = get_peft_model_state_dict(model, save_embedding_layers=False)
+        model.save_pretrained(tmp_path, save_embedding_layers=False)
+        saved = json.loads((tmp_path / "adapter_config.json").read_text())
+        assert saved["adapter_bias"] is None and saved["adapter_bias_init"] == "uniform"
+        restored = PeftModel.from_pretrained(clean, tmp_path, low_cpu_mem_usage=low_cpu_mem_usage).eval()
+        restored_state = get_peft_model_state_dict(restored, save_embedding_layers=False)
+        assert restored_state.keys() == state.keys()
+        for name, value in state.items():
+            torch.testing.assert_close(restored_state[name], value, rtol=0, atol=0)
+        torch.testing.assert_close(restored(tokens).logits, expected, rtol=0, atol=0)
+        merged = restored.merge_and_unload(safe_merge=True).eval()
+        torch.testing.assert_close(merged(tokens).logits, expected, rtol=2e-5, atol=2e-5)
+
+
+class TestCortexCheckpointDtypes:
+    @pytest.fixture(autouse=True)
+    def deterministic_cpu(self):
+        previous_threads = torch.get_num_threads()
+        torch.manual_seed(123)
+        torch.set_num_threads(1)
+        yield
+        torch.set_num_threads(previous_threads)
+
+    def test_checkpoint_reload_matches_deepspeed_style_dtype_conversion(self, tmp_path):
+        tiny_gpt_oss_checkpoint = tmp_path / "base"
+        tiny_model("gpt_oss").save_pretrained(tiny_gpt_oss_checkpoint)
+        # Simulate only DeepSpeed's documented module.bfloat16() conversion, not its
+        # engine or GPU behavior. Include rotary buffers that load as FP32.
+        base = AutoModelForCausalLM.from_pretrained(tiny_gpt_oss_checkpoint, dtype=torch.bfloat16, use_kernels=False)
+        assert any(buffer.dtype == torch.float32 for buffer in base.buffers())
+        model = get_peft_model(base, CortexConfig(k=4, init_weights=False, task_type="CAUSAL_LM")).eval()
+        model.bfloat16()
+        dtypes = validation_tensor_dtypes(model)
+        state = adapter_state_for_validation(model)
+        ids = torch.tensor([[1, 4, 5, 6]])
+        with torch.no_grad():
+            expected = model(input_ids=ids).logits.clone()
+        adapter = tmp_path / "adapter"
+        model.save_pretrained(adapter)
+        restored = PeftModel.from_pretrained(
+            AutoModelForCausalLM.from_pretrained(tiny_gpt_oss_checkpoint, dtype=torch.bfloat16, use_kernels=False),
+            adapter,
+        ).eval()
+        assert validation_tensor_dtypes(restored) != dtypes
+        match_validation_dtypes(restored, dtypes)
+        assert_adapter_reloaded(restored, state)
+        assert restored.base_model.model.model.norm.weight.dtype == torch.bfloat16
+        with torch.no_grad():
+            actual = restored(input_ids=ids).logits
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)

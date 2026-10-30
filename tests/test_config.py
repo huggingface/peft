@@ -30,6 +30,7 @@ from peft import (
     BOFTConfig,
     C3AConfig,
     CartridgeConfig,
+    CortexConfig,
     CPTConfig,
     DeftConfig,
     DeloraConfig,
@@ -93,6 +94,7 @@ PEFT_MODELS_TO_TEST = [("peft-internal-testing/tiny-opt-lora-revision", "test")]
 
 # Config classes and their mandatory parameters
 ALL_CONFIG_CLASSES = (
+    (CortexConfig, {}),
     (AdaLoraConfig, {"total_step": 1}),
     (AdamssConfig, {}),
     (AdaptionPromptConfig, {}),
@@ -780,3 +782,60 @@ class TestLoraNestedConfigRoundTrip:
         nested = getattr(loaded, attribute_name)
         assert isinstance(nested, nested_config_cls)
         assert getattr(nested, dummy_field) == dummy_value
+
+
+class TestCortexConfig:
+    @pytest.mark.parametrize("value", [0, 1, "auto", "true"])
+    def test_invalid_bias_override_is_rejected(self, value):
+        with pytest.raises(TypeError, match="adapter_bias"):
+            CortexConfig(adapter_bias=value)
+
+    @pytest.mark.parametrize("value", [None, True, "normal"])
+    def test_invalid_bias_initializer_is_rejected(self, value):
+        with pytest.raises(ValueError, match="adapter_bias_init"):
+            CortexConfig(adapter_bias_init=value)
+
+    @pytest.mark.parametrize("value", [0, -1, True, 1.5])
+    def test_invalid_width(self, value):
+        with pytest.raises(ValueError, match="positive integer"):
+            CortexConfig(k=value)
+
+    @pytest.mark.parametrize("selection", ["shared", "routed"])
+    def test_singleton_moe_selection_roundtrips(self, selection, tmp_path):
+        config = CortexConfig(k=3, moe_target=[selection])
+        assert config.moe_target == selection
+        config.save_pretrained(tmp_path)
+        assert CortexConfig.from_pretrained(tmp_path).moe_target == selection
+
+    @pytest.mark.parametrize(
+        "selection", ["all", [], ["shared", "shared"], ["all"], ["shared", "all"], ["shared", None], True, {}]
+    )
+    def test_invalid_moe_selections_fail_clearly(self, selection, tmp_path):
+        with pytest.raises(ValueError, match="moe_target"):
+            CortexConfig(moe_target=selection)
+        CortexConfig().save_pretrained(tmp_path)
+        config_path = tmp_path / "adapter_config.json"
+        config = json.loads(config_path.read_text())
+        config["moe_target"] = selection
+        config_path.write_text(json.dumps(config))
+        with pytest.raises(ValueError, match="moe_target"):
+            CortexConfig.from_pretrained(tmp_path)
+
+    @pytest.mark.parametrize("value", [True, False, None, "sum", 0, []])
+    def test_invalid_public_weighting_rejected(self, value):
+        with pytest.raises(ValueError, match="public_weighting"):
+            CortexConfig(public_weighting=value)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"init_weights": "chunk_mean"},
+            {"init_weights": "unknown"},
+            {"init_noise_std": -0.01},
+            {"init_noise_std": float("nan")},
+            {"init_noise_std": True},
+        ],
+    )
+    def test_invalid_initialization_config(self, kwargs):
+        with pytest.raises(ValueError):
+            CortexConfig(**kwargs)
