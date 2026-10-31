@@ -13,17 +13,21 @@
 # limitations under the License.
 
 
+import platform
+from copy import deepcopy
+
 import pytest
 import torch
 from diffusers import StableDiffusionPipeline
 from torch import nn
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, PromptTuningConfig, get_peft_model
 from peft.helpers import (
     DoraCaching,
     MontecloraTrainerMixin,
     check_if_peft_model,
+    create_dummy_lora_config,
     disable_input_dtype_casting,
     rescale_adapter_scale,
 )
@@ -31,6 +35,7 @@ from peft.tuners.lora.config import MontecloraConfig
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.lora.monteclora import MontecloraSampler
 from peft.utils import infer_device
+from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 
 from .testing_utils import hub_online_once
 
@@ -730,3 +735,150 @@ class TestMontecloraTrainerMixin:
 
             assert total_loss.item() != task_loss.item()
             total_loss.backward()
+
+
+class TestCreateDummyLoraConfig:
+    """Tests for create_dummy_lora_config, which is mainly intended for hotswapping."""
+
+    def test_single_config_roundtrip(self, tmp_path):
+        config = LoraConfig(r=4, target_modules=["q_proj"], use_rslora=True, alpha_pattern={"q_proj": 16})
+        dummy = create_dummy_lora_config([config])
+        dummy.save_pretrained(tmp_path)
+        loaded = LoraConfig.from_pretrained(tmp_path)
+
+        assert loaded.target_modules == {"q_proj"}
+        assert loaded.r == 4
+        assert loaded.use_rslora is True
+        assert loaded.alpha_pattern == config.alpha_pattern
+
+    def test_combines_targets_and_rank_patterns_without_mutating_inputs(self):
+        configs = [
+            LoraConfig(r=2, target_modules=["k_proj", "q_proj"], rank_pattern={"q_proj": 9}, init_lora_weights=False),
+            LoraConfig(r=4, target_modules=["v_proj"], layers_to_transform=[1], exclude_modules=["layers.0.v_proj"]),
+        ]
+        original = deepcopy(configs)
+        dummy = create_dummy_lora_config(configs)
+        # sanity check
+        assert configs == original
+
+        assert dummy.target_modules == {"k_proj", "q_proj", "v_proj"}
+        assert dummy.r == 9
+        assert dummy.rank_pattern == {}
+        assert dummy.layers_to_transform is None
+        assert dummy.layers_pattern is None
+        assert dummy.exclude_modules is None
+        assert dummy.init_lora_weights is True
+        assert dummy.inference_mode is True
+
+    def test_empty_input_rejected(self):
+        with pytest.raises(ValueError, match="At least one"):
+            create_dummy_lora_config([])
+
+    def test_non_lora_rejected(self):
+        with pytest.raises(TypeError, match="must be a LoRA configuration"):
+            create_dummy_lora_config([PromptTuningConfig()])
+
+    @pytest.mark.parametrize("target_modules", [None, [], "q_proj", ".*q_proj", "all-linear"])
+    def test_requires_explicit_target_names(self, target_modules):
+        with pytest.raises(ValueError, match="nonempty target_modules"):
+            create_dummy_lora_config([LoraConfig(target_modules=target_modules)])
+
+    @pytest.mark.parametrize(
+        "kwargs, field_name",
+        [
+            ({"use_dora": True}, "use_dora"),
+            ({"bias": "all"}, "bias"),
+            ({"lora_bias": True}, "lora_bias"),
+            ({"modules_to_save": ["head"]}, "modules_to_save"),
+            ({"target_parameters": ["weight"]}, "target_parameters"),
+            ({"trainable_token_indices": [0]}, "trainable_token_indices"),
+            ({"layer_replication": [(0, 1)]}, "layer_replication"),
+        ],
+    )
+    def test_unsupported_features_rejected(self, kwargs, field_name):
+        with pytest.raises(ValueError, match=field_name):
+            create_dummy_lora_config([LoraConfig(target_modules=["q_proj"], **kwargs)])
+
+    @pytest.mark.parametrize(
+        "kwargs, field_name",
+        [
+            ({"use_rslora": True}, "use_rslora"),
+            ({"lora_dropout": 0.1}, "lora_dropout"),
+            ({"alpha_pattern": {"q_proj": 16}}, "alpha_pattern"),
+            ({"fan_in_fan_out": True}, "fan_in_fan_out"),
+            ({"base_model_name_or_path": "other"}, "base_model_name_or_path"),
+            ({"revision": "other"}, "revision"),
+            ({"task_type": "SEQ_2_SEQ_LM"}, "task_type"),
+        ],
+    )
+    def test_incompatible_configs_rejected(self, kwargs, field_name):
+        first = LoraConfig(
+            target_modules=["q_proj"], base_model_name_or_path="base", revision="main", task_type="CAUSAL_LM"
+        )
+        second = deepcopy(first)
+        for key, value in kwargs.items():
+            setattr(second, key, value)
+        with pytest.raises(ValueError, match=field_name):
+            create_dummy_lora_config([first, second])
+
+    @pytest.mark.skipif(platform.system() != "Linux", reason="Running test involving torch.compile only on Linux.")
+    @pytest.mark.parametrize("do_compile", [False, True])
+    @pytest.mark.parametrize("use_rslora", [False, True])
+    def test_dummy_config_preserves_base_output_and_hotswaps_every_adapter(self, tmp_path, do_compile, use_rslora):
+        # test is similar to test_hotswap_rank_and_alpha_patterns in test_initialization, but we check the dummy adapter
+        # on top
+        class MLP(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 20)
+                self.relu = nn.ReLU()
+                self.lin1 = nn.Linear(20, 2)
+                self.sm = nn.LogSoftmax(dim=-1)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.relu(X)
+                X = self.lin1(X)
+                X = self.sm(X)
+                return X
+
+        base_model = MLP()
+        inputs = torch.randn(2, 10)
+        configs = [
+            LoraConfig(r=3, lora_alpha=9, target_modules=["lin0", "lin1"], rank_pattern={"lin1": 5}),
+            LoraConfig(r=2, lora_alpha=4, target_modules=["lin0"]),
+            LoraConfig(r=1, lora_alpha=3, target_modules=["lin1"]),
+        ]
+        expected = []
+        with torch.inference_mode():
+            base_output = base_model(inputs)
+            for index, config in enumerate(configs):
+                config.init_lora_weights = False
+                config.use_rslora = use_rslora
+                adapter = get_peft_model(deepcopy(base_model), deepcopy(config)).eval()
+                adapter.save_pretrained(tmp_path / str(index))
+
+                with torch.inference_mode():
+                    output = adapter(inputs)
+                # sanity check
+                assert not torch.allclose(output, base_output)
+                expected.append(output)
+
+        dummy_config = create_dummy_lora_config(configs)
+        model = get_peft_model(deepcopy(base_model), dummy_config).eval()
+        prepare_model_for_compiled_hotswap(model)
+        if do_compile:
+            # local import: it's a private class, we don't want a global import or else all tests will fail if torch
+            # renames/removes this class.
+            from torch._dynamo.testing import CompileCounter
+
+            counter = CompileCounter()
+
+        model = torch.compile(model, backend=counter, fullgraph=True) if do_compile else model
+        with torch.inference_mode():
+            torch.testing.assert_close(model(inputs), base_output)
+            for index in [0, 1, 2, 0]:
+                hotswap_adapter(model, tmp_path / str(index), adapter_name="default", torch_device="cpu")
+                torch.testing.assert_close(model(inputs), expected[index])
+        if do_compile:
+            assert counter.frame_count == 1
