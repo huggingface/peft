@@ -54,6 +54,13 @@ Read the contribution guideline at `docs/source/developer_guides/contributing.md
 
 ## Development
 
+### PR description
+
+In essence your PR description should be a good commit message in the commit history of the project. It should concisely document what changed, why it changed and possibly what solutions were
+discussed but not taken. The what and the why are the most important parts. If the PR is about a new PEFT method, the PR description should ideally include a short blurb about the method
+suitable for communication. Information that does not belong to the commit history but are helpful to the reviewer should be clearly separated from the descriptive portion of the introduced change.
+The PR description should always reflect the latest code state, addendums are frowned upon, proper integration of the new changes into the description is preferred.
+
 ### Useful commands
 
 - `make style`: runs formatters and linters (ruff), necessary to pass code style checks. Ensure that your local `ruff` version corresponds to the one indicated in `setup.py`.
