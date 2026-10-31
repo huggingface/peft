@@ -39,7 +39,7 @@ ALL_CONFIGS = [
     ##########
     # target down_proj
     (
-        "trl-internal-testing/tiny-Llama4ForCausalLM",
+        "peft-internal-testing/tiny-Llama4ForCausalLM",
         LoraConfig,
         {
             "task_type": TaskType.CAUSAL_LM,
@@ -52,7 +52,7 @@ ALL_CONFIGS = [
     ),
     # target gate_up_proj and down_proj, but not on the same module
     (
-        "trl-internal-testing/tiny-Llama4ForCausalLM",
+        "peft-internal-testing/tiny-Llama4ForCausalLM",
         LoraConfig,
         {
             "task_type": TaskType.CAUSAL_LM,
@@ -66,7 +66,7 @@ ALL_CONFIGS = [
     ),
     # target down_proj and gate_up_proj on the same module
     (
-        "trl-internal-testing/tiny-Llama4ForCausalLM",
+        "peft-internal-testing/tiny-Llama4ForCausalLM",
         LoraConfig,
         {
             "task_type": "CAUSAL_LM",
@@ -83,7 +83,7 @@ ALL_CONFIGS = [
     ),
     # target q_proj, v_proj as modules, and down_proj as parameter
     (
-        "trl-internal-testing/tiny-Llama4ForCausalLM",
+        "peft-internal-testing/tiny-Llama4ForCausalLM",
         LoraConfig,
         {
             "task_type": TaskType.CAUSAL_LM,
@@ -164,7 +164,7 @@ class MyAutoModelForCausalLM(AutoModelForCausalLM):
         model = AutoModelForCausalLM.from_pretrained(*args, **kwargs)
 
         # check that we load the original model, not, say, a trained checkpoint
-        if args[0] == "trl-internal-testing/tiny-Llama4ForCausalLM":
+        if args[0] == "peft-internal-testing/tiny-Llama4ForCausalLM":
             # model contains weights with values ~1e36 or nan, so we need to reinitialize with sane values
             with torch.no_grad():
                 for param in model.parameters():
@@ -177,7 +177,7 @@ class MyAutoModelForCausalLM(AutoModelForCausalLM):
 
 
 def test_rank_pattern_for_moe_target_parameters(tmp_path):
-    model_id = "trl-internal-testing/tiny-Llama4ForCausalLM"
+    model_id = "peft-internal-testing/tiny-Llama4ForCausalLM"
     with hub_online_once(model_id):
         model = MyAutoModelForCausalLM.from_pretrained(model_id)
         num_experts = getattr(model.config, "num_local_experts", None) or getattr(model.config, "num_experts", None)
@@ -407,7 +407,7 @@ class TestTargetParameters:
         # test that if we target multiple nn.Parameters on the same module, all of them are being used during the
         # forward pass
         torch.manual_seed(0)
-        model_id = "trl-internal-testing/tiny-Llama4ForCausalLM"
+        model_id = "peft-internal-testing/tiny-Llama4ForCausalLM"
         with hub_online_once(model_id):
             x = torch.arange(10).view(2, 5)
             model = MyAutoModelForCausalLM.from_pretrained(model_id)
@@ -480,7 +480,7 @@ class TestTargetParameters:
         # Folding the LoRA update into the parameter uses baddbmm, which autocast casts down to the autocast dtype.
         # Since a parametrization may not change the dtype of the parameter, registering it then failed, see #3601.
         torch.manual_seed(0)
-        model_id = "trl-internal-testing/tiny-Llama4ForCausalLM"
+        model_id = "peft-internal-testing/tiny-Llama4ForCausalLM"
         with hub_online_once(model_id):
             model = MyAutoModelForCausalLM.from_pretrained(model_id)
             x = torch.arange(10).view(2, 5)
@@ -639,7 +639,7 @@ class TestTargetParameters:
         # ParamWrapper(s) instead of nesting new ones. As a result, the number of ParamWrappers stays constant and each
         # of them holds both adapters.
         torch.manual_seed(0)
-        model_id = "trl-internal-testing/tiny-Llama4ForCausalLM"
+        model_id = "peft-internal-testing/tiny-Llama4ForCausalLM"
         target_parameters = ["feed_forward.experts.gate_up_proj", "feed_forward.experts.down_proj"]
         with hub_online_once(model_id):
             model = MyAutoModelForCausalLM.from_pretrained(model_id)
@@ -669,7 +669,7 @@ class TestTargetParameters:
         # which meant that the state dict for 'other' would contain an extra base layer, which meant it could not be
         # loaded unless the default adapter was loaded first.
         torch.manual_seed(0)
-        model_id = "trl-internal-testing/tiny-Llama4ForCausalLM"
+        model_id = "peft-internal-testing/tiny-Llama4ForCausalLM"
         target_parameters = ["feed_forward.experts.gate_up_proj", "feed_forward.experts.down_proj"]
         x = torch.arange(10).view(2, 5)
         with hub_online_once(model_id):
