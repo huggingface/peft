@@ -21,10 +21,14 @@ import torch
 import transformers
 
 from .. import __version__
-from ..peft_model import get_layer_status, get_model_status
+from ..peft_model import CLASSIFIER_MODULE_NAMES, get_layer_status, get_model_status
+from .other import ModulesToSaveWrapper
 
 
 SEVERITY = Literal["warning", "error"]
+
+_TASK_HEAD_CLASS_SUFFIXES = ("ForSequenceClassification", "ForTokenClassification", "ForQuestionAnswering")
+_TASK_HEAD_MODULE_NAMES = (*CLASSIFIER_MODULE_NAMES, "qa_outputs")
 
 
 def _format_finding(code: str, severity: SEVERITY, message: str) -> dict[str, str]:
@@ -93,13 +97,39 @@ def _get_model_runtime(model) -> dict[str, Any]:
     }
 
 
+def _find_unsaved_new_task_heads(model) -> list[str]:
+    """
+    Return the names of task heads that were newly initialized when loading the base model but are not saved.
+
+    A head counts as newly initialized if the base model class is a Transformers head class (e.g.
+    `XForSequenceClassification`) that is not listed in `config.architectures`, i.e. the checkpoint did not contain this
+    head. It counts as saved if it is wrapped by `ModulesToSaveWrapper`. If `architectures` is not available, nothing is
+    reported.
+    """
+    base_model = model.get_base_model() if hasattr(model, "get_base_model") else model
+    class_name = type(base_model).__name__
+    if not class_name.endswith(_TASK_HEAD_CLASS_SUFFIXES):
+        return []
+
+    architectures = getattr(getattr(base_model, "config", None), "architectures", None)
+    if not architectures or class_name in architectures:
+        return []
+
+    return [
+        name
+        for name, child in base_model.named_children()
+        if name in _TASK_HEAD_MODULE_NAMES and not isinstance(child, ModulesToSaveWrapper)
+    ]
+
+
 def run_healthcheck(model, min_trainable_params: int = 1, max_trainable_params_percent: int = 50) -> dict[str, Any]:
     """
     Inspect a PEFT model for states that are suspicious before training.
 
     This function summarizes the model and layer status APIs (see [~`PeftModel.get_model_status`] and
     [~`PeftModel.get_layer_status`]), and includes findings for inconsistent adapter state, merged adapters, and
-    implausible numbers of trainable parameters. It does not validate the training loop, optimizer, or dataset. A
+    implausible numbers of trainable parameters, and for newly initialized task heads that are not saved with the
+    adapter. It does not validate the training loop, optimizer, or dataset. A
     status will be reported as `"irregular"` if inconsistencies are found in the model, e.g. when for the same adapter,
     some layers are enabled and some layers are disabled. This almost always means that something went wrong and that
     you should check that you didn't accidentally change some attributes on the model incorrectly.
@@ -212,6 +242,21 @@ def run_healthcheck(model, min_trainable_params: int = 1, max_trainable_params_p
                     f"Active adapter(s) {', '.join(frozen_active_adapters)} are not trainable.",
                 )
             )
+
+    unsaved_heads = _find_unsaved_new_task_heads(model)
+    if unsaved_heads:
+        head_names = ", ".join(f"'{name}'" for name in unsaved_heads)
+        findings.append(
+            _format_finding(
+                "TASK_HEAD_NOT_SAVED",
+                "warning",
+                (
+                    f"The task head {head_names} was newly initialized when the base model was loaded but is not in "
+                    "`modules_to_save`, so it is not saved with the adapter. Loading the adapter later gives a "
+                    "different random head. Set `task_type` in the PEFT config or add the head to `modules_to_save`."
+                ),
+            )
+        )
 
     layer_types_per_adapter = {}
     for adapter_name in model_status.available_adapters:
