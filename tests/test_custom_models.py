@@ -1284,6 +1284,13 @@ TEST_CASES = [
         PsoftConfig,
         {"target_modules": ["lin0"], "r": 4, "psoft_alpha": 4, "ab_svd_init": "pissa_init"},
     ),
+    (
+        # fan_in_fan_out=True is not correct for nn.Linear and is set to False when the layer is created
+        "Vanilla MLP PSOFT fan_in_fan_out",
+        "MLP",
+        PsoftConfig,
+        {"target_modules": ["lin0"], "r": 2, "psoft_alpha": 2, "fan_in_fan_out": True},
+    ),
     ########
     # Lily  #
     ########
@@ -2680,6 +2687,13 @@ class TestPeftCustomModel(PeftCommonTester):
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_merge_layers_after_adding_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
+
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_merge_layers_after_adding_adapter(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
