@@ -30,6 +30,9 @@ from transformers import (
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
     BitsAndBytesConfig,
+    GPT2Config,
+    GPT2ForSequenceClassification,
+    GPT2LMHeadModel,
 )
 from transformers.pytorch_utils import Conv1D
 
@@ -1997,6 +2000,74 @@ class TestHealthcheck:
             assert healthcheck["adapter_configurations"]["default"]["modules_to_save"] == ["embed_tokens"]
             assert healthcheck["model_runtime"]["parameter_devices"] == ["cpu"]
             assert healthcheck["findings"] == []
+
+    @pytest.fixture
+    def lm_checkpoint(self, tmp_path):
+        # tiny base LM checkpoint, so that loading it as a sequence classifier newly initializes the head
+        config = GPT2Config(n_layer=1, n_embd=16, n_head=2, vocab_size=50, n_positions=16, pad_token_id=0)
+        path = tmp_path / "lm"
+        GPT2LMHeadModel(config).save_pretrained(path)
+        return path
+
+    @staticmethod
+    def finding_codes(model):
+        return {finding["code"] for finding in model.healthcheck()["findings"]}
+
+    def test_new_task_head_without_task_type_is_flagged(self, lm_checkpoint):
+        base = AutoModelForSequenceClassification.from_pretrained(lm_checkpoint, num_labels=3)
+        model = get_peft_model(base, LoraConfig(target_modules=["c_attn"], fan_in_fan_out=True, r=2))
+
+        model.print_healthcheck()  # does not raise
+        healthcheck = model.healthcheck()
+
+        assert healthcheck["is_ready"] is True  # warning only
+        assert [finding["code"] for finding in healthcheck["findings"]] == ["TASK_HEAD_NOT_SAVED"]
+        assert healthcheck["findings"][0]["severity"] == "warning"
+        assert "'score'" in healthcheck["findings"][0]["message"]
+
+    def test_new_task_head_targeted_by_adapter_is_flagged(self, lm_checkpoint):
+        # only the LoRA weights of the head are saved, not the random base weight
+        base = AutoModelForSequenceClassification.from_pretrained(lm_checkpoint, num_labels=3)
+        config = LoraConfig(target_modules=["c_attn", "score"], fan_in_fan_out=True, r=2)
+        model = get_peft_model(base, config)
+
+        assert self.finding_codes(model) == {"TASK_HEAD_NOT_SAVED"}
+
+    def test_new_task_head_with_task_type_is_not_flagged(self, lm_checkpoint):
+        base = AutoModelForSequenceClassification.from_pretrained(lm_checkpoint, num_labels=3)
+        config = LoraConfig(target_modules=["c_attn"], fan_in_fan_out=True, r=2, task_type="SEQ_CLS")
+        model = get_peft_model(base, config)
+
+        assert self.finding_codes(model) == set()
+
+    def test_new_task_head_in_modules_to_save_is_not_flagged(self, lm_checkpoint):
+        base = AutoModelForSequenceClassification.from_pretrained(lm_checkpoint, num_labels=3)
+        config = LoraConfig(target_modules=["c_attn"], fan_in_fan_out=True, r=2, modules_to_save=["score"])
+        model = get_peft_model(base, config)
+
+        assert self.finding_codes(model) == set()
+
+    def test_pretrained_task_head_is_not_flagged(self, lm_checkpoint, tmp_path):
+        # an already fine-tuned classifier checkpoint lists the classification class in `architectures`
+        classifier_path = tmp_path / "classifier"
+        AutoModelForSequenceClassification.from_pretrained(lm_checkpoint, num_labels=3).save_pretrained(
+            classifier_path
+        )
+        base = AutoModelForSequenceClassification.from_pretrained(classifier_path)
+        assert base.config.architectures == ["GPT2ForSequenceClassification"]
+        model = get_peft_model(base, LoraConfig(target_modules=["c_attn"], fan_in_fan_out=True, r=2))
+
+        assert self.finding_codes(model) == set()
+
+    def test_task_head_without_architectures_is_not_flagged(self):
+        config = GPT2Config(
+            n_layer=1, n_embd=16, n_head=2, vocab_size=50, n_positions=16, pad_token_id=0, num_labels=3
+        )
+        base = GPT2ForSequenceClassification(config)  # created from a config, there is no checkpoint
+        assert not base.config.architectures
+        model = get_peft_model(base, LoraConfig(target_modules=["c_attn"], fan_in_fan_out=True, r=2))
+
+        assert self.finding_codes(model) == set()
 
 
 # Tests for BaseTuner

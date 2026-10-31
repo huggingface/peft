@@ -220,6 +220,8 @@ You should probably TRAIN this model on a down-stream task to be able to use it 
 
 The mentioned layers should be added to `modules_to_save` in the config to avoid the described problem.
 
+[`~peft.PeftModel.healthcheck`] reports a `TASK_HEAD_NOT_SAVED` warning for the most common form of this mistake: a sequence classification, token classification or question answering head that was newly initialized when loading the base model but is not in `modules_to_save`, e.g. because `task_type` was not set. The check is skipped if the base model does not list its architectures in the config.
+
 > [!TIP]
 > As an example, when loading a model that is using the DeBERTa architecture for sequence classification, you'll see a warning that the following weights are newly initialized: `['classifier.bias', 'classifier.weight', 'pooler.dense.bias', 'pooler.dense.weight']`. From this, it follows that the `classifier` and `pooler` layers should be added to: `modules_to_save=["classifier", "pooler"]`.
 
