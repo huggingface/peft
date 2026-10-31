@@ -118,6 +118,13 @@ REGEX_TEST_CASES = [
     ("foo.whatever.1.baz", ["baz"], [0], "", False),
     ("foo.whatever.1.baz", ["baz"], [1], None, True),
     ("foo.whatever.1.baz", ["baz"], [0], None, False),
+    # same without prefix before the layer container, e.g. the ModuleList at the root of the model
+    ("whatever.1.baz", ["baz"], [1], None, True),
+    ("whatever.1.baz", ["baz"], [0], None, False),
+    ("whatever.1.baz", ["baz"], [1], [], True),
+    ("whatever.1.baz", ["baz"], [0], "", False),
+    ("whatever.1.experts.0.baz", ["baz"], [1], None, True),
+    ("whatever.1.experts.0.baz", ["baz"], [0], None, False),
     # some realistic examples: transformers model
     ("transformer.h.1.attn.attention.q_proj.foo", ["q_proj"], None, [], False),
     ("transformer.h.1.attn.attention.q_proj", [], None, [], False),
