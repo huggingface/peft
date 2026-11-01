@@ -3,7 +3,9 @@ from io import StringIO
 
 import pytest
 import torch
+from torch import nn
 from transformers import AutoModelForCausalLM
+from transformers.pytorch_utils import Conv1D
 
 from peft import LoraConfig, MissConfig, get_peft_model
 from peft.tuners.lora.intruders import reduce_intruder_dimension
@@ -143,6 +145,55 @@ class TestLoraIntruders:
                 # Since the epsilon is really low, we should modify every layer so the weights should differ
                 new_weight = module.lora_embedding_B["intruder_reduced"].detach()
                 assert not torch.equal(new_weight, original_weights[name])
+
+    @pytest.mark.parametrize(
+        "layer_fn, fan_in_fan_out, x_fn",
+        [
+            (lambda: nn.Linear(16, 16), False, lambda: torch.randn(4, 16)),
+            (lambda: nn.Linear(16, 24), False, lambda: torch.randn(4, 16)),
+            (lambda: Conv1D(16, 16), True, lambda: torch.randn(4, 16)),
+            (lambda: Conv1D(24, 16), True, lambda: torch.randn(4, 16)),
+            (lambda: nn.Embedding(20, 16), False, lambda: torch.randint(0, 20, (4,))),
+        ],
+        ids=["linear", "linear_rect", "conv1d", "conv1d_rect", "embedding"],
+    )
+    def test_lora_intruders_without_mitigation_keeps_output(self, layer_fn, fan_in_fan_out, x_fn):
+        # With mitigation_lambda=1.0 nothing is subtracted, so the new adapter must reproduce the old adapter. A high
+        # epsilon makes every top-k dimension count as an intruder, so the SVD path is taken. The tolerance covers
+        # float32 error of a rank-4 SVD round trip on a 16-dim layer.
+        torch.manual_seed(0)
+        layer, x = layer_fn(), x_fn()
+
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer = layer
+
+            def forward(self, x):
+                return self.layer(x)
+
+        config = LoraConfig(r=4, target_modules=["layer"], fan_in_fan_out=fan_in_fan_out, init_lora_weights=False)
+        model = get_peft_model(Net(), config).eval()
+        with torch.no_grad():
+            expected = model(x)
+
+        reduce_intruder_dimension(model, threshold_epsilon=999, mitigation_lambda=1.0, top_k=4, logging_sink=None)
+
+        lora_layer = model.base_model.model.layer
+        if isinstance(layer, nn.Embedding):
+            assert (
+                lora_layer.lora_embedding_A["intruder_reduced"].shape == lora_layer.lora_embedding_A["default"].shape
+            )
+            assert (
+                lora_layer.lora_embedding_B["intruder_reduced"].shape == lora_layer.lora_embedding_B["default"].shape
+            )
+        else:
+            assert lora_layer.lora_A["intruder_reduced"].weight.shape == lora_layer.lora_A["default"].weight.shape
+            assert lora_layer.lora_B["intruder_reduced"].weight.shape == lora_layer.lora_B["default"].weight.shape
+
+        with torch.no_grad():
+            output = model(x)
+        torch.testing.assert_close(output, expected, atol=1e-4, rtol=1e-4)
 
     def test_non_lora_intruders_linear_raises(self, model_lin_non_lora):
         with pytest.raises(ValueError) as e:
