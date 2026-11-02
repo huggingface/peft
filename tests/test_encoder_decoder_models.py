@@ -481,7 +481,6 @@ class TestEncoderDecoderModels(PeftCommonTester):
         self, model_id, config_cls, config_kwargs, dtype, autocast_adapter_dtype, request
     ):
         # after a merge/unmerge roundtrip, the base weights should be restored exactly
-        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         beft_tests(config_cls, model_id, config_kwargs)
         if not merge_unmerge_restores_exactly(config_cls, dtype, model_id):
             request.node.add_marker(

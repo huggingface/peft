@@ -2709,7 +2709,6 @@ class TestPeftCustomModel(PeftCommonTester):
         self, test_name, model_id, config_cls, config_kwargs, dtype, autocast_adapter_dtype, request
     ):
         # after a merge/unmerge roundtrip, the base weights should be restored exactly
-        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         if not merge_unmerge_restores_exactly(config_cls, dtype, test_name):
             request.node.add_marker(
                 pytest.mark.xfail(strict=True, reason="Merging and unmerging does not restore the base weights")

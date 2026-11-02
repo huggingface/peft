@@ -77,7 +77,7 @@ from peft.utils import (
     infer_device,
 )
 
-from .testing_utils import get_state_dict, hub_online_once
+from .testing_utils import get_state_dict, hub_online_once, perturb_peft_adapter_weights
 
 
 def skip_non_prompt_learning(config_cls):
@@ -890,10 +890,11 @@ class PeftCommonTester:
             torch.manual_seed(0)  # the adapter init must be reproducible for this check
             model = self.transformers_class.from_pretrained(model_id, dtype=dtype)
             model = model.to(device=self.torch_device, dtype=dtype)
-            # Give the base model generic, small weights. Generic, because otherwise some methods pass by accident
-            # (e.g. biases are exactly zero, so (0 + delta) - delta is always exact). Small, because the adapter delta
-            # must be significant compared to the base weights: if it is much smaller than one ulp, adding it is exact
-            # and even a lossy add/subtract merge restores the weights, which would hide the very issue tested here.
+            # The base weights are replaced by generic, small random values, before the adapter is created (some
+            # methods store a copy of the base weights at init, e.g. TrainableTokens). Generic, because with the
+            # default init some methods pass by accident: biases are exactly zero, so (0 + delta) - delta is always
+            # exact. Small, because the adapter delta has to be significant compared to the base weights, otherwise
+            # adding it is exact and even a lossy merge restores the weights.
             generator = torch.Generator().manual_seed(1)
             with torch.no_grad():
                 for param in model.parameters():
@@ -910,30 +911,45 @@ class PeftCommonTester:
 
             # the merge/unmerge cycle only touches the weights of the base model, not the adapter weights
             base_model = model.get_base_model()
+            adapter_params = [(param, param.detach().clone()) for param in model.parameters() if param.requires_grad]
+            adapter_param_ids = {id(param) for param, _ in adapter_params}
 
             def base_weights():
                 # re-read the parameters every time, some PEFT methods replace the parameter object on merge/unmerge
                 return {
                     name: param.detach().clone()
                     for name, param in base_model.named_parameters()
-                    if param.is_floating_point()
+                    if param.is_floating_point() and id(param) not in adapter_param_ids
                 }
 
-            weights_before = base_weights()
-            model.merge_adapter()
-            weights_merged = base_weights()
+            # Check several independent draws. A lossy merge/unmerge roundtrip comes out exact by chance whenever no
+            # base weight crosses a binade boundary when the delta is added, which is the case for a few percent of
+            # all weights, so a single draw is not enough to tell a lossy method from one that restores the weights.
+            for draw in range(3):
+                with torch.no_grad():
+                    for param, original in adapter_params:
+                        param.copy_(original)
+                perturb_peft_adapter_weights(model, seed=draw)
 
-            # sanity check: the adapter has to change at least one base weight, otherwise the check below is vacuous
-            changed = [name for name, w in weights_merged.items() if not torch.equal(w, weights_before[name])]
-            assert changed, f"Merging {config_cls.__name__} did not change any base weight, the check would be vacuous"
+                weights_before = base_weights()
+                model.merge_adapter()
+                weights_merged = base_weights()
 
-            model.unmerge_adapter()
-            weights_unmerged = base_weights()
-            not_restored = [name for name in changed if not torch.equal(weights_unmerged[name], weights_before[name])]
-            assert not not_restored, (
-                f"Unmerging {config_cls.__name__} did not restore {len(not_restored)} of the {len(changed)} changed base "
-                f"weights, e.g. {not_restored[0]}"
-            )
+                # sanity check: the adapter has to change at least one base weight, or the check below is vacuous
+                changed = [name for name, w in weights_merged.items() if not torch.equal(w, weights_before[name])]
+                assert changed, (
+                    f"Merging {config_cls.__name__} did not change any base weight, the check would be vacuous"
+                )
+
+                model.unmerge_adapter()
+                weights_unmerged = base_weights()
+                not_restored = [
+                    name for name in changed if not torch.equal(weights_unmerged[name], weights_before[name])
+                ]
+                assert not not_restored, (
+                    f"Unmerging {config_cls.__name__} did not restore {len(not_restored)} of the {len(changed)} "
+                    f"changed base weights (draw {draw}), e.g. {not_restored[0]}"
+                )
 
     def _test_safe_merge(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)

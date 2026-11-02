@@ -413,7 +413,6 @@ class TestPeftFeatureExtractionModel(PeftCommonTester):
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained(self, model_id, config_cls, config_kwargs):
         deberta_beft_tests(config_cls, model_id, config_kwargs)
-        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
@@ -448,7 +447,6 @@ class TestPeftFeatureExtractionModel(PeftCommonTester):
     ):
         # after a merge/unmerge roundtrip, the base weights should be restored exactly
         deberta_beft_tests(config_cls, model_id, config_kwargs)
-        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         if not merge_unmerge_restores_exactly(config_cls, dtype, model_id):
             request.node.add_marker(
                 pytest.mark.xfail(strict=True, reason="Merging and unmerging does not restore the base weights")
