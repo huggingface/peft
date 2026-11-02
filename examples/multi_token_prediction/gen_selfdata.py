@@ -154,7 +154,15 @@ def main():
                 # too little context to be a meaningful prefix
                 manifest["short_docs"] = manifest.get("short_docs", 0) + 1
                 continue
-            prompts.append((([bos_id] if bos_id is not None else []) + ids[:prefix_len], len(ids[:prefix_len])))
+
+            # take a random subset of the article to include all sorts of content
+            if len(ids) <= prefix_len:
+                start_idx = 0
+            else:
+                start_idx = int(rng.integers(0, len(ids) - prefix_len + 1))
+
+            content = ids[start_idx : start_idx + prefix_len]
+            prompts.append((([bos_id] if bos_id is not None else []) + content, len(content)))
         if not prompts:
             print("Input stream exhausted before reaching --num_samples")
             break
