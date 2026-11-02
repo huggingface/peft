@@ -2782,6 +2782,16 @@ class TestPeftCustomModel(PeftCommonTester):
         assert torch.allclose(output_disabled_before, output_base)
         assert torch.allclose(output_disabled_after, output_base)
 
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    # note: not testing float32 to save time, if fp32 manages to unmerge exactly, it doesn't mean much
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    @pytest.mark.parametrize("autocast_adapter_dtype", [True, False])
+    def test_exact_merge_layers(self, test_name, model_id, config_cls, config_kwargs, dtype, autocast_adapter_dtype):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_exact_merge_layers(
+            model_id, config_cls, config_kwargs, dtype=dtype, autocast_adapter_dtype=autocast_adapter_dtype
+        )
+
     @pytest.mark.parametrize("conv_cls", [nn.Conv2d, nn.Conv3d])
     @pytest.mark.parametrize("safe_merge", [False, True])
     def test_ia3_grouped_conv_feedforward_merge(self, conv_cls, safe_merge):

@@ -14,6 +14,7 @@
 
 
 import warnings
+from typing import Optional
 
 import torch
 
@@ -158,12 +159,12 @@ class OFTModel(BaseTuner):
         new_module = layer_cls(target, adapter_name, config=oft_config, **kwargs)
         return new_module
 
-    def _check_merge_allowed(self):
+    def _check_merge_allowed(self, adapter_names: Optional[list[str]], exact: bool = False):
         """Verify that the configuration supports merging.
 
         Currently gptq quantization and replicated layers do not support merging.
         """
-        super()._check_merge_allowed()
+        super()._check_merge_allowed(adapter_names=adapter_names, exact=exact)
         if getattr(self.model, "quantization_method", None) == "gptq":
             raise ValueError("Cannot merge OFT layers when the model is gptq quantized")
         if self.peft_config.get("layer_replication"):

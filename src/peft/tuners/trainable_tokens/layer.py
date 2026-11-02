@@ -182,7 +182,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
                 )
             indices.update(index_set)
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None, exact: bool = False) -> None:
         adapter_names = check_adapters_to_merge(self, adapter_names)
         adapter_names = [name for name in adapter_names if name in self.trainable_tokens_delta]
 

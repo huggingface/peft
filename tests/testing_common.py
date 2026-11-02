@@ -1032,6 +1032,120 @@ class PeftCommonTester:
             # no error is only acceptable if this method does not merge the bias at all
             assert torch.equal(base_layer.bias, orig_bias)
 
+    def _test_exact_merge_layers(self, model_id, config_cls, config_kwargs, dtype, autocast_adapter_dtype):
+        # check that exact merging is truly exact, and that if it's not supported, we get the correct error message
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+
+        with hub_online_once(model_id):
+            # ESTABLISH THAT MERGING IS INEXACT
+
+            model = self.transformers_class.from_pretrained(model_id)
+            model = model.to(device=self.torch_device, dtype=dtype)
+            model = get_peft_model(model, config_cls(**config_kwargs), autocast_adapter_dtype=autocast_adapter_dtype)
+            prefix = model.prefix
+            self.perturb_trainable_token_weights_if_used(model, config_kwargs)
+
+            def get_base_state_dict(model):
+                # helper to filter for base weights and normalize keys
+                sd = model.state_dict()
+                to_return = {}
+                for k, v in sd.items():
+                    if f".{prefix}" in k:
+                        continue
+                    if ".modules_to_save" in k:
+                        continue
+                    if ".trainable_token" in k:
+                        continue
+                    k = k.removeprefix("base_model.model.")
+
+                    for infix in (".base_layer", ".original_module", ".token_adapter"):
+                        for param in (".weight", ".bias"):
+                            suffix = f"{infix}{param}"
+                            if k.endswith(suffix):
+                                k = k.removesuffix(suffix) + param
+
+                    to_return[k] = v.clone()
+                return to_return
+
+            sd_before = get_base_state_dict(model)
+
+            # first get the weights after a normal merge-unmerge roundtrip
+            model.merge_adapter()
+            model.unmerge_adapter()
+            sd_inexact_unmerge = get_base_state_dict(model)
+
+            # sanity check: with inexact unmerge, there are some deviations in the weights
+            assert sd_before.keys() == sd_inexact_unmerge.keys()
+            all_equal = all(torch.equal(sd_before[k], sd_inexact_unmerge[k]) for k in sd_before)
+            if all_equal:
+                pytest.skip(f"Skipping exact merge tests because {config_cls} is already exact.")
+
+            del model
+
+            # SHOW THAT WHEN MERGING ONE ADAPTER EXACTLY, WEIGHTS CAN BE RESTORED (IF THE MODEL SUPPORTS)
+            model = self.transformers_class.from_pretrained(model_id)
+            model = model.to(device=self.torch_device, dtype=dtype)
+            sd_before = get_base_state_dict(model)
+            model = get_peft_model(model, config_cls(**config_kwargs), autocast_adapter_dtype=autocast_adapter_dtype)
+            self.perturb_trainable_token_weights_if_used(model, config_kwargs)
+
+            # if exact merging is not allowed, only check the error message, then return
+            msg = "does not support exact merging"
+            try:
+                model.merge_adapter(exact=True)
+            except Exception as exc:
+                err_msg = str(exc.args[0])
+                assert msg in err_msg
+                # IF THIS PEFT MEHTOD DOES NOT SUPPORT EXACT MERGING, EXIT EARLY
+                return
+
+            sd_after_merge = get_base_state_dict(model)
+            # sanity check:
+            assert sd_before.keys() == sd_after_merge.keys()
+            assert any(not torch.equal(sd_before[k], sd_after_merge[k]) for k in sd_before)
+
+            # merging is not possible if there is already a merged adapter
+            model.add_adapter("other", config_cls(**config_kwargs), autocast_adapter_dtype=autocast_adapter_dtype)
+            msg = "This model does not support exact merging because there are already merged adapters"
+            with pytest.raises(ValueError, match=msg):
+                model.merge_adapter(["other"], exact=True)
+            with pytest.raises(ValueError, match=msg):
+                model.merge_adapter(["other"], exact=False)
+
+            model.unmerge_adapter()
+            sd_exact_unmerge = get_base_state_dict(model)
+            # exact: no difference
+            assert sd_before.keys() == sd_exact_unmerge.keys()
+            assert all(torch.equal(sd_before[k], sd_exact_unmerge[k]) for k in sd_before)
+
+            del model
+
+            # SHOW THAT TWO ADAPTERS CAN BE MERGED AND UNMERGED EXACTLY
+
+            if "trainable_token_indices" in config_kwargs:
+                # For now, skip if we have trainable token indices, as overlapping indices raise when you try to merge
+                # them. It's not qiute trivial to avoid that here.
+                return
+
+            # it's possible to merge multiple adapters exactly
+            model = self.transformers_class.from_pretrained(model_id)
+            model = model.to(device=self.torch_device, dtype=dtype)
+            sd_before = get_base_state_dict(model)
+            model = get_peft_model(model, config_cls(**config_kwargs), autocast_adapter_dtype=autocast_adapter_dtype)
+            self.perturb_trainable_token_weights_if_used(model, config_kwargs)
+
+            model.add_adapter("other", config_cls(**config_kwargs), autocast_adapter_dtype=autocast_adapter_dtype)
+            model.merge_adapter(["default", "other"], exact=True)
+
+            # sanity check
+            sd_two_merged = get_base_state_dict(model)
+            assert sd_before.keys() == sd_two_merged.keys()
+            assert any(not torch.equal(sd_before[k], sd_two_merged[k]) for k in sd_before)
+
+            model.unmerge_adapter()
+            sd_two_unmerged_exact = get_base_state_dict(model)
+            assert all(torch.equal(sd_before[k], sd_two_unmerged_exact[k]) for k in sd_before)
+
     def _test_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
         # Test for mixing different adapters in a single batch by passing the adapter_names argument
         if config_cls not in (LoraConfig, RoadConfig):
