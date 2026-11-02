@@ -140,6 +140,10 @@ class ImageClassificationArguments:
     adamss_r: int = field(default=100, metadata={"help": "SVD rank"})
     adamss_k: int = field(default=10, metadata={"help": "Number of subspaces (K), auto-set based on model"})
     adamss_ri: int = field(default=3, metadata={"help": "Subspace rank (rk), use 3 for vision"})
+    target_modules: list[str] = field(
+        default_factory=lambda: ["q_proj", "v_proj"],
+        metadata={"help": "Target module names"},
+    )
 
     # ASA Configuration
     use_asa: bool = field(default=False, metadata={"help": "Enable Adaptive Subspace Allocation"})
@@ -154,7 +158,7 @@ class ImageClassificationArguments:
     # Training Configuration
     num_epochs: int = field(default=10, metadata={"help": "Number of training epochs"})
     batch_size: int = field(default=32, metadata={"help": "Batch size per device"})
-    warmup_ratio: float = field(default=0.0, metadata={"help": "Warmup ratio"})
+    warmup_steps: float = field(default=0.0, metadata={"help": "Warmup steps or ratio"})
     max_train_samples: Optional[int] = field(default=None, metadata={"help": "Max training samples (for debug)"})
 
     # Other
@@ -313,12 +317,11 @@ def main():
 
     # Configure AdaMSS
     print("\nApplying AdaMSS...")
-    target_modules = ["q_proj", "v_proj"]
     config = AdamssConfig(
         r=args.adamss_r,
         num_subspaces=args.adamss_k,
         subspace_rank=args.adamss_ri,
-        target_modules=target_modules,
+        target_modules=args.target_modules,
         use_asa=args.use_asa,
         asa_target_subspaces=args.asa_target_subspaces if args.use_asa else None,
         init_warmup=args.asa_init_warmup if args.use_asa else None,
@@ -369,7 +372,7 @@ def main():
         per_device_eval_batch_size=args.batch_size,
         learning_rate=hp["lr"],
         weight_decay=hp["wd"],
-        warmup_steps=args.warmup_ratio,
+        warmup_steps=args.warmup_steps,
         eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
