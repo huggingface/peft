@@ -46,7 +46,6 @@ from transformers import (
 )
 
 from peft import AdamssConfig, get_peft_model
-from peft.import_utils import is_transformers_ge_v5
 from peft.tuners.adamss.asa_callback import AdamssAsaCallback
 
 
@@ -314,7 +313,7 @@ def main():
 
     # Configure AdaMSS
     print("\nApplying AdaMSS...")
-    target_modules = ["q_proj", "v_proj"] if is_transformers_ge_v5 else ["query", "value"]
+    target_modules = ["q_proj", "v_proj"]
     config = AdamssConfig(
         r=args.adamss_r,
         num_subspaces=args.adamss_k,
@@ -363,9 +362,6 @@ def main():
         return metric.compute(predictions=predictions, references=eval_pred.label_ids)
 
     # Create TrainingArguments manually (not parsed to avoid conflicts)
-    warmup_kwargs = (
-        {"warmup_steps": args.warmup_ratio} if is_transformers_ge_v5 else {"warmup_ratio": args.warmup_ratio}
-    )
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         num_train_epochs=args.num_epochs,
@@ -373,7 +369,7 @@ def main():
         per_device_eval_batch_size=args.batch_size,
         learning_rate=hp["lr"],
         weight_decay=hp["wd"],
-        **warmup_kwargs,
+        warmup_steps=args.warmup_ratio,
         eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,

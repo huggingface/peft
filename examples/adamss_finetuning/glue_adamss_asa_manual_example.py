@@ -43,7 +43,6 @@ from transformers import (
 )
 
 from peft import AdamssConfig, get_peft_model
-from peft.import_utils import is_transformers_ge_v5
 
 
 class CustomTrainerWithManualASA(Trainer):
@@ -248,11 +247,6 @@ def main():
     test_ds = tokenized_datasets[test_key]
 
     # Create TrainingArguments manually (not parsed to avoid conflicts)
-    warmup_kwargs = (
-        {"warmup_steps": adamss_args.warmup_ratio}
-        if is_transformers_ge_v5
-        else {"warmup_ratio": adamss_args.warmup_ratio}
-    )
     training_args = TrainingArguments(
         output_dir=adamss_args.output_dir,
         num_train_epochs=adamss_args.num_epochs,
@@ -260,7 +254,7 @@ def main():
         per_device_eval_batch_size=adamss_args.batch_size,
         learning_rate=hp["lr"],
         weight_decay=hp["wd"],
-        **warmup_kwargs,
+        warmup_steps=adamss_args.warmup_ratio,
         eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
