@@ -481,10 +481,8 @@ class TestBnb4bitMergeUnmerge:
     def _merge(model, how):
         if how == "one":
             model.merge_adapter()
-        elif how == "together":
-            # merge_adapter() merges the active adapters, and add_adapter() leaves the first one active.
-            model.base_model.set_adapter(["default", "second"])
-            model.merge_adapter()
+        elif how == "together":  # merge both adapters in one go
+            model.merge_adapter(adapter_names=["default", "second"])
         else:  # "sequentially": merge the second adapter on top of the first
             model.merge_adapter(adapter_names=["default"])
             model.merge_adapter(adapter_names=["second"])
@@ -513,8 +511,7 @@ class TestBnb4bitMergeUnmerge:
         magnitude = 0.0
         numel = 0
         for layer, weight in zip(layers, before):
-            after = self._dequantize(layer).float()
-            weight = weight.float()
+            after = self._dequantize(layer)
             changed += (after != weight).sum().item()
             deviation += (after - weight).abs().sum().item()
             magnitude += weight.abs().sum().item()
