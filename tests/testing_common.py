@@ -916,7 +916,7 @@ class PeftCommonTester:
                 atol, rtol = 1e-3, 1e-3
             elif issubclass(config_cls, PveraConfig):
                 atol, rtol = 1e-5, 1e-5
-            elif issubclass(config_cls, (LoHaConfig, LoKrConfig)) and model_id in (
+            elif issubclass(config_cls, (AdaLoraConfig, LoHaConfig, LoKrConfig)) and model_id in (
                 "Conv1dGroups",
                 "Conv2dGroups",
                 "Conv2dGroups2",
