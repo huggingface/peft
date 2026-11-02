@@ -154,6 +154,10 @@ def infer_device() -> str:
         return "xpu"
     elif is_npu_available():
         return "npu"
+    elif hasattr(torch, "accelerator") and torch.accelerator.is_available():
+        accelerator = torch.accelerator.current_accelerator()
+        if accelerator is not None:
+            return accelerator.type
     return "cpu"
 
 
