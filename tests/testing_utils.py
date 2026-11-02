@@ -24,12 +24,16 @@ from datasets import load_dataset
 
 from peft import (
     AdaLoraConfig,
+    FrodConfig,
+    HiraConfig,
     IA3Config,
     LNTuningConfig,
     LoraConfig,
     MissConfig,
+    PeanutConfig,
     PromptLearningConfig,
     TinyLoraConfig,
+    TrainableTokensConfig,
     VBLoRAConfig,
 )
 from peft.import_utils import (
@@ -316,6 +320,35 @@ def set_init_weights_false(config_cls, kwargs):
     else:
         kwargs["init_weights"] = False
     return kwargs
+
+
+# Merging an adapter into the base weights and unmerging it again is a lossy operation in floating point for most PEFT
+# methods: merging computes W + delta and unmerging computes W - delta again, and (W + delta) - delta is not W
+# whenever W + delta crosses a binade boundary. Methods that keep a copy of the pre-merge base weights and copy them
+# back on unmerge do restore the base weights bit for bit.
+_MERGE_UNMERGE_EXACT_CONFIGS = (FrodConfig, HiraConfig, PeanutConfig, TrainableTokensConfig)
+
+# A few parametrizations of the non-exact methods still restore the weights, but only by numerical accident: the tensors
+# involved are tiny and the merge barely changes them, so no rounding happens and the subtraction cancels out. These
+# have to be excluded from the xfail marks, otherwise the strict xfail would turn them into errors.
+_MERGE_UNMERGE_ACCIDENTALLY_EXACT = {
+    # OFT rotates the weights of the convolutions, but only 4-6 out of 450 entries change at all and by ~1e-4
+    # relative, so the round trip is exact in half precision (but not in float32).
+    ("OFTConfig", "Conv2d 3 OFT", "float16"),
+    ("OFTConfig", "Conv2d 3 OFT", "bfloat16"),
+    ("OFTConfig", "Conv2d 5 OFT", "float16"),
+    ("OFTConfig", "Conv2d 5 OFT", "bfloat16"),
+    # the weight of this Conv1D consists of just 5 entries in float16
+    ("DeftConfig", "Embedding + transformers Conv1D 1 DEFT", "float16"),
+}
+
+
+def merge_unmerge_restores_exactly(config_cls, dtype, case_name) -> bool:
+    """Whether merging and unmerging an adapter is expected to restore the base weights bit for bit."""
+    if issubclass(config_cls, _MERGE_UNMERGE_EXACT_CONFIGS):
+        return True
+    key = (config_cls.__name__, case_name, str(dtype).removeprefix("torch."))
+    return key in _MERGE_UNMERGE_ACCIDENTALLY_EXACT
 
 
 @contextmanager

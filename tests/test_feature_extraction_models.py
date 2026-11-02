@@ -51,7 +51,7 @@ from peft import (
 )
 
 from .testing_common import PeftCommonTester, skip_non_prompt_learning
-from .testing_utils import set_init_weights_false
+from .testing_utils import merge_unmerge_restores_exactly, set_init_weights_false
 
 
 # Note: models from peft-internal-testing are just the safetensors versions of hf-internal-testing
@@ -438,6 +438,24 @@ class TestPeftFeatureExtractionModel(PeftCommonTester):
         deberta_beft_tests(config_cls, model_id, config_kwargs)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @pytest.mark.parametrize("autocast_adapter_dtype", [True, False])
+    def test_merge_unmerge_restores_base_weights(
+        self, model_id, config_cls, config_kwargs, dtype, autocast_adapter_dtype, request
+    ):
+        # after a merge/unmerge roundtrip, the base weights should be restored exactly
+        deberta_beft_tests(config_cls, model_id, config_kwargs)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        if not merge_unmerge_restores_exactly(config_cls, dtype, model_id):
+            request.node.add_marker(
+                pytest.mark.xfail(strict=True, reason="Merging and unmerging does not restore the base weights")
+            )
+        self._test_merge_unmerge_restores_base_weights(
+            model_id, config_cls, config_kwargs.copy(), dtype, autocast_adapter_dtype
+        )
 
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)

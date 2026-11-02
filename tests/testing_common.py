@@ -877,6 +877,64 @@ class PeftCommonTester:
 
             assert torch.allclose(logits_0, logits_1, atol=1e-6, rtol=1e-6)
 
+    def _test_merge_unmerge_restores_base_weights(
+        self, model_id, config_cls, config_kwargs, dtype, autocast_adapter_dtype
+    ):
+        # A merge followed by an unmerge has to restore the base weights bit for bit, not just approximately. This
+        # only holds for PEFT methods that keep a copy of the pre-merge base weights; they are parametrized over all
+        # mergeable configs, the other methods are marked as expected failures.
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs)
+
+        with hub_online_once(model_id):
+            torch.manual_seed(0)  # the adapter init must be reproducible for this check
+            model = self.transformers_class.from_pretrained(model_id, dtype=dtype)
+            model = model.to(device=self.torch_device, dtype=dtype)
+            # Give the base model generic, small weights. Generic, because otherwise some methods pass by accident
+            # (e.g. biases are exactly zero, so (0 + delta) - delta is always exact). Small, because the adapter delta
+            # must be significant compared to the base weights: if it is much smaller than one ulp, adding it is exact
+            # and even a lossy add/subtract merge restores the weights, which would hide the very issue tested here.
+            generator = torch.Generator().manual_seed(1)
+            with torch.no_grad():
+                for param in model.parameters():
+                    if param.is_floating_point():
+                        noise = torch.randn(param.shape, generator=generator, dtype=torch.float32) * 1e-3
+                        param.copy_(noise.to(device=param.device, dtype=param.dtype))
+            config = config_cls(
+                base_model_name_or_path=model_id,
+                **config_kwargs,
+            )
+            model = get_peft_model(model, config, autocast_adapter_dtype=autocast_adapter_dtype)
+            model = model.to(device=self.torch_device, dtype=dtype)
+            model.eval()
+
+            # the merge/unmerge cycle only touches the weights of the base model, not the adapter weights
+            base_model = model.get_base_model()
+
+            def base_weights():
+                # re-read the parameters every time, some PEFT methods replace the parameter object on merge/unmerge
+                return {
+                    name: param.detach().clone()
+                    for name, param in base_model.named_parameters()
+                    if param.is_floating_point()
+                }
+
+            weights_before = base_weights()
+            model.merge_adapter()
+            weights_merged = base_weights()
+
+            # sanity check: the adapter has to change at least one base weight, otherwise the check below is vacuous
+            changed = [name for name, w in weights_merged.items() if not torch.equal(w, weights_before[name])]
+            assert changed, f"Merging {config_cls.__name__} did not change any base weight, the check would be vacuous"
+
+            model.unmerge_adapter()
+            weights_unmerged = base_weights()
+            not_restored = [name for name in changed if not torch.equal(weights_unmerged[name], weights_before[name])]
+            assert not not_restored, (
+                f"Unmerging {config_cls.__name__} did not restore {len(not_restored)} of the {len(changed)} changed base "
+                f"weights, e.g. {not_restored[0]}"
+            )
+
     def _test_safe_merge(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
         if (config_cls == MissConfig) and (config_kwargs.get("init_weights") == "bat"):

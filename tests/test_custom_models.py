@@ -93,7 +93,13 @@ from .testing_common import (
     PeftCommonTester,
     _skip_if_merging_not_supported,
 )
-from .testing_utils import get_state_dict, hub_online_once, require_non_cpu, set_init_weights_false
+from .testing_utils import (
+    get_state_dict,
+    hub_online_once,
+    merge_unmerge_restores_exactly,
+    require_non_cpu,
+    set_init_weights_false,
+)
 
 
 # Note about `save_pretrained` and `get_peft_model_state_dict`
@@ -2695,6 +2701,22 @@ class TestPeftCustomModel(PeftCommonTester):
         # calling merge twice with the same arguments should not change the output
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers_is_idempotent(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @pytest.mark.parametrize("autocast_adapter_dtype", [True, False])
+    def test_merge_unmerge_restores_base_weights(
+        self, test_name, model_id, config_cls, config_kwargs, dtype, autocast_adapter_dtype, request
+    ):
+        # after a merge/unmerge roundtrip, the base weights should be restored exactly
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        if not merge_unmerge_restores_exactly(config_cls, dtype, test_name):
+            request.node.add_marker(
+                pytest.mark.xfail(strict=True, reason="Merging and unmerging does not restore the base weights")
+            )
+        self._test_merge_unmerge_restores_base_weights(
+            model_id, config_cls, config_kwargs, dtype, autocast_adapter_dtype
+        )
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_is_deterministic_in_train_mode(self, test_name, model_id, config_cls, config_kwargs):
