@@ -952,6 +952,9 @@ def tokenize_conversational(examples, tokenizer, chunk_size, min_len, skip_prefi
             prefix_len = len(tokens) - len(prefix)
             tokens = tokens[prefix_len:]
 
+        # FIXME technically we fuck up the chat template when removing the prefix,
+        # so not sure if we should use it at all.
+
         for i_split in range(0, len(tokens), chunk_size):
             chunk = tokens[i_split : i_split + chunk_size]
             if len(chunk) > min_len:
@@ -975,7 +978,9 @@ def main():
         "This is important for self-distillation datasets that have a prompt + generated data - during training we'd "
         "want to skip the prompt since it is not what we want to learn, we want to match the generated data."
     ))
-    parser.add_argument("--dataset_type", choices=["wiki", "conversational"])
+    parser.add_argument("--dataset_type", choices=["wiki", "conversational"], help=(
+        "wiki if derived from finewiki, conversational if it employs conversation steps in a list format."
+    ))
     parser.add_argument("--seq_len", type=int, default=128)
     parser.add_argument("--model_id", type=str, default="meta-llama/Llama-3.2-3B")
     parser.add_argument("--lr", type=float)
