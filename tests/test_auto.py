@@ -274,6 +274,7 @@ class TestPeftAutoModel:
             (AutoPeftModel, "peft-internal-testing/tiny_WhisperForConditionalGeneration-lora"),
         ],
     )
+    # Ensure that AutoPeftModel does not import arbitrary packages from adapter configurations.
     def test_import_allow_list_prevents_arbitrary_imports(self, auto_class, model_id, tmp_path):
         with hub_online_once(model_id):
             model = auto_class.from_pretrained(model_id)
