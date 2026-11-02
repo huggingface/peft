@@ -545,6 +545,8 @@ class TestModulesToSaveUnloadOriginalModule:
         ],
     )
     def test_merge_modules_to_save_partial_selection(self, mlp, active_adapter, adapter_names):
+        # Only "default" has a saved lin1 copy. Export must follow adapter_names rather than the active adapter:
+        # ["other"] and [] restore the original lin1, while ["other", "default"] retains the saved copy.
         x = torch.randn(4, 8)
         original_lin1 = mlp.lin1
         model = get_peft_model(mlp, LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])).eval()
@@ -564,8 +566,9 @@ class TestModulesToSaveUnloadOriginalModule:
 
     def test_merge_modules_to_save_ambiguous_selection_leaves_model_unchanged(self, mlp):
         config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_lora_weights=False)
+        other_config = copy.deepcopy(config)
         model = get_peft_model(mlp, config).eval()
-        model.add_adapter("other", copy.deepcopy(config))
+        model.add_adapter("other", other_config)
         state_dict = {key: value.clone() for key, value in model.state_dict().items()}
 
         with pytest.raises(ValueError, match="Only one adapter"):
