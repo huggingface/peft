@@ -3155,6 +3155,13 @@ class PeftModelForQuestionAnswering(PeftModel):
         peft_config = self.active_peft_config
         return_dict = return_dict if return_dict is not None else _get_return_dict_transformers_v4(self.config)
 
+        # token_type_ids and position_ids are named arguments here, unlike in the other task classes, so put them back
+        # into kwargs to pass them to the base model
+        if token_type_ids is not None:
+            kwargs["token_type_ids"] = token_type_ids
+        if position_ids is not None:
+            kwargs["position_ids"] = position_ids
+
         if not peft_config.is_prompt_learning:
             if peft_config.peft_type == PeftType.POLY:
                 kwargs["task_ids"] = task_ids
