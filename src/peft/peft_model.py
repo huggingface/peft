@@ -1834,7 +1834,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self._reshard_fsdp_modules()
                 self.base_model.enable_adapter_layers()
 
-    def merge_adapter(self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False) -> None:
+    def merge_adapter(
+        self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False, **kwargs: Any
+    ) -> None:
         """
         Merge the active adapters into the base model.
 
@@ -1846,22 +1848,28 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 If `True`, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
+            kwargs: (`optional`):
+                Additional keyword arguments passed to the base model's `merge_adapter` method.
         """
         # The merge has to end up in the weights that FSDP2 keeps, i.e. the shards. A forward with
         # `reshard_after_forward=False` leaves the unsharded parameters registered, and a merge into those is dropped
         # by the next reshard, see #3800.
         self._reshard_fsdp_modules()
-        self.base_model.merge_adapter(adapter_names=adapter_names, safe_merge=safe_merge)
+        self.base_model.merge_adapter(adapter_names=adapter_names, safe_merge=safe_merge, **kwargs)
 
-    def unmerge_adapter(self) -> None:
+    def unmerge_adapter(self, **kwargs: Any) -> None:
         """
         Unmerge the adapters from the base model.
+
+        Args:
+            kwargs: (`optional`):
+                Additional keyword arguments passed to the base model's `unmerge_adapter` method.
         """
         # The unmerge has to end up in the shards as well, see merge_adapter. Resharding a merged layer is safe here
         # because the merge is in the sharded parameters.
         if any(isinstance(module, BaseTunerLayer) and module.merged for module in self.modules()):
             self._reshard_fsdp_modules(include_merged=True)
-        self.base_model.unmerge_adapter()
+        self.base_model.unmerge_adapter(**kwargs)
 
     @property
     def base_model_torch_dtype(self):
