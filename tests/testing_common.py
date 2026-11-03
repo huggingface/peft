@@ -909,7 +909,7 @@ class PeftCommonTester:
             if self.torch_device in ["mlu"]:
                 atol, rtol = 1e-3, 1e-3  # MLU
 
-            conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
+            conv_ids = ["Conv2d", "Conv3d", "Conv3d1x1", "Conv2d2"]
             if (
                 issubclass(config_cls, (IA3Config, LoraConfig, HiraConfig)) and model_id in conv_ids
             ):  # more instability with Conv
