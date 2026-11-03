@@ -18,6 +18,7 @@ style:
 	doc-builder style src/peft tests docs/source --max_len 119
 
 test:
+	python -m pytest tests/test_custom_models -n3 $(if $(IS_GITHUB_CI),--report-log "ci_tests.log",)
 	python -m pytest tests/ -k "exact_merge" $(if $(IS_GITHUB_CI),--report-log "ci_tests.log",)
 
 tests_examples_multi_gpu:
