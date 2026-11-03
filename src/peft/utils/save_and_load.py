@@ -31,7 +31,7 @@ from peft.import_utils import is_transformers_dtensor_tp, is_transformers_ge_v5
 from peft.mapping import PEFT_TYPE_TO_TUNER_MAPPING
 
 from .constants import INCLUDE_LINEAR_LAYERS_SHORTHAND
-from .integrations import TpInfo, dtensor_from_local_like
+from .integrations import TpInfo, dtensor_from_local_like, remove_torch_wrapper_names
 from .other import (
     EMBEDDING_LAYER_NAMES,
     SAFETENSORS_WEIGHTS_NAME,
@@ -270,10 +270,7 @@ def get_peft_model_state_dict(
     # ADDITIONAL TRAINING MODULES / MODULES_TO_SAVE
     for name, module in model.named_modules():
         if isinstance(module, AuxiliaryTrainingWrapper):
-            if name.startswith("_fsdp_wrapped_module."):
-                # If FSDP is used, the state_dict is from the unwrapped model, which will result in a key mismatch if we
-                # don't remove the FSDP-specific prefix
-                name = name.removeprefix("_fsdp_wrapped_module.")
+            name = remove_torch_wrapper_names(name)
             # Compute the module-relative state dict to make it easier for the adapter to fetch the appropriate
             # keys that the module thinks need to be saved. We cannot rely on `.state_dict()` internally of the
             # module since accelerators like DeepSpeed require special handling which is done for the model
@@ -636,10 +633,7 @@ def set_peft_model_state_dict(
             # `modules_to_save.{adapter_name}.` prefix. This prefix must be restored when loading the model from the
             # saved state dict which is why we fetch a load key map from the wrapper.
             key_map = module.adapter_state_dict_load_map(adapter_name)
-            if name.startswith("_fsdp_wrapped_module."):
-                # If FSDP is used, the state_dict is from the unwrapped model, which will result in a key mismatch if we
-                # don't remove the FSDP-specific prefix
-                name = name.removeprefix("_fsdp_wrapped_module.")
+            name = remove_torch_wrapper_names(name)
             for k in key_map:
                 lookup_key = f"{name}.{k}"
                 store_key = f"{name}.{key_map[k]}"

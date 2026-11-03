@@ -44,7 +44,7 @@ from peft.utils.constants import (
     SEQ_CLS_HEAD_NAMES,
 )
 from peft.utils.error import NoMatchingPeftModuleError
-from peft.utils.integrations import TpMeshDimRegistry, init_empty_weights
+from peft.utils.integrations import TpMeshDimRegistry, init_empty_weights, remove_torch_wrapper_names
 from peft.utils.other import (
     AuxiliaryTrainingWrapper,
     _get_module_names_tied_with_embedding,
@@ -520,10 +520,10 @@ class BaseTuner(nn.Module, ABC):
         # parameter names against self.prefix, so that a base model module whose name happens to contain the prefix is
         # not treated as an adapter module.
         adapter_prefixes = _get_tuner_state_dict_key_prefixes(model)
-        adapter_param_names = set(_filter_state_dict_by_key_prefixes(dict(model.named_parameters()), adapter_prefixes))
         aux_module_names = {n for n, m in model.named_modules() if isinstance(m, AuxiliaryTrainingWrapper)}
         for n, p in model.named_parameters():
-            if n in adapter_param_names:
+            # the prefixes are made to match the state_dict keys, which don't contain the torch wrapper names
+            if _is_key_under_prefixes(remove_torch_wrapper_names(n), adapter_prefixes):
                 continue
             if _is_key_under_prefixes(n, aux_module_names):
                 # auxiliary modules like ModulesToSaveWrapper manage the requires_grad state of their parameters
@@ -1625,8 +1625,7 @@ class BaseTuner(nn.Module, ABC):
         bias_state_dict = {}
         if bias.endswith("_only"):  # e.g. 'lora_only'
             for module_name, module in model.named_modules():
-                if module_name.startswith("_fsdp_wrapped_module."):
-                    module_name = module_name.removeprefix("_fsdp_wrapped_module.")
+                module_name = remove_torch_wrapper_names(module_name)
                 if not isinstance(module, BaseTunerLayer):
                     continue
                 # the bias of the targeted module is located on the base layer of the tuner layer
@@ -1841,10 +1840,7 @@ def _get_tuner_state_dict_key_prefixes(model: nn.Module, adapter_name: Optional[
     # layers nested inside of it
     aux_module_names = set()
     for module_name, module in model.named_modules():
-        if module_name.startswith("_fsdp_wrapped_module."):
-            # If FSDP is used, the state_dict is from the unwrapped model, which would result in a key mismatch if we
-            # didn't remove the FSDP-specific prefix
-            module_name = module_name.removeprefix("_fsdp_wrapped_module.")
+        module_name = remove_torch_wrapper_names(module_name)
 
         if isinstance(module, AuxiliaryTrainingWrapper):
             aux_module_names.add(module_name)
