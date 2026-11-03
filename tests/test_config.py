@@ -399,19 +399,15 @@ class TestPeftConfig:
             assert isinstance(config_from_pretrained.target_modules, set)
 
     def test_regex_with_layer_indexing_lora(self):
-        # This test checks that an error is raised if `target_modules` is a regex expression and `layers_to_transform` or
-        # `layers_pattern` are not None
+        # This test checks that an error is raised if `target_modules` is a regex expression and `layers_pattern` is not
+        # None (`layers_to_transform` is covered by `test_config_layers_to_transform_with_str_target_modules_raises`)
 
-        invalid_config1 = {"target_modules": ".*foo", "layers_to_transform": [0]}
-        invalid_config2 = {"target_modules": ".*foo", "layers_pattern": ["bar"]}
+        invalid_config = {"target_modules": ".*foo", "layers_pattern": ["bar"]}
 
         valid_config = {"target_modules": ["foo"], "layers_pattern": ["bar"], "layers_to_transform": [0]}
 
-        with pytest.raises(ValueError, match="`layers_to_transform` cannot be used when `target_modules` is a str."):
-            LoraConfig(**invalid_config1)
-
         with pytest.raises(ValueError, match="`layers_pattern` cannot be used when `target_modules` is a str."):
-            LoraConfig(**invalid_config2)
+            LoraConfig(**invalid_config)
 
         # should run without errors
         LoraConfig(**valid_config)
