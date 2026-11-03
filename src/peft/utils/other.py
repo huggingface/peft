@@ -1594,7 +1594,14 @@ def match_target_against_key(target_pattern: str, key: str) -> Optional[re.Match
 
     Having this as its own function ensures that target key matching can be implemented in the same way everywhere.
     """
-    return re.fullmatch(target_pattern, key)
+    try:
+        return re.fullmatch(target_pattern, key)
+    except re.error as e:
+        msg = (
+            f"Invalid regular expression in `target_modules`: {target_pattern!r} ({e}). Please fix the regex or "
+            "pass `target_modules` as a list of module name suffixes instead."
+        )
+        raise ValueError(msg) from e
 
 
 def get_pattern_key(pattern_keys: Sequence[str], key_to_match: str) -> str:

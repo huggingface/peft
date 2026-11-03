@@ -62,6 +62,7 @@ from peft.tuners.tuners_utils import (
 )
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, ModulesToSaveWrapper, infer_device
 from peft.utils.constants import DUMMY_MODEL_CONFIG, MIN_TARGET_MODULES_FOR_OPTIMIZATION
+from peft.utils.other import match_target_against_key
 from peft.utils.healthcheck import format_healthcheck, run_healthcheck
 from peft.utils.quantization_utils import Bnb8bitBackend
 
@@ -2812,3 +2813,9 @@ class TestTunerStateDictKeyPrefixes:
         prefixes = _get_tuner_state_dict_key_prefixes(model)
         assert len(prefixes) > 0  # sanity check
         assert not any(prefix.startswith("base_model.model.emb") for prefix in prefixes)
+
+
+@pytest.mark.parametrize("pattern", ["q_proj[", "(", "*invalid"])
+def test_an_invalid_target_modules_regex_is_named(pattern):
+    with pytest.raises(ValueError, match="Invalid regular expression in `target_modules`"):
+        match_target_against_key(pattern, "model.layers.0.self_attn.q_proj")
