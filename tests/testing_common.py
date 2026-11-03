@@ -52,6 +52,7 @@ from peft import (
     PveraConfig,
     RoadConfig,
     ShadowConfig,
+    TrainableTokensConfig,
     UniLoraConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -1036,14 +1037,15 @@ class PeftCommonTester:
         # check that exact merging is truly exact, and that if it's not supported, we get the correct error message
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
-        with hub_online_once(model_id):
-            # ESTABLISH THAT MERGING IS INEXACT
+        # Merging exactly is not possible if there is already a merged adapter, resulting in an error. If the PEFT
+        # method is, however, exact by nature, tihs limitation does not exist and checks need to be skipped.
+        natively_exact_methods: list[str] = ["FROD", "HIRA", "PEANUT", "TRAINABLE_TOKENS"]
 
+        with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
             model = model.to(device=self.torch_device, dtype=dtype)
             model = get_peft_model(model, config_cls(**config_kwargs), autocast_adapter_dtype=autocast_adapter_dtype)
             prefix = model.prefix
-            self.perturb_trainable_token_weights_if_used(model, config_kwargs)
 
             def get_base_state_dict(model):
                 # helper to filter for base weights and normalize keys
@@ -1068,25 +1070,6 @@ class PeftCommonTester:
                 return to_return
 
             sd_before = get_base_state_dict(model)
-
-            # first get the weights after a normal merge-unmerge roundtrip
-            model.merge_adapter()
-            model.unmerge_adapter()
-            sd_inexact_unmerge = get_base_state_dict(model)
-
-            # sanity check: with inexact unmerge, there are some deviations in the weights
-            assert sd_before.keys() == sd_inexact_unmerge.keys()
-            all_equal = all(torch.equal(sd_before[k], sd_inexact_unmerge[k]) for k in sd_before)
-            if all_equal:
-                pytest.skip(f"Skipping exact merge tests because {config_cls} is already exact.")
-
-            del model
-
-            # SHOW THAT WHEN MERGING ONE ADAPTER EXACTLY, WEIGHTS CAN BE RESTORED (IF THE MODEL SUPPORTS)
-            model = self.transformers_class.from_pretrained(model_id)
-            model = model.to(device=self.torch_device, dtype=dtype)
-            sd_before = get_base_state_dict(model)
-            model = get_peft_model(model, config_cls(**config_kwargs), autocast_adapter_dtype=autocast_adapter_dtype)
             self.perturb_trainable_token_weights_if_used(model, config_kwargs)
 
             # if exact merging is not allowed, only check the error message, then return
@@ -1104,13 +1087,16 @@ class PeftCommonTester:
             assert sd_before.keys() == sd_after_merge.keys()
             assert any(not torch.equal(sd_before[k], sd_after_merge[k]) for k in sd_before)
 
-            # merging is not possible if there is already a merged adapter
+            # Exact merging is not possible if there is already a merged adapter, unless the PEFT method is natively
+            # exact.
             model.add_adapter("other", config_cls(**config_kwargs), autocast_adapter_dtype=autocast_adapter_dtype)
-            msg = "This model does not support exact merging because there are already merged adapters"
-            with pytest.raises(ValueError, match=msg):
-                model.merge_adapter(["other"], exact=True)
-            with pytest.raises(ValueError, match=msg):
-                model.merge_adapter(["other"], exact=False)
+            if config_cls(**config_kwargs).peft_type.value not in natively_exact_methods:
+                msg = "This model does not support exact merging because there are already merged adapters"
+                # in an exact merge is already going on, cannot merge after that
+                with pytest.raises(ValueError, match=msg):
+                    model.merge_adapter(["other"], exact=True)
+                with pytest.raises(ValueError, match=msg):
+                    model.merge_adapter(["other"], exact=False)
 
             model.unmerge_adapter()
             sd_exact_unmerge = get_base_state_dict(model)
@@ -1120,12 +1106,29 @@ class PeftCommonTester:
 
             del model
 
-            # SHOW THAT TWO ADAPTERS CAN BE MERGED AND UNMERGED EXACTLY
-
-            if "trainable_token_indices" in config_kwargs:
-                # For now, skip if we have trainable token indices, as overlapping indices raise when you try to merge
-                # them. It's not qiute trivial to avoid that here.
+            if (config_cls == TrainableTokensConfig) or ("trainable_token_indices" in config_kwargs):
+                # For now, skip tests with multiple adapters if we deal with trainable token (standalone or LoRA), as
+                # overlapping indices raise when you try to merge them. It's not qiute trivial to avoid that here.
                 return
+
+            if config_cls(**config_kwargs).peft_type.value not in natively_exact_methods:
+                # if there is already a merged adapter, cannot initialize exact merge, as the base weight is already
+                # mutated
+                model = self.transformers_class.from_pretrained(model_id)
+                model = model.to(device=self.torch_device, dtype=dtype)
+                model = get_peft_model(
+                    model, config_cls(**config_kwargs), autocast_adapter_dtype=autocast_adapter_dtype
+                )
+                model.merge_adapter()
+                model.add_adapter("other", config_cls(**config_kwargs), autocast_adapter_dtype=autocast_adapter_dtype)
+                msg = "This model does not support exact merging because there are already merged adapters"
+                with pytest.raises(ValueError, match=msg):
+                    model.merge_adapter(["other"], exact=True)
+                # sanity check: normal merging is still possible
+                model.merge_adapter(["other"])
+                del model
+
+            # SHOW THAT TWO ADAPTERS CAN BE MERGED AND UNMERGED EXACTLY
 
             # it's possible to merge multiple adapters exactly
             model = self.transformers_class.from_pretrained(model_id)

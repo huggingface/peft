@@ -185,7 +185,7 @@ class Linear(nn.Module, HiraLayer):
         self.update_layer(adapter_name, r, config=config)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None, exact: bool = False) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -330,7 +330,7 @@ class Embedding(nn.Module, HiraLayer):
 
         self.set_adapter(self.active_adapters)
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None, exact: bool = False) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -510,7 +510,7 @@ class _ConvNd(nn.Module, HiraLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None, exact: bool = False) -> None:
         """
         Merge the active adapter weights inside the base weights
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import warnings
 from collections import defaultdict
+from typing import Optional
 
 import torch
 from torch import nn
@@ -369,3 +370,6 @@ class FrodModel(BaseTuner):
                 "`peft_config.save_projection = True`."
             )
         return peft_model_state_dict
+
+    def _check_exact_merge_allowed(self, adapter_names: Optional[list[str]] = None) -> None:
+        """FRoD merge-unmerge roundtrips are always exact"""
