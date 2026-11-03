@@ -158,8 +158,9 @@ if is_bnb_available():
                 lambda_d = lambda_d.float()
                 lambda_b = lambda_b.float()
 
-            sliced_A = pvera_A[:, : self.in_features].to(lambda_d.device)
-            sliced_B = pvera_B[: self.out_features, :].to(lambda_d.device)
+            r = self.r[adapter]
+            sliced_A = pvera_A[: r * 2, : self.in_features].to(lambda_d.device)
+            sliced_B = pvera_B[: self.out_features, :r].to(lambda_d.device)
             lambda_b = lambda_b.unsqueeze(-1)
             lambda_d = lambda_d.unsqueeze(-1)
 
@@ -220,8 +221,9 @@ if is_bnb_available():
                         if x.dtype != compute_dtype:
                             x = x.to(compute_dtype)
 
-                    sliced_A = pvera_A[:, : self.in_features].to(x.device)
-                    sliced_B = pvera_B[: self.out_features, :].to(x.device)
+                    r = self.r[active_adapter]
+                    sliced_A = pvera_A[: r * 2, : self.in_features].to(x.device)
+                    sliced_B = pvera_B[: self.out_features, :r].to(x.device)
 
                     x_temp = dropout(x.to(lambda_d.dtype))
                     mu, logvar = (lambda_d * F.linear(x_temp, sliced_A)).chunk(2, dim=-1)
@@ -342,8 +344,9 @@ if is_bnb_4bit_available():
                 lambda_d = lambda_d.float()
                 lambda_b = lambda_b.float()
 
-            sliced_A = pvera_A[:, : self.in_features].to(lambda_d.device)
-            sliced_B = pvera_B[: self.out_features, :].to(lambda_d.device)
+            r = self.r[adapter]
+            sliced_A = pvera_A[: r * 2, : self.in_features].to(lambda_d.device)
+            sliced_B = pvera_B[: self.out_features, :r].to(lambda_d.device)
             lambda_b = lambda_b.unsqueeze(-1)
             lambda_d = lambda_d.unsqueeze(-1)
 
@@ -387,8 +390,9 @@ if is_bnb_4bit_available():
                         if x.dtype != compute_dtype:
                             x = x.to(compute_dtype)
 
-                    sliced_A = pvera_A[:, : self.in_features].to(x.device)
-                    sliced_B = pvera_B[: self.out_features, :].to(x.device)
+                    r = self.r[active_adapter]
+                    sliced_A = pvera_A[: r * 2, : self.in_features].to(x.device)
+                    sliced_B = pvera_B[: self.out_features, :r].to(x.device)
 
                     x_temp = dropout(x.to(lambda_d.dtype))
                     mu, logvar = (lambda_d * F.linear(x_temp, sliced_A)).chunk(2, dim=-1)

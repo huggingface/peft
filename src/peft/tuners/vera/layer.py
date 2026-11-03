@@ -239,8 +239,9 @@ class Linear(nn.Module, VeraLayer):
             lambda_d = lambda_d.float()
             lambda_b = lambda_b.float()
 
-        sliced_A = vera_A[:, : self.in_features].to(lambda_d.device)
-        sliced_B = vera_B[: self.out_features, :].to(lambda_d.device)
+        r = self.r[adapter]
+        sliced_A = vera_A[:r, : self.in_features].to(lambda_d.device)
+        sliced_B = vera_B[: self.out_features, :r].to(lambda_d.device)
         lambda_b = lambda_b.unsqueeze(-1)
         lambda_d = lambda_d.unsqueeze(-1)
         output_tensor = transpose((lambda_b * sliced_B) @ (lambda_d * sliced_A), self.fan_in_fan_out)
@@ -277,8 +278,9 @@ class Linear(nn.Module, VeraLayer):
                 # As adapted layers may have different shapes and VeRA contains a single shared pair of A and B matrices,
                 # we initialize these matrices with the largest required size for each dimension.
                 # During the forward pass, required submatrices are sliced out from the shared vera_A and vera_B.
-                sliced_A = vera_A[:, : self.in_features].to(x.device)
-                sliced_B = vera_B[: self.out_features, :].to(x.device)
+                r = self.r[active_adapter]
+                sliced_A = vera_A[:r, : self.in_features].to(x.device)
+                sliced_B = vera_B[: self.out_features, :r].to(x.device)
 
                 dropout = self.vera_dropout[active_adapter]
                 x = self._cast_input_dtype(x, lambda_d.dtype)

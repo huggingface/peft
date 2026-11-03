@@ -266,3 +266,30 @@ class TestVera:
         inputs = torch.randn(5, 10).to(dtype)
         output = peft_model(inputs)  # should not raise
         assert output.dtype == dtype
+
+    def test_vera_multiple_adapters_different_ranks(self, mlp):
+        # Adding higher rank first, lower rank second should work for forward and merge (#4109)
+        config_high = VeraConfig(target_modules=["lin1", "lin2"], r=8, init_weights=False)
+        config_low = VeraConfig(target_modules=["lin1", "lin2"], r=4, init_weights=False)
+
+        peft_model = get_peft_model(mlp, config_high, adapter_name="high")
+        peft_model.add_adapter("low", config_low)
+
+        x = torch.randn(5, 10)
+
+        # Forward with low rank adapter
+        peft_model.set_adapter("low")
+        out_low = peft_model(x)
+        assert out_low.shape == (5, 2)
+
+        # Forward with high rank adapter
+        peft_model.set_adapter("high")
+        out_high = peft_model(x)
+        assert out_high.shape == (5, 2)
+
+        # Merge low rank adapter
+        peft_model.set_adapter("low")
+        peft_model.merge_adapter()
+        out_merged = peft_model(x)
+        assert torch.allclose(out_low, out_merged, atol=1e-5)
+        peft_model.unmerge_adapter()

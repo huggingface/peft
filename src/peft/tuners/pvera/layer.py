@@ -136,8 +136,8 @@ class PveraLayer(BaseTunerLayer):
                 "adapter with a lower rank was added after the first one; loading the adapters "
                 "in reverse order may solve this."
             )
-            if pvera_A_param.shape[0] < self.r[adapter_name]:
-                raise ValueError(error_tmpl.format("pvera_A", pvera_A_param.shape[0], self.r[adapter_name]))
+            if pvera_A_param.shape[0] < self.r[adapter_name] * 2:
+                raise ValueError(error_tmpl.format("pvera_A", pvera_A_param.shape[0], self.r[adapter_name] * 2))
             if pvera_B_param.shape[1] < self.r[adapter_name]:
                 raise ValueError(error_tmpl.format("pvera_B", pvera_B_param.shape[1], self.r[adapter_name]))
 
@@ -268,8 +268,9 @@ class Linear(nn.Linear, PveraLayer):
             lambda_d = lambda_d.float()
             lambda_b = lambda_b.float()
 
-        sliced_A = pvera_A[:, : self.in_features].to(lambda_d.device)
-        sliced_B = pvera_B[: self.out_features, :].to(lambda_d.device)
+        r = self.r[adapter]
+        sliced_A = pvera_A[: r * 2, : self.in_features].to(lambda_d.device)
+        sliced_B = pvera_B[: self.out_features, :r].to(lambda_d.device)
         lambda_b = lambda_b.unsqueeze(-1)
         lambda_d = lambda_d.unsqueeze(-1)
 
@@ -308,8 +309,9 @@ class Linear(nn.Linear, PveraLayer):
                 # As adapted layers may have different shapes and PVeRA contains a single shared pair of A and B matrices,
                 # we initialize these matrices with the largest required size for each dimension.
                 # During the forward pass, required submatrices are sliced out from the shared pvera_A and pvera_B.
-                sliced_A = pvera_A[:, : self.in_features].to(x.device)
-                sliced_B = pvera_B[: self.out_features, :].to(x.device)
+                r = self.r[active_adapter]
+                sliced_A = pvera_A[: r * 2, : self.in_features].to(x.device)
+                sliced_B = pvera_B[: self.out_features, :r].to(x.device)
 
                 dropout = self.pvera_dropout[active_adapter]
                 x = x.to(lambda_d.dtype)

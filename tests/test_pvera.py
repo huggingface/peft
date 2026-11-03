@@ -272,3 +272,42 @@ class TestPVeRA:
         inputs = torch.randn(5, 10).to(dtype)
         output = peft_model(inputs)  # should not raise
         assert output.dtype == dtype
+
+    def test_pvera_multiple_adapters_different_ranks(self, mlp):
+        # Adding higher rank first, lower rank second should work for forward and merge (#4109)
+        config_high = PveraConfig(target_modules=["lin1", "lin2"], r=8, init_weights=False)
+        config_low = PveraConfig(target_modules=["lin1", "lin2"], r=4, init_weights=False)
+
+        peft_model = get_peft_model(mlp, config_high, adapter_name="high")
+        peft_model.add_adapter("low", config_low)
+
+        x = torch.randn(5, 10)
+
+        # Forward with low rank adapter
+        peft_model.set_adapter("low")
+        out_low = peft_model(x)
+        assert out_low.shape == (5, 2)
+
+        # Forward with high rank adapter
+        peft_model.set_adapter("high")
+        out_high = peft_model(x)
+        assert out_high.shape == (5, 2)
+
+        # Merge low rank adapter in eval mode (so _reparametrize uses mu without stochastic sampling)
+        peft_model.eval()
+        peft_model.set_adapter("low")
+        out_low_eval = peft_model(x)
+        peft_model.merge_adapter()
+        out_merged = peft_model(x)
+        assert torch.allclose(out_low_eval, out_merged, atol=1e-5)
+        peft_model.unmerge_adapter()
+
+    def test_pvera_multiple_adapters_capacity_check(self, mlp):
+        # Adding lower rank first, then higher rank should raise ValueError mentioning pvera_A capacity of r * 2
+        config_low = PveraConfig(target_modules=["lin1", "lin2"], r=4, init_weights=False)
+        config_high = PveraConfig(target_modules=["lin1", "lin2"], r=8, init_weights=False)
+
+        peft_model = get_peft_model(mlp, config_low, adapter_name="low")
+        msg = "pvera_A has a size of 8 but 16 or greater is required"
+        with pytest.raises(ValueError, match=msg):
+            peft_model.add_adapter("high", config_high)
