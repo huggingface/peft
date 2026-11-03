@@ -1428,7 +1428,11 @@ class BaseTuner(nn.Module, ABC):
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
                 with onload_layer(module):
-                    module.merge(adapter_names=adapter_names, safe_merge=safe_merge, exact=exact)
+                    # don't pass exact argument unconditionally, as the layer may not support it
+                    if exact:
+                        module.merge(adapter_names=adapter_names, safe_merge=safe_merge, exact=exact)
+                    else:
+                        module.merge(adapter_names=adapter_names, safe_merge=safe_merge)
 
     def unmerge_adapter(self):
         """
