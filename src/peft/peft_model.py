@@ -1082,6 +1082,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self._adapters_disabled = was_disabled
 
         else:  # LoRA, LoHa, etc.
+            if get_fsdp_modules(self) and any(isinstance(m, BaseTunerLayer) and m.merged for m in self.modules()):
+                # Under FSDP2, the merged weights live in the sharded parameters. Disabling the adapter layers while
+                # the weights are still merged would forward the merged weights as if they were the base weights, so
+                # unmerge first, which also brings the merge into the shards.
+                self.unmerge_adapter()
             model_status = self.get_model_status()
             if model_status.enabled == "irregular":
                 warnings.warn(
@@ -1853,8 +1858,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         # The merge has to end up in the weights that FSDP2 keeps, i.e. the shards. A forward with
         # `reshard_after_forward=False` leaves the unsharded parameters registered, and a merge into those is dropped
-        # by the next reshard, see #3800.
-        self._reshard_fsdp_modules()
+        # by the next reshard, see #3800. Resharding is safe even if a layer is already merged, because the merge is
+        # written in place into the sharded parameters.
+        self._reshard_fsdp_modules(include_merged=True)
         self.base_model.merge_adapter(adapter_names=adapter_names, safe_merge=safe_merge, **kwargs)
 
     def unmerge_adapter(self, **kwargs: Any) -> None:
