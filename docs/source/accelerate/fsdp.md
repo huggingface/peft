@@ -6,12 +6,59 @@ rendered properly in your Markdown viewer.
 
 [Fully sharded data parallel](https://pytorch.org/docs/stable/fsdp.html) (FSDP) is developed for distributed training of large pretrained models up to 1T parameters. FSDP achieves this by sharding the model parameters, gradients, and optimizer states across data parallel processes and it can also offload sharded model parameters to a CPU. The memory efficiency afforded by FSDP allows you to scale training to larger batch or model sizes.
 
-Both of these features are supported in 🤗 Accelerate, and you can use them with 🤗 PEFT. 
+PEFT supports FSDP1 and [PyTorch FSDP2](https://docs.pytorch.org/tutorials/intermediate/FSDP_tutorial.html). You can configure FSDP through Transformers [`~transformers.Trainer`] or use it directly in a PyTorch training loop.
 
-# Use PEFT and FSDP
-This section of guide will help you learn how to use our DeepSpeed [training script](https://github.com/huggingface/peft/blob/main/examples/sft/train.py) for performing SFT. You'll configure the script to do SFT (supervised fine-tuning) of Llama-70B model with LoRA and FSDP on 8xH100 80GB GPUs on a single machine. You can configure it to scale to multiple machines by changing the accelerate config.
+## FSDP2 with Transformers
 
-## Configuration
+Use PyTorch 2.6 or newer and current versions of Transformers, Accelerate, TRL, and PEFT. The [SFT example](https://github.com/huggingface/peft/tree/main/examples/sft) uses [`~trl.SFTTrainer`]. Its [fsdp2_config.json](https://github.com/huggingface/peft/blob/main/examples/sft/configs/fsdp2_config.json) contains the model, dataset, and training options, including these FSDP2 settings:
+
+```json
+{
+  "fsdp": true,
+  "fsdp_config": {
+    "version": 2,
+    "reshard_after_forward": true,
+    "auto_wrap_policy": "TRANSFORMER_BASED_WRAP",
+    "cpu_ram_efficient_loading": true,
+    "state_dict_type": "SHARDED_STATE_DICT",
+    "activation_checkpointing": false
+  }
+}
+```
+
+`TRANSFORMER_BASED_WRAP` uses the model's transformer-layer definitions. `reshard_after_forward` releases gathered parameters after each forward pass. FSDP2 shards individual parameters, so it does not use FSDP1's `use_orig_params` setting. See the [Transformers FSDP guide](https://huggingface.co/docs/transformers/fsdp) for more configuration options.
+
+Edit the model, dataset and training options in the example's JSON file. From `examples/sft`, launch one process per GPU:
+
+```bash
+torchrun --standalone --nproc_per_node=2 train.py configs/fsdp2_config.json
+```
+
+On GPUs without BF16 support, set `"bf16": false` and `"fp16": true` in the JSON file.
+
+Keep `activation_checkpointing` set to `false`; enabling it can produce an empty adapter export.
+
+### Save and resume
+
+To resume training, keep the same FSDP configuration and set `"resume_from_checkpoint": "path/to/checkpoint-N"` in the JSON file. Training checkpoints contain sharded model and optimizer states.
+
+At the end of training, the example gathers a full state dictionary before exporting the adapter:
+
+```python
+if trainer.is_fsdp_enabled:
+    trainer.accelerator.state.fsdp_plugin.set_state_dict_type("FULL_STATE_DICT")
+trainer.save_model()
+```
+
+All ranks must participate in the gather; only the main process writes the adapter files. Gathering the full state dictionary temporarily increases memory use.
+
+For inference, load the exported adapter directory with [`AutoPeftModelForCausalLM.from_pretrained`], which handles resized token embeddings.
+
+## FSDP1 with Accelerate
+
+This section uses the SFT [training script](https://github.com/huggingface/peft/blob/main/examples/sft/train.py) to fine-tune Llama-70B with LoRA and FSDP1 on 8xH100 80GB GPUs on a single machine. You can scale to multiple machines by changing the Accelerate config.
+
+### Configuration
 
 Start by running the following command to [create a FSDP configuration file](https://huggingface.co/docs/accelerate/quicktour#launching-your-distributed-script) with 🤗 Accelerate. The `--config_file` flag allows you to save the configuration file to a specific location, otherwise it is saved as a `default_config.yaml` file in the 🤗 Accelerate cache.
 
@@ -35,6 +82,7 @@ debug: false
 distributed_type: FSDP
 downcast_bf16: 'no'
 fsdp_config:
+  fsdp_version: 1
   fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
   fsdp_backward_prefetch: BACKWARD_PRE
   fsdp_cpu_ram_efficient_loading: true
@@ -57,7 +105,7 @@ tpu_use_sudo: false
 use_cpu: false
 ```
 
-## Launch command
+### Launch command
 
 The launch command is available at [run_peft_fsdp.sh](https://github.com/huggingface/peft/blob/main/examples/sft/run_peft_fsdp.sh) and it is also shown below:
 ```bash
@@ -69,7 +117,7 @@ accelerate launch --config_file "configs/fsdp_config.yaml"  train.py \
 --add_special_tokens False \
 --append_concat_token False \
 --splits "train,test" \
---max_seq_len 2048 \
+--max_length 2048 \
 --num_train_epochs 1 \
 --logging_steps 5 \
 --log_level "info" \
@@ -104,7 +152,7 @@ accelerate launch --config_file "configs/fsdp_config.yaml"  train.py \
 
 Notice that we are using LoRA with  rank=8, alpha=16 and targeting all linear layers. We are passing the FSDP config file and finetuning the 70B Llama model on a subset of the [ultrachat dataset](https://huggingface.co/datasets/HuggingFaceH4/ultrachat_200k).
 
-## The important parts
+### The important parts
 
 Let's dive a little deeper into the script so you can see what's going on, and understand how it works.
 
@@ -121,14 +169,8 @@ trainer = SFTTrainer(
     peft_config=peft_config,
 )
 trainer.accelerator.print(f"{trainer.model}")
-if model_args.use_peft_lora:
-    # handle PEFT+FSDP case
+if hasattr(trainer.model, "print_healthcheck"):
     trainer.model.print_healthcheck()
-    if getattr(trainer.accelerator.state, "fsdp_plugin", None):
-        from peft.utils.other import fsdp_auto_wrap_policy
-
-        fsdp_plugin = trainer.accelerator.state.fsdp_plugin
-        fsdp_plugin.auto_wrap_policy = fsdp_auto_wrap_policy(trainer.model)
 
 # train
 checkpoint = None
@@ -143,17 +185,9 @@ trainer.save_model()
 ```
 
 
-Here, one main thing to note currently when using FSDP with PEFT is that `use_orig_params` needs to be `False` to realize GPU memory savings. Due to `use_orig_params=False`, the auto wrap policy for FSDP needs to change so that trainable and non-trainable parameters are wrapped separately. This is done by the code snippet below which uses the util function `fsdp_auto_wrap_policy` from PEFT:
+With FSDP1, `use_orig_params=False` reduces memory use by wrapping trainable and frozen parameters separately. Current Transformers Trainer installs PEFT's `fsdp_auto_wrap_policy` for this case; the example does not need to set it manually. A custom Accelerate FSDP1 training loop must set that policy before preparing the model. This flat-parameter wrapping requirement does not apply to FSDP2.
 
-```
-if getattr(trainer.accelerator.state, "fsdp_plugin", None):
-    from peft.utils.other import fsdp_auto_wrap_policy
-
-    fsdp_plugin = trainer.accelerator.state.fsdp_plugin
-    fsdp_plugin.auto_wrap_policy = fsdp_auto_wrap_policy(trainer.model)
-```
-
-## Memory usage
+### Memory usage
 
 In the above example, the memory consumed per GPU is  72-80 GB (90-98%) as seen in the screenshot below. The slight increase in GPU memory at the end is when saving the model using `FULL_STATE_DICT` state dict type instead of the `SHARDED_STATE_DICT` so that the model has adapter weights that can be loaded normally with `from_pretrained` method during inference:
 
@@ -162,11 +196,11 @@ In the above example, the memory consumed per GPU is  72-80 GB (90-98%) as seen 
 </div>
 <small>GPU memory usage for the training run</small>
 
-# Use PEFT QLoRA and FSDP for finetuning large models on multiple GPUs
+## FSDP1 with QLoRA
 
 In this section, we will look at how to use QLoRA and FSDP for finetuning 70B llama model on 2X24GB GPUs. [Answer.AI](https://www.answer.ai/) in collaboration with bitsandbytes and Hugging Face 🤗 open sourced code enabling the usage of FSDP+QLoRA and explained the whole process in their insightful blogpost [You can now train a 70b language model at home](https://www.answer.ai/posts/2024-03-06-fsdp-qlora.html). This is now integrated in Hugging Face ecosystem. 
 
-For this, we first need `bitsandbytes>=0.43.3`, `accelerate>=1.0.1`, `transformers>4.44.2`, `trl>0.11.4` and `peft>0.13.0`. We need to set `fsdp_cpu_ram_efficient_loading=true`, `fsdp_use_orig_params=false` and `fsdp_offload_params=true`(cpu offloading) when using Accelerate config. When not using accelerate launcher, you can alternately set the environment variable `export FSDP_CPU_RAM_EFFICIENT_LOADING=true`.  Here, we will be using accelerate config and below is the config which can be found at [fsdp_config_qlora.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/fsdp_config_qlora.yaml):
+Use current PEFT, Transformers, TRL and Accelerate with `bitsandbytes>=0.43.3`. For this FSDP1 configuration, set `fsdp_cpu_ram_efficient_loading=true`, `fsdp_use_orig_params=false` and `fsdp_offload_params=true` (CPU offloading). The config is available at [fsdp_config_qlora.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/fsdp_config_qlora.yaml):
 
 ```yml
 compute_environment: LOCAL_MACHINE                                                                                                                                           
@@ -174,6 +208,7 @@ debug: false
 distributed_type: FSDP
 downcast_bf16: 'no'
 fsdp_config:
+  fsdp_version: 1
   fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
   fsdp_backward_prefetch: BACKWARD_PRE
   fsdp_cpu_ram_efficient_loading: true
@@ -206,7 +241,7 @@ accelerate launch --config_file "configs/fsdp_config_qlora.yaml"  train.py \
 --add_special_tokens False \
 --append_concat_token False \
 --splits "train,test" \
---max_seq_len 2048 \
+--max_length 2048 \
 --num_train_epochs 1 \
 --logging_steps 5 \
 --log_level "info" \
@@ -270,7 +305,7 @@ model = AutoModelForCausalLM.from_pretrained(
 
 Notice that `dtype` for `AutoModelForCausalLM` is same as the `bnb_4bit_quant_storage` data type. That's it. Everything else is handled by Trainer and TRL.
 
-## Memory usage
+### Memory usage
 
 In the above example, the memory consumed per GPU is **19.6 GB** while CPU RAM usage is around **107 GB**. When disabling CPU offloading, the GPU memory usage is  **35.6 GB/ GPU**. Therefore, what took 16X80GB GPUs for full finetuning, 8X80GB GPUs with FSDP+LoRA, and a couple of 80GB GPUs with DDP+QLoRA, now requires 2X24GB GPUs. This makes finetuning of large models more accessible.
 
