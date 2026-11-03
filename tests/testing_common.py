@@ -852,6 +852,43 @@ class PeftCommonTester:
 
             assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=atol, rtol=rtol)
 
+    def _test_merge_layers_after_adding_adapter(self, model_id, config_cls, config_kwargs):
+        # Add a second adapter with a new config to the already wrapped model, then check for both adapters that the
+        # merged output matches the unmerged output. When the first adapter is injected, its config may be corrected
+        # in place (e.g. fan_in_fan_out=True for transformers Conv1D) but the new config is not, so the layers must
+        # keep the fan_in_fan_out they were created with. See #3861.
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs)
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+            model = get_peft_model(model, config)
+
+            def get_fan_in_fan_out(model):
+                return {
+                    name: getattr(module, "fan_in_fan_out", None)
+                    for name, module in model.named_modules()
+                    if isinstance(module, BaseTunerLayer)
+                }
+
+            fan_in_fan_out_before = get_fan_in_fan_out(model)
+            config_other = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+            model.add_adapter("other", config_other)
+            assert get_fan_in_fan_out(model) == fan_in_fan_out_before
+
+            model = model.to(self.torch_device)
+            model.eval()
+            dummy_input = self.prepare_inputs_for_testing()
+            atol, rtol = 1e-4, 1e-4
+            for adapter_name in ["other", "default"]:
+                model.set_adapter(adapter_name)
+                logits = model(**dummy_input)[0]
+                model.merge_adapter()
+                logits_merged = model(**dummy_input)[0]
+                model.unmerge_adapter()
+                assert torch.allclose(logits, logits_merged, atol=atol, rtol=rtol)
+
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
         _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs)
