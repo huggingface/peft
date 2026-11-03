@@ -950,7 +950,8 @@ class TestGetNoSplitModules:
     def test_get_no_split_modules_simple(self):
         # choose a model where recursively visiting children is *not* required
         model_id = "peft-internal-testing/opt-125m"
-        model = AutoModelForCausalLM.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
         assert list(model._no_split_modules) == ["OPTDecoderLayer"]
         no_split_modules = _get_no_split_modules(model)
         assert no_split_modules == {"OPTDecoderLayer"}
