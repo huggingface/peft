@@ -215,7 +215,15 @@ class PeftConfigMixin(PushToHubMixin):
 
         if "peft_type" in kwargs:
             peft_type = kwargs["peft_type"]
-            config_cls = PEFT_TYPE_TO_CONFIG_MAPPING[peft_type]
+            try:
+                config_cls = PEFT_TYPE_TO_CONFIG_MAPPING[peft_type]
+            except KeyError:
+                # A corrupted or hand-edited adapter_config.json, or an adapter saved with a
+                # PEFT type this version does not know about.
+                raise ValueError(
+                    f"Invalid `peft_type` value: '{peft_type}'. Must be one of the following PEFT types: "
+                    f"{', '.join(PeftType)}."
+                ) from None
         else:
             config_cls = cls
 

@@ -780,3 +780,11 @@ class TestLoraNestedConfigRoundTrip:
         nested = getattr(loaded, attribute_name)
         assert isinstance(nested, nested_config_cls)
         assert getattr(nested, dummy_field) == dummy_value
+
+
+def test_from_peft_type_with_an_unknown_peft_type():
+    # A corrupted or hand-edited adapter_config.json used to surface a bare KeyError here.
+    with pytest.raises(
+        ValueError, match="Invalid `peft_type` value: 'NOT_A_PEFT_TYPE'"
+    ):
+        PeftConfig.from_peft_type(peft_type="NOT_A_PEFT_TYPE")
