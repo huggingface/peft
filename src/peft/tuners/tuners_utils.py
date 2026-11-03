@@ -1428,10 +1428,7 @@ class BaseTuner(nn.Module, ABC):
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
                 with onload_layer(module):
-                    if exact:
-                        module.merge(adapter_names=adapter_names, safe_merge=safe_merge, exact=exact)
-                    else:
-                        module.merge(adapter_names=adapter_names, safe_merge=safe_merge)
+                    module.merge(adapter_names=adapter_names, safe_merge=safe_merge, exact=exact)
 
     def unmerge_adapter(self):
         """
@@ -2766,16 +2763,25 @@ def set_adapter(
     _set_adapter(model, adapter_name, inference_mode=inference_mode)  # auxiliary modules
     for module in model.modules():
         if isinstance(module, layer_cls):
-            # If the module's active adapters are already the same as the adapters to be set, just skip. Note that we
-            # assume that the order of the adapters matter.
-            if isinstance(adapter_name, str) and (module.active_adapters[0] == adapter_name):
-                continue
-            if module.active_adapters == adapter_name:
-                continue
-
             if module.merged:
-                warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
-                module.unmerge()
+                # If the module's active adapters are already the same as the adapters to be set, skip the
+                # unmerge. There can be set_adapter calls in situations that don't really require it, like as a
+                # housekeeping step during add_adapter. We should still call module.set_adapter though because it deals
+                # with other states like inference_mode.
+                active_adapters_have_changed = True
+                if (
+                    isinstance(adapter_name, str)
+                    and module.active_adapters
+                    and (module.active_adapters[0] == adapter_name)
+                ):
+                    active_adapters_have_changed = False
+                elif module.active_adapters == adapter_name:
+                    # Note that we assume that the order of the adapters matter.
+                    active_adapters_have_changed = False
+
+                if active_adapters_have_changed:
+                    warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
+                    module.unmerge()
             module.set_adapter(adapter_name, inference_mode=inference_mode)
 
 

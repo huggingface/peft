@@ -970,7 +970,7 @@ class LoraLayer(BaseTunerLayer):
 
     def _check_exact_merge_allowed(self, adapter_names: list[str], configs: list[LoraConfig]) -> None:
         raise ValueError(
-            f"Layer of type {type(self), __name__} does not support exact merging, please use `exact=False`."
+            f"Layer of type {type(self).__name__} does not support exact merging, please use `exact=False`."
         )
 
     def _mixed_batch_forward(

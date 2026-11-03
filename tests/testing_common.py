@@ -1038,7 +1038,7 @@ class PeftCommonTester:
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         # Merging exactly is not possible if there is already a merged adapter, resulting in an error. If the PEFT
-        # method is, however, exact by nature, tihs limitation does not exist and checks need to be skipped.
+        # method is, however, exact by nature, this limitation does not exist and checks need to be skipped.
         natively_exact_methods: list[str] = ["FROD", "HIRA", "PEANUT", "TRAINABLE_TOKENS"]
 
         with hub_online_once(model_id):
@@ -1070,16 +1070,17 @@ class PeftCommonTester:
                 return to_return
 
             sd_before = get_base_state_dict(model)
+            assert sd_before  # ensure it's not empty
             self.perturb_trainable_token_weights_if_used(model, config_kwargs)
 
             # if exact merging is not allowed, only check the error message, then return
             msg = "does not support exact merging"
             try:
                 model.merge_adapter(exact=True)
-            except Exception as exc:
+            except ValueError as exc:
                 err_msg = str(exc.args[0])
                 assert msg in err_msg
-                # IF THIS PEFT MEHTOD DOES NOT SUPPORT EXACT MERGING, EXIT EARLY
+                # IF THIS PEFT METHOD DOES NOT SUPPORT EXACT MERGING, EXIT EARLY
                 return
 
             sd_after_merge = get_base_state_dict(model)
@@ -1108,7 +1109,7 @@ class PeftCommonTester:
 
             if (config_cls == TrainableTokensConfig) or ("trainable_token_indices" in config_kwargs):
                 # For now, skip tests with multiple adapters if we deal with trainable token (standalone or LoRA), as
-                # overlapping indices raise when you try to merge them. It's not qiute trivial to avoid that here.
+                # overlapping indices raise when you try to merge them. It's not quite trivial to avoid that here.
                 return
 
             if config_cls(**config_kwargs).peft_type.value not in natively_exact_methods:
@@ -1134,6 +1135,7 @@ class PeftCommonTester:
             model = self.transformers_class.from_pretrained(model_id)
             model = model.to(device=self.torch_device, dtype=dtype)
             sd_before = get_base_state_dict(model)
+            assert sd_before  # ensure it's not empty
             model = get_peft_model(model, config_cls(**config_kwargs), autocast_adapter_dtype=autocast_adapter_dtype)
             self.perturb_trainable_token_weights_if_used(model, config_kwargs)
 
