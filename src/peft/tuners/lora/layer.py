@@ -1180,7 +1180,7 @@ class Linear(nn.Module, LoraLayer):
     def _restore_base_weight(self, base_layer) -> None:
         base_layer.weight.data = self._base_layer_weight_copy.pop()
         self._base_layer_weight_copy.clear()
-        if self._base_layer_bias_copy is not None:
+        if self._base_layer_bias_copy:
             base_layer.bias.data = self._base_layer_bias_copy.pop()
         self._base_layer_bias_copy.clear()
 
