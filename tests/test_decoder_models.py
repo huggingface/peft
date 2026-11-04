@@ -49,8 +49,11 @@ from peft import (
     IA3Config,
     LoraConfig,
     MissConfig,
+    MultitaskPromptTuningConfig,
     OFTConfig,
     OSFConfig,
+    PacaConfig,
+    PeftModel,
     PrefixTuningConfig,
     PromptEmbedding,
     PromptEncoderConfig,
@@ -72,7 +75,7 @@ from peft import (
     get_peft_model,
 )
 
-from .testing_common import PeftCommonTester
+from .testing_common import PeftCommonTester, skip_non_prompt_learning
 from .testing_utils import device_count, hub_online_once, load_dataset_english_quotes, set_init_weights_false
 
 
@@ -81,7 +84,7 @@ PEFT_DECODER_MODELS_TO_TEST = [
     "peft-internal-testing/tiny-random-OPTForCausalLM",
     "peft-internal-testing/tiny-random-GPT2LMHeadModel",
     "peft-internal-testing/tiny-random-GPTJForCausalLM",
-    "trl-internal-testing/tiny-random-LlamaForCausalLM",
+    "peft-internal-testing/tiny-random-LlamaForCausalLM",
     "peft-internal-testing/tiny-dummy-qwen2",
     "hf-internal-testing/tiny-random-Gemma3ForCausalLM",
 ]
@@ -91,7 +94,7 @@ SMALL_GRID_MODELS = [
     "peft-internal-testing/tiny-random-OPTForCausalLM",
     "hf-internal-testing/tiny-random-MistralForCausalLM",
     "peft-internal-testing/tiny-dummy-qwen2",
-    "trl-internal-testing/tiny-random-LlamaForCausalLM",
+    "peft-internal-testing/tiny-random-LlamaForCausalLM",
 ]
 
 
@@ -336,6 +339,14 @@ ALL_CONFIGS = [
         },
     ),
     (
+        PacaConfig,
+        {
+            "r": 2,
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+        },
+    ),
+    (
         ShiraConfig,
         {
             "r": 1,
@@ -459,6 +470,7 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         HRAConfig,
         OFTConfig,
         OSFConfig,
+        PacaConfig,
         RoadConfig,
         ShiraConfig,
         SupertuningConfig,
@@ -468,7 +480,7 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         PsoftConfig,
     ]:
         pytest.skip(
-            "Skipping Beft/BOFT/GLoRA/HRA/OFT/Road/SHiRA/Supertuning/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel"
+            "Skipping Beft/BOFT/GLoRA/HRA/OFT/PaCA/Road/SHiRA/Supertuning/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel"
         )
 
 
@@ -485,9 +497,10 @@ def _skip_osf_disable_adapter_test(config_cls):
 
 
 def check_beft_config(config_cls, model_id, config_kwargs):
-    if isinstance(config_cls, BeftConfig):
+    if config_cls != BeftConfig:
         return
-    elif "gptj" in model_id.lower():
+
+    if "gptj" in model_id.lower():
         config_kwargs["target_modules"] = ["fc_out"]
     elif "llama" in model_id.lower():
         pytest.skip("Skip tests for Llama models because layers have no bias term")
@@ -687,6 +700,79 @@ class TestDecoderModels(PeftCommonTester):
     def test_from_pretrained_config_construction(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs.copy())
+
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize(
+        "config_cls,config_kwargs",
+        ALL_CONFIGS + [(MultitaskPromptTuningConfig, {"task_type": "CAUSAL_LM", "num_virtual_tokens": 10})],
+    )
+    @pytest.mark.parametrize("adapter_name", ["default", "experiment"])
+    def test_prompt_learning_inference_mode(self, model_id, config_cls, config_kwargs, adapter_name):
+        skip_non_prompt_learning(config_cls)
+        with hub_online_once(model_id):
+            config = config_cls(**config_kwargs)
+            model = get_peft_model(self.transformers_class.from_pretrained(model_id), config)
+            # CPT keeps its original prompt embedding frozen and trains only its delta.
+            assert any(param.requires_grad for param in model.prompt_encoder["default"].parameters())
+
+            frozen_config = config_cls(**{**config_kwargs, "inference_mode": True})
+            model.add_adapter("frozen", frozen_config)
+            assert not any(param.requires_grad for param in model.prompt_encoder["frozen"].parameters())
+            # Adding the inactive inference-only adapter leaves the default adapter trainable.
+            assert any(param.requires_grad for param in model.prompt_encoder["default"].parameters())
+
+            # Create a separate inference-only model with its own config instance.
+            frozen_model = get_peft_model(
+                self.transformers_class.from_pretrained(model_id),
+                config_cls(**{**config_kwargs, "inference_mode": True}),
+                adapter_name=adapter_name,
+            )
+            assert not any(param.requires_grad for param in frozen_model.parameters())
+
+            inputs = {"input_ids": torch.tensor([[1, 2, 3]]), "task_ids": torch.tensor([0])}
+            if config_cls != MultitaskPromptTuningConfig:
+                inputs.pop("task_ids")
+            model.eval()
+            output = model(**inputs)
+            output.logits.sum().backward()
+            assert any(param.grad is not None for param in model.prompt_encoder["default"].parameters())
+            assert not frozen_model(**inputs).logits.requires_grad
+
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize(
+        "config_cls,config_kwargs",
+        ALL_CONFIGS + [(MultitaskPromptTuningConfig, {"task_type": "CAUSAL_LM", "num_virtual_tokens": 10})],
+    )
+    @pytest.mark.parametrize("adapter_name", ["default", "experiment"])
+    def test_prompt_learning_inference_mode_from_pretrained(
+        self, model_id, config_cls, config_kwargs, adapter_name, tmp_path
+    ):
+        skip_non_prompt_learning(config_cls)
+        with hub_online_once(model_id):
+            config = config_cls(**config_kwargs)
+            model = get_peft_model(self.transformers_class.from_pretrained(model_id), config)
+            assert any(param.requires_grad for param in model.prompt_encoder["default"].parameters())
+            model.save_pretrained(tmp_path)
+
+            model.load_adapter(tmp_path, adapter_name="frozen")
+            assert not any(param.requires_grad for param in model.prompt_encoder["frozen"].parameters())
+            assert any(param.requires_grad for param in model.prompt_encoder["default"].parameters())
+
+            # Loading the checkpoint freezes this separate model, not model's original default adapter.
+            frozen_model = PeftModel.from_pretrained(
+                self.transformers_class.from_pretrained(model_id), tmp_path, adapter_name=adapter_name
+            )
+            assert not any(param.requires_grad for param in frozen_model.parameters())
+
+            inputs = {"input_ids": torch.tensor([[1, 2, 3]]), "task_ids": torch.tensor([0])}
+            if config_cls != MultitaskPromptTuningConfig:
+                inputs.pop("task_ids")
+            model.eval()
+            output = model(**inputs)
+            output.logits.sum().backward()
+            assert any(param.grad is not None for param in model.prompt_encoder["default"].parameters())
+            assert not frozen_model(**inputs).logits.requires_grad
+            torch.testing.assert_close(frozen_model(**inputs).logits, output.logits)
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
@@ -900,7 +986,7 @@ class TestDecoderModels(PeftCommonTester):
         self._test_passing_input_embeds_works("", model_id, config_cls, config_kwargs.copy())
 
     def test_lora_layer_replication(self):
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         config_kwargs = {
             "target_modules": ["down_proj", "up_proj"],
             "task_type": "CAUSAL_LM",
@@ -961,7 +1047,7 @@ class TestDecoderModels(PeftCommonTester):
 
     def test_prefix_tuning_offsets_position_ids_in_forward(self, monkeypatch):
         # Regression: RoPE models need position_ids offset for prefix tuning.
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             base = AutoModelForCausalLM.from_pretrained(model_id)
         peft_config = PrefixTuningConfig(num_virtual_tokens=4, task_type="CAUSAL_LM", prefix_projection=False)
@@ -992,7 +1078,7 @@ class TestDecoderModels(PeftCommonTester):
     def test_prompt_learning_position_ids_warns_and_drops(self, monkeypatch):
         # Counterpart to test_prefix_tuning_offsets_position_ids_in_forward for prompt learning methods that extend
         # inputs_embeds instead of the KV cache: passing position_ids is not supported, PEFT warns and removes them.
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             base = AutoModelForCausalLM.from_pretrained(model_id)
         peft_config = PromptTuningConfig(num_virtual_tokens=4, task_type="CAUSAL_LM")
@@ -1378,7 +1464,7 @@ class TestDecoderModels(PeftCommonTester):
         ],
     )
     def test_save_pretrained_targeting_lora_to_embedding_layer(self, save_embedding_layers, tmp_path, peft_config):
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
 
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
@@ -1506,7 +1592,7 @@ class TestDecoderModels(PeftCommonTester):
 
     def test_merge_and_unload_fixes_tie_word_embeddings_config(self):
         # See https://github.com/huggingface/transformers/issues/45127
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id, tie_word_embeddings=True)
             assert model.config.tie_word_embeddings

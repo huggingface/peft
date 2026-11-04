@@ -175,7 +175,7 @@ class ShiraModel(BaseTuner):
                         v.to(torch.float32) if platform.system() == "Windows" else v
                     )
                     # the above may contain other adapter names, so filter again
-                    to_return = _filter_state_dict_for_adapter_name(to_return, unwanted_adapter_names)
+                    to_return = _filter_state_dict_for_adapter_name(to_return, unwanted_adapter_names, model)
         return to_return
 
     @classmethod

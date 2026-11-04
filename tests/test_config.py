@@ -16,6 +16,7 @@ import inspect
 import json
 import os
 import pickle
+import sys
 import tempfile
 import warnings
 
@@ -48,6 +49,7 @@ from peft import (
     MultitaskPromptTuningConfig,
     OFTConfig,
     OSFConfig,
+    PacaConfig,
     PeanutConfig,
     PeftConfig,
     PeftType,
@@ -122,6 +124,7 @@ ALL_CONFIG_CLASSES = (
     (PeanutConfig, {}),
     (RoadConfig, {}),
     (ShadowConfig, {}),
+    (PacaConfig, {}),
     (ShiraConfig, {}),
     (SupertuningConfig, {}),
     (TinyLoraConfig, {}),
@@ -249,6 +252,28 @@ class TestPeftConfig:
 
             config_from_json = config_class.from_json_file(config_path)
             assert config.to_dict() == config_from_json
+
+    @pytest.mark.skipif(
+        not sys.platform.startswith("win"), reason="locale-encoding regression only manifests on Windows"
+    )
+    def test_from_json_file_utf8_non_ascii(self, tmp_path):
+        # Config files are UTF-8; without an explicit encoding, reading them on Windows falls back
+        # to the locale encoding (e.g. cp936), crashing or corrupting literal non-ASCII values
+        # (e.g. a hand-edited config or one written by another tool with ensure_ascii=False).
+        value = "汉 模型 🤗 Ё"
+        config_path = os.path.join(tmp_path, "adapter_config.json")
+        # Write the config with literal (non-escaped) non-ASCII characters.
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump({"base_model_name_or_path": value, "peft_type": "LORA"}, f, ensure_ascii=False)
+
+        loaded = LoraConfig.from_json_file(config_path)
+        assert loaded["base_model_name_or_path"] == value
+
+        # Roundtrip through save_pretrained to lock in the write-side encoding pin as well.
+        roundtrip_dir = os.path.join(tmp_path, "roundtrip")
+        LoraConfig(base_model_name_or_path=value).save_pretrained(roundtrip_dir)
+        reloaded = LoraConfig.from_json_file(os.path.join(roundtrip_dir, "adapter_config.json"))
+        assert reloaded["base_model_name_or_path"] == value
 
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
     def test_to_dict(self, config_class, mandatory_kwargs):
@@ -693,6 +718,37 @@ class TestPeftConfig:
         config_dict = json.loads((tmp_path / "resaved" / "adapter_config.json").read_text())
         assert "_peft_version_missing" not in config_dict
         assert config_dict["peft_version"] == peft_config.peft_version
+
+    def test_save_pretrained_sorts_keys_except_pattern_keys(self, tmp_path):
+        # The config is written with sorted keys, nested dicts included, but the order of rank_pattern and
+        # alpha_pattern is kept, see #3818. Testing LoRA is enough: all configs are saved by the same
+        # PeftConfigMixin.save_pretrained, and the methods that support these arguments use the same names.
+        config = LoraConfig(
+            rank_pattern={"module.foo": 16, "foo": 4},
+            alpha_pattern={"module.foo": 2, "foo": 8},
+            init_lora_weights="loftq",
+            loftq_config={"loftq_iter": 2, "loftq_bits": 4},
+        )
+        config.save_pretrained(tmp_path)
+        config_dict = json.loads((tmp_path / "adapter_config.json").read_text())
+
+        assert list(config_dict["rank_pattern"]) == ["module.foo", "foo"]
+        assert list(config_dict["alpha_pattern"]) == ["module.foo", "foo"]
+        assert list(config_dict["loftq_config"]) == ["loftq_bits", "loftq_iter"]
+
+        # apart from the order of the pattern keys, the file is the same as when sorting all keys
+        for key in ("rank_pattern", "alpha_pattern"):
+            config_dict[key] = dict(sorted(config_dict[key].items()))
+        assert json.dumps(config_dict, indent=2) == json.dumps(config_dict, indent=2, sort_keys=True)
+
+    def test_save_pretrained_keeps_order_of_paca_indices_pattern(self, tmp_path):
+        # as for rank_pattern, the first key of paca_indices_pattern that matches a module wins
+        config = PacaConfig(paca_indices_pattern={"module.foo": [0, 1], "foo": [2]})
+        config.save_pretrained(tmp_path)
+        config_dict = json.loads((tmp_path / "adapter_config.json").read_text())
+
+        assert list(config_dict["paca_indices_pattern"]) == ["module.foo", "foo"]
+        assert list(PacaConfig.from_pretrained(tmp_path).paca_indices_pattern) == ["module.foo", "foo"]
 
 
 class TestLoraNestedConfigRoundTrip:

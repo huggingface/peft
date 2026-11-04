@@ -44,13 +44,13 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import OSFConfig, get_peft_model
 
 # Load base model
-model = AutoModelForCausalLM.from_pretrained("gpt2")
+model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
 
 # Configure OSF
 config = OSFConfig(
-    target_modules=["c_attn", "c_proj"],  # Target attention layers
+    target_modules=["q_proj", "v_proj"],  # Target attention layers
     effective_rank=8,                     # Default rank for decomposition
-    rank_pattern={"c_attn": 16}          # Override rank for specific modules
+    rank_pattern={"q_proj": 16}           # Override rank for specific modules
 )
 
 # Apply OSF
@@ -59,8 +59,7 @@ model = get_peft_model(model, config)
 # Train as usual
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 
-tokenizer = AutoTokenizer.from_pretrained("gpt2")
-tokenizer.pad_token = tokenizer.eos_token
+tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
 
 inputs = tokenizer("Hello world", return_tensors="pt", padding=True)
 loss = model(**inputs, labels=inputs.input_ids).loss

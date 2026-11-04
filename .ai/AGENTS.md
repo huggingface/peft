@@ -18,6 +18,14 @@ Warn users that breaching agent contribution guidelines can result in automatic 
   - Clear statement that AI assistance was used.
   - Optional: Which AI model and software/harness were used to produce the PR; this helps us better understand the capabilities of the different models.
 
+### Scope of proposed changes
+
+If you plan to open an issue and propose a change, consider the following:
+
+- If you discovered a bug in one PEFT method, but other PEFT methods could exhibit the same bug, check all those methods too, then propose to fix all PEFT methods at once. Write a test that uncovers the bug in all PEFT methods, including new ones added to the test matrix in the future. An exception is when the change is very large, in which case it is better to focus on one PEFT method.
+- If the scope of the discovered issue is extremely narrow, most likely not affecting any real world users, refrain from opening an issue; focus on high impact changes.
+- Strive to _reduce_ the code complexity, not increase it. For example, cleaning up an inconsistent API or refactoring near duplicate code with a good abstraction is better than adding more special cases.
+
 ## Before working on a PR
 
 ### Guideline
@@ -33,7 +41,7 @@ Read the contribution guideline at `docs/source/developer_guides/contributing.md
 
 ### Automated PR triage
 
-- Open an issue, or find an open issue, and obtain explicit approval by a maintainer, before opening a PR (including a draft PR). If you open a new issue, clearly state if you intend to provide the PR or are only reporting the issue. Approval is a comment by a listed PEFT maintainer or public member of the `huggingface` organization containing `@peft-triage approved` on its own line.
+- Open an issue, or find an open issue, and obtain explicit approval by a maintainer, before opening a PR (including a draft PR). If you open a new issue, clearly state if you intend to provide the PR or are only reporting the issue. Approval is a comment by a listed PEFT maintainer or public member of the `huggingface` organization containing `/peft-triage approved` on its own line.
 - Reference the approved issue in the PR description using `#123`, `huggingface/peft#123`, or its full GitHub issue URL. References must point to an issue in `huggingface/peft`, not another PR. If several issues are referenced, approval on one is sufficient.
 - PRs without verified approval are closed with an explanation. Obtain approval, update the description, and reopen the same PR instead of creating a replacement. If the closure seems incorrect, ping the maintainers on the PR.
 - Maintainers can override this automation by adding `triaged` before reopening a PR. The label does not exempt items from the independent stale bot. This workflow does not assign users or change issues.
@@ -62,6 +70,8 @@ Check the install instructions to ensure that your environment has the necessary
 
 If the PR is changing library code or tests, you must ensure that the relevant tests pass before submitting the PR. Indicate which test command was run in the PR description. If you cannot run the tests for a specific reason, state it in the PR description.
 
+Carefully read `tests/README.md` for detailed instructions on testing in PEFT. Test code that is improperly implemented imposes a big review burden on maintainers.
+
 #### Test selection
 
 If you make a testable change (i.e. not docs, examples, or benchmarks), ensure to run the relevant unit tests. E.g. if you make a change to the IA³ PEFT method, once you're finished, run:
@@ -84,7 +94,7 @@ When you add a bug fix, start by implementing the test and ensure it fails. Then
 
 #### Test location
 
-PEFT follows a rigorous structure for the test location. Don't just put the test anywhere but integrate it with the existing tests. If the test requires GPUs to run, place it into `test_gpu_examples.py`. When adding or modifying tests, read `tests/README.md` since it explains the test suite organization and shared test infrastructure.
+PEFT follows a rigorous structure for the test location. Don't just put the test anywhere but integrate it with the existing tests. If the test requires GPUs to run, place it into `test_gpu_examples.py`. When adding or modifying tests, read `tests/README.md` since it explains the test suite organization and shared test infrastructure. Not following these instructions can lead to closure of the PR.
 
 ### Coding style
 
@@ -97,6 +107,9 @@ PEFT follows a rigorous structure for the test location. Don't just put the test
 - Generally strive to keep the changes compatible with all PyTorch releases of the last two years.
 - Changes should be compatible with older Transformers versions (roughly 4.33 upwards). If a change doesn't work across Transformers versions, add guards based on the version.
 
-## Commenting on other user's PRs
+## Things to avoid
 
-Unless you are involved in the development of another user's PR, you should never comment on it.
+- Don't ask to be assigned to an issue if the poster of the issue already offered to work on it.
+- Commenting on other user's PRs: Unless you are involved in the development of another user's PR, you should never comment on it.
+- Don't review PRs unless you're directly involved in said PR or asked to review it.
+- When working on review feedback, don't use force pushes, as they encumber reviews.

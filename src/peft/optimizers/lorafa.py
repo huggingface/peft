@@ -91,7 +91,8 @@ class LoraFAOptimizer(Optimizer):
         """
         loss = None
         if closure is not None:
-            loss = closure()
+            with torch.enable_grad():
+                loss = closure()
 
         for group in self.param_groups:
             param_list = []
@@ -122,6 +123,11 @@ class LoraFAOptimizer(Optimizer):
                     param_list.append(p)
                     name_list.append(n)
                     if len(param_list) == 2:
+                        # Skip the whole unused pair before touching its state or applying weight decay.
+                        if param_list[1].grad is None:
+                            param_list = []
+                            name_list = []
+                            continue
                         name = n[: n.find("lora")] + "lora"
                     elif len(param_list) == 1:
                         continue

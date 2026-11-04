@@ -26,6 +26,22 @@ import transformers
 from torch import nn
 
 
+class TpMeshDimRegistry:
+    """Recognized mesh dimension names for tensor parallelism without a Transformers TP plan."""
+
+    _names = frozenset({"tp"})
+
+    @classmethod
+    def register(cls, name: str) -> None:
+        """Register a custom TP mesh dimension name before creating adapters."""
+        cls._names = cls._names | {name}
+
+    @classmethod
+    def is_registered(cls, name: str) -> bool:
+        """Whether a mesh dimension name identifies tensor parallelism."""
+        return name in cls._names
+
+
 @dataclass
 class TpInfo:
     tp_plan: dict[str, str]

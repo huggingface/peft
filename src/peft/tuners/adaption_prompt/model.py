@@ -17,7 +17,7 @@ from contextlib import contextmanager
 
 from torch import nn
 
-from peft.utils import _freeze_adapter, _get_submodules
+from peft.utils import _get_submodules
 
 from .config import AdaptionPromptConfig, prepare_config
 from .layer import AdaptedAttention, AdaptedAttentionGPT
@@ -100,9 +100,6 @@ class AdaptionPromptModel(nn.Module):
             self._active_adapter = previous_adapter
             if self._enabled:
                 self._set_adapted_attentions(previous_adapter)
-
-        if config.inference_mode:
-            _freeze_adapter(self.model, adapter_name)
 
     def delete_adapter(self, adapter_name: str) -> None:
         """Delete an adapter with the given name."""
@@ -189,6 +186,11 @@ class AdaptionPromptModel(nn.Module):
                     adapter_len=config.adapter_len,
                     model=getattr(par, config.target_modules),
                 )
+            if config.inference_mode:
+                # Freeze the new adapter before it can be moved into the inactive cache.
+                for name, param in attn.named_parameters():
+                    if is_adaption_prompt_trainable(name):
+                        param.requires_grad_(False)
             setattr(par, config.target_modules, attn)
 
     def _set_adapted_attentions(self, adapter_name: str) -> None:

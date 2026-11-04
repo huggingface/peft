@@ -19,7 +19,7 @@ import json
 import os
 import warnings
 from dataclasses import asdict, dataclass, field
-from typing import Optional, Union
+from typing import Optional, Self, Union
 
 import packaging.version
 from huggingface_hub import hf_hub_download
@@ -32,6 +32,12 @@ from .utils import CONFIG_NAME, PeftType, TaskType
 
 # we expect at least these keys to be present in a PEFT adapter_config.json
 MIN_EXPECTED_CONFIG_KEYS = {"peft_type"}
+
+# The adapter_config.json is written with sorted keys, except for the dicts stored under these keys, whose order has to
+# survive a save/load round trip. For rank_pattern, alpha_pattern and paca_indices_pattern, the order matters because
+# when more than one key matches a module, the first one wins. If another config argument needs its order preserved,
+# add it here and extend this comment.
+CONFIG_KEYS_WITH_PRESERVED_ORDER = {"rank_pattern", "alpha_pattern", "paca_indices_pattern"}
 
 
 def _check_and_remove_unused_kwargs(cls, kwargs):
@@ -47,6 +53,20 @@ def _check_and_remove_unused_kwargs(cls, kwargs):
     for key in unexpected_kwargs:
         del kwargs[key]
     return kwargs, unexpected_kwargs
+
+
+def _sort_keys(obj):
+    """Sort the keys of all dicts in obj, like `json.dumps(..., sort_keys=True)`, except for the dicts stored under
+    `CONFIG_KEYS_WITH_PRESERVED_ORDER`.
+    """
+    if isinstance(obj, dict):
+        return {
+            key: value if key in CONFIG_KEYS_WITH_PRESERVED_ORDER else _sort_keys(value)
+            for key, value in sorted(obj.items())
+        }
+    if isinstance(obj, (list, tuple)):
+        return [_sort_keys(item) for item in obj]
+    return obj
 
 
 def _is_dev_version(version: str) -> bool:
@@ -158,12 +178,13 @@ class PeftConfigMixin(PushToHubMixin):
         if auto_mapping_dict is not None:
             output_dict["auto_mapping"] = auto_mapping_dict
 
-        # save it
-        with open(output_path, "w") as writer:
-            writer.write(json.dumps(output_dict, indent=2, sort_keys=True))
+        # save it; config JSON is UTF-8, pin the encoding so this does not depend on the
+        # locale's preferred encoding (e.g. cp936 on Windows)
+        with open(output_path, "w", encoding="utf-8") as writer:
+            writer.write(json.dumps(_sort_keys(output_dict), indent=2))
 
     @classmethod
-    def from_peft_type(cls, **kwargs):
+    def from_peft_type(cls, **kwargs) -> Self:
         r"""
         This method loads the configuration of your adapter model from a set of kwargs.
 
@@ -228,7 +249,7 @@ class PeftConfigMixin(PushToHubMixin):
         return config
 
     @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path: str, subfolder: Optional[str] = None, **kwargs):
+    def from_pretrained(cls, pretrained_model_name_or_path: str, subfolder: Optional[str] = None, **kwargs) -> Self:
         r"""
         This method loads the configuration of your adapter model from a directory.
 
@@ -281,7 +302,10 @@ class PeftConfigMixin(PushToHubMixin):
             path_json_file (`str`):
                 The path to the json file.
         """
-        with open(path_json_file) as file:
+        # Config JSON files are UTF-8; pin the encoding so reading a config containing
+        # non-ASCII (e.g. a CJK path in `base_model_name_or_path`) does not crash on
+        # Windows locales such as cp936.
+        with open(path_json_file, encoding="utf-8") as file:
             json_object = json.load(file)
 
         # Sanity check that config does not contain a runtime_config
