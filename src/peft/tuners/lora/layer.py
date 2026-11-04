@@ -319,6 +319,7 @@ class LoraLayer(BaseTunerLayer):
 
         # call this before init of the lora variants
         self._move_adapter_to_device_of_base_layer(adapter_name)
+        self._sync_tp_replicated_lora_weights(adapter_name)
 
         if adapter_name in self.lora_variant:
             self.lora_variant[adapter_name].init(self, adapter_name=adapter_name, config=config, **kwargs)
@@ -379,6 +380,7 @@ class LoraLayer(BaseTunerLayer):
                     # embeddings are not supported at the moment, but still adding this for consistency
                     nn.init.zeros_(self.lora_embedding_B[adapter_name].bias)
 
+    def _sync_tp_replicated_lora_weights(self, adapter_name):
         # Always synchronize non-sharded LoRA weights across TP ranks, regardless of
         # init_lora_weights, since each rank initializes weights independently.
         # We could skip some broadcast, for instance when the lora weights are initialized to zero,
@@ -1361,6 +1363,7 @@ class Embedding(nn.Module, LoraLayer):
 
         # call this before init of the lora variants
         self._move_adapter_to_device_of_base_layer(adapter_name)
+        self._sync_tp_replicated_lora_weights(adapter_name)
 
         if adapter_name in self.lora_variant:
             self.lora_variant[adapter_name].init(self, adapter_name=adapter_name, config=config, **kwargs)
