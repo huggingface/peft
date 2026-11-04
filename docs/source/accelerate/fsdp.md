@@ -10,7 +10,7 @@ PEFT supports FSDP1 and [PyTorch FSDP2](https://docs.pytorch.org/tutorials/inter
 
 ## FSDP2 with Transformers
 
-Use PyTorch 2.6 or newer and current versions of Transformers, Accelerate, TRL, and PEFT. The [SFT example](https://github.com/huggingface/peft/tree/main/examples/sft) uses [`~trl.SFTTrainer`]. Its [fsdp2_config.json](https://github.com/huggingface/peft/blob/main/examples/sft/configs/fsdp2_config.json) contains the model, dataset, and training options, including these FSDP2 settings:
+Use PyTorch 2.6 or newer and current versions of Transformers, Accelerate, TRL, and PEFT. The [SFT example](https://github.com/huggingface/peft/tree/main/examples/sft) uses [`~trl.SFTTrainer`]. Here is a typical FSDP2 configuration:
 
 ```json
 {
@@ -28,7 +28,7 @@ Use PyTorch 2.6 or newer and current versions of Transformers, Accelerate, TRL, 
 
 `TRANSFORMER_BASED_WRAP` uses the model's transformer-layer definitions. `reshard_after_forward` releases gathered parameters after each forward pass. FSDP2 shards individual parameters, so it does not use FSDP1's `use_orig_params` setting. See the [Transformers FSDP guide](https://huggingface.co/docs/transformers/fsdp) for more configuration options.
 
-Edit the model, dataset and training options in the example's JSON file. From `examples/sft`, launch one process per GPU:
+Edit the model, dataset, and training options in the example's [fsdp2_config.json](https://github.com/huggingface/peft/blob/main/examples/sft/configs/fsdp2_config.json). From `examples/sft`, launch one process per GPU:
 
 ```bash
 torchrun --standalone --nproc_per_node=2 train.py configs/fsdp2_config.json
@@ -52,7 +52,21 @@ trainer.save_model()
 
 All ranks must participate in the gather; only the main process writes the adapter files. Gathering the full state dictionary temporarily increases memory use.
 
-For inference, load the exported adapter directory with [`AutoPeftModelForCausalLM.from_pretrained`], which handles resized token embeddings.
+For inference, resize the base model's embeddings to match the tokenizer saved with the adapter. The SFT example pads the vocabulary size to a multiple of 8, including when it shrinks the original embeddings:
+
+```python
+import torch
+
+from peft import PeftConfig, PeftModel
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+adapter_dir = "qwen-sft-lora-fsdp2"
+peft_config = PeftConfig.from_pretrained(adapter_dir)
+tokenizer = AutoTokenizer.from_pretrained(adapter_dir)
+base_model = AutoModelForCausalLM.from_pretrained(peft_config.base_model_name_or_path, dtype=torch.float32)
+base_model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
+model = PeftModel.from_pretrained(base_model, adapter_dir)
+```
 
 ## FSDP1 with Accelerate
 
