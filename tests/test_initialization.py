@@ -111,6 +111,11 @@ except ImportError:
     reset_sessions = None
 
 
+# On macOS, float32 matmuls go through Accelerate (CPU) or MPS, whose rounding can slightly exceed 1e-6 when comparing a
+# model with mutated base weights (PiSSA, OLoRA, CorDA) to the original or converted model
+MUTATED_BASE_TOL = 1e-5 if platform.system() == "Darwin" else 1e-6
+
+
 class TestLoraInitialization:
     """Test class to check the initialization of LoRA adapters."""
 
@@ -664,7 +669,7 @@ class TestLoraInitialization:
         # Both OLoRA and olora should work
         config = LoraConfig(init_lora_weights="OLoRA", target_modules=["linear"])
         peft_model = get_peft_model(deepcopy(model), config)
-        assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
+        assert torch.allclose(output, peft_model(data)[0], atol=MUTATED_BASE_TOL)
 
     def test_lora_olora_init_conv1d(self):
         # GPT-2 uses transformers' Conv1D, which stores the weight as (in_features, out_features), see #3996
@@ -791,7 +796,7 @@ class TestLoraInitialization:
         output_pissa = peft_model(data)[0]
 
         # sanity check
-        tol = 1e-06
+        tol = MUTATED_BASE_TOL
         assert not torch.allclose(output_base, output_pissa, atol=tol, rtol=tol)
 
         # save the model normally
@@ -849,7 +854,7 @@ class TestLoraInitialization:
         output_pissa = peft_model(data)[0]
 
         # sanity check
-        tol = 1e-06
+        tol = MUTATED_BASE_TOL
         assert not torch.allclose(output_base, output_pissa, atol=tol, rtol=tol)
 
         # save the model normally
@@ -901,7 +906,7 @@ class TestLoraInitialization:
         output_pissa = peft_model(data)[0]
 
         # sanity check
-        tol = 1e-06
+        tol = MUTATED_BASE_TOL
         assert not torch.allclose(output_base, output_pissa, atol=tol, rtol=tol)
 
         # save the model normally
@@ -952,7 +957,7 @@ class TestLoraInitialization:
         output_pissa = peft_model(data)[0]
 
         # sanity check
-        tol = 1e-06
+        tol = MUTATED_BASE_TOL
         assert not torch.allclose(output_base, output_pissa, atol=tol, rtol=tol)
 
         # save the model normally
@@ -1034,7 +1039,7 @@ class TestLoraInitialization:
         output_olora = peft_model(data)[0]
 
         # sanity check
-        tol = 1e-06
+        tol = MUTATED_BASE_TOL
         assert not torch.allclose(output_base, output_olora, atol=tol, rtol=tol)
 
         # save the model normally
@@ -1090,7 +1095,7 @@ class TestLoraInitialization:
         output_olora = peft_model(data)[0]
 
         # sanity check
-        tol = 1e-06
+        tol = MUTATED_BASE_TOL
         assert not torch.allclose(output_base, output_olora, atol=tol, rtol=tol)
 
         # save the model normally
@@ -1140,7 +1145,7 @@ class TestLoraInitialization:
         output_olora = peft_model(data)[0]
 
         # sanity check
-        tol = 1e-06
+        tol = MUTATED_BASE_TOL
         assert not torch.allclose(output_base, output_olora, atol=tol, rtol=tol)
 
         # save the model normally
@@ -1190,7 +1195,7 @@ class TestLoraInitialization:
         output_olora = peft_model(data)[0]
 
         # sanity check
-        tol = 1e-06
+        tol = MUTATED_BASE_TOL
         assert not torch.allclose(output_base, output_olora, atol=tol, rtol=tol)
 
         # save the model normally
@@ -4558,7 +4563,7 @@ class TestCordaInitialization:
         output_corda = peft_model(data)[0]
 
         # sanity check
-        tol = 1e-06
+        tol = MUTATED_BASE_TOL
         assert not torch.allclose(output_base, output_corda, atol=tol, rtol=tol)
 
         # save the model normally
@@ -4625,7 +4630,7 @@ class TestCordaInitialization:
         output_corda = peft_model(data)[0]
 
         # sanity check
-        tol = 1e-06
+        tol = MUTATED_BASE_TOL
         assert not torch.allclose(output_base, output_corda, atol=tol, rtol=tol)
 
         # save the model normally
@@ -4685,7 +4690,7 @@ class TestCordaInitialization:
         output_corda = peft_model(data)[0]
 
         # sanity check
-        tol = 1e-06
+        tol = MUTATED_BASE_TOL
         assert not torch.allclose(output_base, output_corda, atol=tol, rtol=tol)
 
         # save the model normally
@@ -4741,7 +4746,7 @@ class TestCordaInitialization:
         output_corda = peft_model(data)[0]
 
         # sanity check
-        tol = 1e-06
+        tol = MUTATED_BASE_TOL
         assert not torch.allclose(output_base, output_corda, atol=tol, rtol=tol)
 
         # save the model normally
