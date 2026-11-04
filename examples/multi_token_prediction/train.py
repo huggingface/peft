@@ -48,6 +48,7 @@ class TrainConfig:
     hub_id: str
     skip_prefix: bool
     loss_decay: bool
+    dense: bool = False
 
 
 MTP_MASK_TOKENS = None
@@ -124,6 +125,151 @@ def augment_mtp(sample: list[int], bs: int, num_mtp: int, use_lc_loss: bool, use
         labels.append([-100] * end_idx)
 
     return input_ids, labels, offsets
+
+
+def augment_mtp_dense(sample: list[int], num_mtp: int, mask_ids: list[int]):
+    """Augment samples with MTP tokens in a dense mask-block batch
+    (paper Fig-4 scheme, two-forward formulation). TODO: explain two-forward
+
+    This is an alternative to `augment_mtp`. Instead of `bs` overlapping
+    windows with one trailing mask block each, we (conceptually) intersect
+    input and mask tokens so that one input token is followed by `num_mtp` mask
+    tokens. This has the benefit of having one sequence per batch-row and
+    therefore a higher sample density compared to `augment_mtp`.
+
+    Here's a visualization (for num_mtp=2).
+
+    input sequence:
+    X1 X2 X3 X4 X5
+
+    augmented:
+    X1 M1 M2 X2 M1 M2
+
+    labels (for the mask tokens):
+    X3 X4 X4 X5
+
+    anchor_idcs (for the LC loss):
+    1 2 2 3
+
+    In the above example we only have two MTP blocks because we
+    would not have enough reference labels in the input sequence for more.
+
+    Returns a dict with python lists (caller moves them to the device).
+    """
+    n = len(sample)
+    k = num_mtp
+    n_blocks = n - k - 1  # block i needs labels up to x_{i+k+1} <= x_{n-1}
+    assert n_blocks > 0, f"sequence too short for dense blocks: n={n}, k={k}"
+
+    mask_seq: list[int] = []
+    labels: list[int] = []
+    position_ids: list[int] = []
+    anchor_idcs: list[int] = []
+    for i in range(n_blocks):
+        for j in range(1, k + 1):  # j = mask role, 1-based
+            mask_seq.append(mask_ids[j - 1])
+            labels.append(sample[i + j + 1])
+            position_ids.append(i + j)
+            anchor_idcs.append(i + j)
+
+    return {
+        "real_ids": list(sample),
+        "mask_seq": mask_seq,
+        "labels": labels,
+        "position_ids": position_ids,
+        "anchor_idcs": anchor_idcs,
+        "n_real": n,
+        "n_blocks": n_blocks,
+        "k": k,
+    }
+
+
+def build_dense_attention_mask(n_real: int, n_blocks: int, k: int, dtype, device):
+    """Additive 4D attention mask [1, 1, n_real, n_real + k * n_blocks] for the dense mask
+    forward where n_real is the number of non-mask tokens and k * n_blocks is the number
+    of mask tokens.
+
+    A custom attention mask is needed for two reasons:
+
+    1. we have multiple mask token sequences for each model input and the masks must not
+       attend to each other (since they can be wrong); they may only attend to themselves
+       and to previous non-mask inputs.
+    2. we split the forward in two steps: one forward to get reference logits and hidden
+       states from non-mask tokens and a second step to get predictions for the mask tokens
+       *using the KV cache from the previous forward*. So, we have a forward(non_mask_tokens)
+       and a second forward(mask_tokens, past_key_values=kv).
+
+    This is a very simplified example of the attention mask:
+
+    input sequence:
+    X1 M1 M2 X2 M1 M2
+
+    additive attention mask (semantically, - is -infinity):
+    X1 0  -  -  -  -  -
+    M1 0  0  -  -  -  -
+    M2 0  0  0  -  -  -
+    X2 0  0  0  0  -  -
+    M1 0  -  -  0  0  -
+    M2 0  -  -  0  0  0
+      X1 M1 M2 X2 M1 M2
+
+    i.e. the first M1 M2 block can attend to itself and X1 while the second block
+    can attend to X1 X2 and itself but not the first mask token block.
+
+    It doesn't really look like this. In actuality we expect the KV cache
+    content to be the mask-free tokens and the input to be the mask tokens.
+    So the attention mask we produce here looks like this:
+
+    M1  0  -  -  -  -  0  -  -  -  |
+    M2  0  -  -  -  -  0  0  -  -  | mask block 0
+    M1  0  0  -  -  -  -  -  0  -  |
+    M2  0  0  -  -  -  -  -  0  0  | mask block 1
+       X1 X2 X3 X4 X5 M1 M2 M1 M2
+       ^^^^^^^^^^^^^^|^^^^^^^^^^^
+         KV cache       input
+
+    n_blocks: number of MTP mask blocks (each of size `k`)
+    k: number of MTP mask tokens
+    """
+    n_masks = n_blocks * k
+    rows = torch.arange(n_masks, device=device)
+    ib = rows // k  # block index per row
+    jb = rows % k  # role index per row (0-based)
+    cols = torch.arange(n_real + n_masks, device=device)
+
+    # use the block index ib to identify which cache positions the mask tokens can attend to.
+    # e.g. mask block 0 can attend to cache position 0, block 1 to cache pos 0, 1, etc.;
+    # best visualized in the docstring example.
+    is_cache = cols < n_real
+    cache_pos = cols.clamp(max=n_real - 1)
+    allowed_cache = is_cache.unsqueeze(0) & (cache_pos.unsqueeze(0) <= ib.unsqueeze(1))
+
+    # this section build the inter-mask token attention. mask tokens can only attend
+    # causally to themselves, not to other mask tokens. input tokens are handled above.
+    #
+    # determine the mask token positions.
+    # for n_real=3 and k=2, cols - n_real would be [0, 1, 2, 3, 4] -> [-3, -2, -1, 0, 1]
+    # d//k would be [-2, -1, -1, 0, 0], i.e. the block index for each mask token
+    # d %k would be [ 1,  1,  1, 0, 1], i.e. the role for each mask token inside the block (for causal mask)
+    # d//k and d%k can then be matched against the vertical ib and jb to build the causal mask.
+    d = cols - n_real
+    in_masks = d >= 0
+    d_block = torch.where(in_masks, d // k, torch.zeros_like(d))
+    d_role = torch.where(in_masks, d % k, torch.zeros_like(d))
+    allowed_self = (
+        in_masks.unsqueeze(0)
+        & (d_block.unsqueeze(0) == ib.unsqueeze(1))
+        & (d_role.unsqueeze(0) <= jb.unsqueeze(1))  # causal incl. self-attention
+    )
+
+    allowed = allowed_cache | allowed_self
+    fill = torch.finfo(dtype).min
+    mask = torch.where(
+        allowed,
+        torch.tensor(0.0, dtype=dtype, device=device),
+        torch.tensor(fill, dtype=dtype, device=device),
+    )
+    return mask.view(1, 1, n_masks, n_real + n_masks)
 
 
 class Sampler(nn.Module):
@@ -601,6 +747,32 @@ def train_loop(
 def train_step(
     model, tokenizer, sampler, optimizer, iterator_train, lr_scheduler, train_config: TrainConfig, sample, step
 ):
+    if train_config.dense:
+        return _train_step_dense(
+            model=model,
+            optimizer=optimizer,
+            lr_scheduler=lr_scheduler,
+            train_config=train_config,
+            sample=sample,
+            step=step
+        )
+    else:
+        return _train_step_windows(
+            model=model,
+            tokenizer=tokenizer,
+            sampler=sampler,
+            optimizer=optimizer,
+            iterator_train=iterator_train,
+            lr_scheduler=lr_scheduler,
+            train_config=train_config,
+            sample=sample,
+            step=step,
+        )
+
+
+def _train_step_windows(
+    model, tokenizer, sampler, optimizer, iterator_train, lr_scheduler, train_config: TrainConfig, sample, step
+):
     tic = time.perf_counter()
     # assume batch size 1
     input_ids, labels, offsets = augment_mtp(
@@ -696,6 +868,122 @@ def train_step(
         "duration": toc - tic,
         "num_samples": actual_batch_size,
         "num_tokens": total_tokens,
+        "grad_norm_stats": grad_norm_stats,
+    }
+
+
+def _train_step_dense(model, optimizer, lr_scheduler, train_config: TrainConfig, sample, step):
+    """Dense input sequence training step. Semantically trains as though the
+    sequence is interleaved with mask tokens, i.e. `X1 M1 M2 X2 M1 M2 X3 [...]`.
+    The goal is to maximize sample density per batch.
+
+    Uses two forward passes. Forward 1 runs the plain token sequence with the aLoRA
+    gate off. It yields the base-model KV cache for the whole prefix and the
+    last-layer hidden states z_i, which serve as LC loss anchors.
+
+    Forward 2 runs all mask blocks with the KV cache of the first forward. Every input
+    position is a mask token, so the aLoRA adapter is activated for the whole sequence.
+    A custom attention mask enforces that masks don't attend more than their own block
+    (since that would mean we attend to speculated inputs) and only attend to the
+    correponding, causal tokens from the KV cache.
+    """
+    assert not train_config.use_sampler, "dense mode does not support the sampler yet"
+    tic = time.perf_counter()
+
+    d = augment_mtp_dense(sample, train_config.num_mtp, MTP_MASK_TOKENS)
+
+    device = model.device
+    dtype = model.dtype
+    real_ids = torch.tensor([d["real_ids"]], dtype=torch.long, device=device)
+    mask_seq = torch.tensor([d["mask_seq"]], dtype=torch.long, device=device)
+    position_ids = torch.tensor([d["position_ids"]], dtype=torch.long, device=device)
+    labels = torch.tensor(d["labels"], dtype=torch.long, device=device)
+    anchor_idcs = torch.tensor(d["anchor_idcs"], dtype=torch.long, device=device)
+    n_real, n_mask_blocks = d["n_real"], d["n_blocks"]
+    k = train_config.num_mtp
+    n_masks = n_mask_blocks * k
+
+    optimizer.zero_grad()
+
+    # first forward to gather the hidden states. technically we could skip this if
+    # we didn't use the LC loss but that's not implemented.
+    out1 = model(
+        input_ids=real_ids,
+        use_cache=True,
+        output_hidden_states=True,
+        # no invocation tokens are present, so PEFT computes `alora_offsets = [None]` itself;
+        # we pass it explicitly to skip the search.
+        alora_offsets=[None],
+    )
+    z = out1.hidden_states[-1][0]  # [n_real, H], post final norm
+    kv = out1.past_key_values
+
+    # second forward, here we get the predictions for the mask tokens, i.e. the
+    # speculated outputs.
+    attn_mask = build_dense_attention_mask(n_real, n_mask_blocks, k, dtype, device)
+    out2 = model(
+        input_ids=mask_seq,
+        past_key_values=kv,
+        position_ids=position_ids,
+        attention_mask=attn_mask,
+        use_cache=False,
+        output_hidden_states=True,
+        alora_offsets=[n_masks],
+    )
+    logits = out2.logits[0]  # [n_masks, V]
+    hidden = out2.hidden_states[-1][0]  # [n_masks, H], post final norm
+
+    # CE loss for the MTP tokens. Semantically this is `calculate_mtp_loss`.
+    # We need to make sure that the weights are applied to each mask block independently.
+    if train_config.loss_decay:
+        weights = torch.exp(-(torch.arange(1, k + 1, device=device) - 1) / k).to(logits)
+    else:
+        weights = torch.ones(k, device=device, dtype=logits.dtype)
+    roles = torch.arange(n_masks, device=device) % k
+    loss_mtp = (F.cross_entropy(logits, labels, reduction="none") * weights[roles]).mean()
+
+    # LC loss for the MTP token hidden states.
+    # pairing: row r = i*k + (j-1) anchors to z_{i+j} == the real token at the mask's position.
+    # (identical rule to calculate_lc_loss in the window scheme).
+    loss_lc = torch.tensor(0.0, device=device)
+    if train_config.use_lc_loss:
+        anchors = z[anchor_idcs]  # [n_masks, H]
+        loss_lc = train_config.lc_loss_weight * F.mse_loss(hidden, anchors.detach())
+
+    # TV loss for the MTP token hiddden states. Similar to LC loss. See calculate_tv_loss for details.
+    loss_tv = torch.tensor(0.0, device=device)
+    if train_config.use_tv_loss:
+        w_lm = model.get_output_embeddings().weight  # frozen, untied
+        logits_anchor = F.linear(z[anchor_idcs].detach(), w_lm)  # [n_masks, V] base logits
+        probas_pred = F.softmax(logits.float(), dim=-1)
+        probas_true = F.softmax(logits_anchor.float(), dim=-1)
+        loss_tv = train_config.tv_loss_weight * (probas_pred - probas_true).abs().sum(dim=-1).mean()
+
+    if step % 100 == 0:
+        grad_norm_stats = gradient_norm_step(optimizer, loss_mtp, loss_lc, loss_tv, torch.tensor(0.0))
+    else:
+        grad_norm_stats = {}
+
+    loss = loss_mtp + loss_lc + loss_tv
+    loss.backward()
+
+    if train_config.max_gradient_norm > 0:
+        for group in optimizer.param_groups:
+            torch.nn.utils.clip_grad_norm_(group["params"], train_config.max_gradient_norm)
+
+    optimizer.step()
+    lr_scheduler.step()
+
+    toc = time.perf_counter()
+    return {
+        "loss": loss.detach().cpu().item(),
+        "loss_mtp": loss_mtp.detach().cpu().item(),
+        "loss_lc": loss_lc.detach().cpu().item(),
+        "loss_tv": loss_tv.detach().cpu().item(),
+        "loss_sampler": 0.0,
+        "duration": toc - tic,
+        "num_samples": 1,
+        "num_tokens": n_real + n_masks,
         "grad_norm_stats": grad_norm_stats,
     }
 
@@ -1004,6 +1292,12 @@ def main():
     parser.add_argument("--use_tv_loss", action="store_true", default=False)
     parser.add_argument("--loss_decay", action="store_true", default=False,
         help="Use exponential decayed weight for each MTP token in the CE loss.")
+    parser.add_argument("--dense", action="store_true", default=False,
+        help=(
+            "Dense mask-block training: two-forward formulation per document "
+            "(real-token forward for base KV + LC anchors, then one mask-block forward "
+            "over the whole prefix). Supervises ~n*k MTP positions per step instead of bs*k."
+        ))
     parser.add_argument("--log_step", type=int, default=10)
     parser.add_argument("--eval_step", type=int, default=1000)  # eval is expensive, not too often
     parser.add_argument("--checkpoint_step", type=int, default=1000)
@@ -1070,7 +1364,10 @@ def main():
         print(f"Loading text from {args.dataset}")
         ds = load_dataset(args.dataset, split="train", streaming=True)
         num_valid_samples = args.num_valid
-        min_len = args.batch_size * args.k + 2 + 1  # see augment_mtp for details
+        # see augment_mtp for details on `min_len`. even with args.dense set
+        # we use augment_mtp in eval, so we keep the min_len the same. this is
+        # only of concern if the dataset includes many short sequences.
+        min_len = args.batch_size * args.k + 2 + 1
         if args.dataset_type == "wiki":
             mapping_fn = tokenize_wiki
         elif args.dataset_type == "conversational":
@@ -1174,6 +1471,7 @@ def main():
         use_lc_loss=args.use_lc_loss,
         use_tv_loss=args.use_tv_loss,
         loss_decay=args.loss_decay,
+        dense=args.dense,
         log_step=args.log_step,
         eval_step=args.eval_step,
         output_dir=args.output_dir,
