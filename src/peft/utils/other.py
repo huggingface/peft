@@ -524,10 +524,10 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         else:
             self._disable_adapters = True
 
-    def check_set_adapter(self, adapter_name: str | list[str]) -> str | None:
+    def check_set_adapter(self, adapter_name: str | list[str]) -> list[str] | None:
         """Helper function to check if the given adapter(s) can be set.
 
-        Return the name of the adapter to be set or None if no adapter should be set.
+        Return the name of the adapter(s) to be set or None if no adapter should be set.
         """
         raise NotImplementedError
 
@@ -706,28 +706,25 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             for module in self.modules_to_save.values():
                 _set_layer_requires_grad(module, False)
 
-    def check_set_adapter(self, adapter_name: str | list[str]) -> str | None:
+    def check_set_adapter(self, adapter_name: str | list[str]) -> list[str] | None:
         """Helper function to check if the given adapter(s) can be set.
 
-        Return the name of the adapter to be set or None if no adapter should be set.
+        Return the name of the adapters to be set or None if no adapter should be set. For ModulesToSaveWrapper, at
+        most one adapter can be set.
         """
         if isinstance(adapter_name, str):
-            return adapter_name
-
-        # adapter_name is a list of str
-        if len(adapter_name) == 0:
-            raise ValueError("Please specify at least one adapter to set")
+            return [adapter_name]
 
         adapter_names_in_module = [n for n in adapter_name if n in self.modules_to_save]
 
         if len(adapter_names_in_module) > 1:
             raise ValueError(f"Only one adapter can be set at a time for {self}, got {len(adapter_names_in_module)}")
 
-        adapter_name_to_set: str | None
+        adapter_name_to_set: list[str] | None
         if not adapter_names_in_module:
             adapter_name_to_set = None
         else:
-            adapter_name_to_set = adapter_names_in_module[0]
+            adapter_name_to_set = [adapter_names_in_module[0]]
 
         return adapter_name_to_set
 
