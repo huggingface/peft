@@ -753,7 +753,7 @@ def main(args):
             raise ValueError("xformers is not available. Make sure it is installed correctly")
 
     if args.gradient_checkpointing:
-        activation_checkpointing_enable(unet)
+        unet.enable_gradient_checkpointing()
         # below fails when using lora so commenting it out
         if args.train_text_encoder and not args.use_lora:
             activation_checkpointing_enable(text_encoder)
