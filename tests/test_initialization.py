@@ -2324,6 +2324,15 @@ class TestAdaLoraInitialization:
         with pytest.raises(ValueError, match=re.escape(msg)):
             AdaLoraConfig(target_modules=["linear"], total_step=1, orth_reg_weight=-0.5)
 
+    def test_adalora_conv2d_groups_merge_raises(self):
+        # like LoRA, the AdaLoRA adapter of a grouped Conv2d covers all input channels, so it can't be merged
+        model = nn.Sequential(nn.Conv2d(4, 8, 3, groups=2))
+        config = AdaLoraConfig(target_modules=["0"], total_step=1)
+        with pytest.warns(UserWarning, match="groups > 1. Merging is not supported"):
+            model = get_peft_model(model, config)
+        with pytest.raises(NotImplementedError, match="Merging is not supported for Conv2d layers with groups > 1"):
+            model.merge_and_unload()
+
     def get_model(self):
         class MyModule(nn.Module):
             def __init__(self):

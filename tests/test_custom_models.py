@@ -3617,12 +3617,12 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
             atol, rtol = 1e-3, 1e-3
 
-        if issubclass(config_cls, (AdaLoraConfig, LoHaConfig, LoKrConfig)) and model_id in (
+        if issubclass(config_cls, (LoHaConfig, LoKrConfig)) and model_id in (
             "Conv1dGroups",
             "Conv2dGroups",
             "Conv2dGroups2",
         ):
-            # Grouped AdaLoRA/LoHa/LoKr merges need a wider tolerance than a LoRA `B @ A` merge.
+            # Grouped LoHa/LoKr merges need a wider tolerance than a LoRA `B @ A` merge.
             atol, rtol = 1e-3, 1e-3
 
         if issubclass(config_cls, OFTConfig):
