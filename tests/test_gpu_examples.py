@@ -104,7 +104,7 @@ from peft.import_utils import (
 from peft.tuners import boft
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
-from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
+from peft.utils import SAFETENSORS_WEIGHTS_NAME, activation_checkpointing_enable, infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 from peft.utils.other import fsdp_auto_wrap_policy
 from tests.testing_utils import hub_online_once
@@ -444,7 +444,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         )
         tokenizer = AutoTokenizer.from_pretrained(model_id)
 
-        model.gradient_checkpointing_enable()
+        activation_checkpointing_enable(model)
         model = prepare_model_for_kbit_training(model)
 
         peft_config = AdaLoraConfig(
@@ -517,7 +517,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         )
         tokenizer = AutoTokenizer.from_pretrained(model_id)
 
-        model.gradient_checkpointing_enable()
+        activation_checkpointing_enable(model)
         model = prepare_model_for_kbit_training(model)
 
         peft_config = AdaLoraConfig(

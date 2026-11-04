@@ -176,7 +176,9 @@ def prepare_model_for_kbit_training(
         gradient_checkpointing_kwargs (`dict`, *optional*, defaults to `None`):
             Keyword arguments to pass to the gradient checkpointing function, please refer to the documentation of
             `torch.utils.checkpoint.checkpoint` for more details about the arguments that you can pass to that method.
-            Note this is only available in the latest transformers versions (> 4.34.1).
+            Note this is only available in the latest transformers versions (> 4.34.1). In Transfomers >= v5.23, this
+            argument was renamed to `activation_checkpointing_kwargs` but we keep the old name in PEFT for
+            compatibility.
         auto_clear_cache (`bool`, *optional*, defaults to `True`):
             Whether to empty the accelerator cache after upcasting parameters to fp32. This releases memory held by the
             caching allocator, which is especially helpful on devices that share host and accelerator memory. Set to
@@ -241,23 +243,30 @@ def prepare_model_for_kbit_training(
                 model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
 
         # To support older transformers versions, check if the model supports gradient_checkpointing_kwargs
-        _supports_gc_kwargs = "gradient_checkpointing_kwargs" in list(
-            inspect.signature(model.gradient_checkpointing_enable).parameters
-        )
 
-        if not _supports_gc_kwargs and len(gradient_checkpointing_kwargs) > 0:
-            warnings.warn(
-                "gradient_checkpointing_kwargs is not supported in this version of transformers. The passed kwargs will be ignored."
-                " if you want to use that feature, please upgrade to the latest version of transformers.",
-                FutureWarning,
+        if hasattr(model, "activation_checkpointing_enable"):
+            # enable activation checkpointing for memory efficiency; method was renamed in Transformers v5.23
+            model.activation_checkpointing_enable(activation_checkpointing_kwargs=gradient_checkpointing_kwargs)
+        else:
+            # TODO: remove once Transformers <= 4.34 is no longer supported
+            _supports_gc_kwargs = "gradient_checkpointing_kwargs" in list(
+                inspect.signature(model.gradient_checkpointing_enable).parameters
+            )
+            if not _supports_gc_kwargs and len(gradient_checkpointing_kwargs) > 0:
+                warnings.warn(
+                    "gradient_checkpointing_kwargs / activation_checkpointing_kwargs is not supported in this "
+                    "version of transformers. The passed kwargs will be ignored."
+                    " if you want to use that feature, please upgrade to the latest version of transformers.",
+                    FutureWarning,
+                )
+
+            gc_enable_kwargs = (
+                {} if not _supports_gc_kwargs else {"gradient_checkpointing_kwargs": gradient_checkpointing_kwargs}
             )
 
-        gc_enable_kwargs = (
-            {} if not _supports_gc_kwargs else {"gradient_checkpointing_kwargs": gradient_checkpointing_kwargs}
-        )
-
-        # enable gradient checkpointing for memory efficiency
-        model.gradient_checkpointing_enable(**gc_enable_kwargs)
+            # TODO: remove the whole `else` branch once Transformers < v6 no longer supported
+            # enable gradient checkpointing for memory efficiency
+            model.gradient_checkpointing_enable(**gc_enable_kwargs)
     return model
 
 

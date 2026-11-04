@@ -74,6 +74,7 @@ from peft.utils import (
     ModulesToSaveWrapper,
     TrainableTokensWrapper,
     _get_submodules,
+    activation_checkpointing_enable,
     infer_device,
 )
 
@@ -1480,7 +1481,7 @@ class PeftCommonTester:
 
             # grads with gradient checkpointing
             model.prepare_model_for_gradient_checkpointing(model)
-            model.gradient_checkpointing_enable({"use_reentrant": use_reentrant})
+            activation_checkpointing_enable(model, {"use_reentrant": use_reentrant})
 
             grads_checkpointing = get_grads()
 
