@@ -854,7 +854,7 @@ class VeloraLinearVariant(LoraVariant):
     def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
         orig_dtype = orig_weight.dtype
         delta_weight = module.get_delta_weight(active_adapter)
-        return orig_weight + delta_weight.to(orig_dtype)
+        return (orig_weight + delta_weight).to(orig_dtype)
 
     @staticmethod
     def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
@@ -864,7 +864,7 @@ class VeloraLinearVariant(LoraVariant):
     def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
         orig_dtype = orig_weight.dtype
         delta_weight = module.get_delta_weight(active_adapter)
-        return orig_weight - delta_weight.to(orig_dtype)
+        return (orig_weight - delta_weight).to(orig_dtype)
 
     @staticmethod
     def _maybe_update_embed(module: Linear, adapter_name: str, x: torch.Tensor) -> None:
@@ -1146,7 +1146,7 @@ class MontecloraLinearVariant(LoraVariant):
         """
         orig_dtype = orig_weight.dtype
         delta_weight = module.get_delta_weight(active_adapter)
-        new_weight = orig_weight + delta_weight.to(orig_dtype)
+        new_weight = (orig_weight + delta_weight).to(orig_dtype)
         return new_weight
 
     @staticmethod
@@ -1183,7 +1183,7 @@ class MontecloraLinearVariant(LoraVariant):
         """
         orig_dtype = orig_weight.dtype
         delta_weight = module.get_delta_weight(active_adapter)
-        new_weight = orig_weight - delta_weight.to(orig_dtype)
+        new_weight = (orig_weight - delta_weight).to(orig_dtype)
         return new_weight
 
     @staticmethod
