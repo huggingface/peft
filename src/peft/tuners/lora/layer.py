@@ -1569,7 +1569,7 @@ class Embedding(nn.Module, LoraLayer):
         if getattr(self.get_base_layer(), "_hf_tp_plan", None) == "embedding_colwise":
             # In the case of column-wise, embedding_A is replicated and embedding_B is shareded.
             # To be able to compute the output:
-            #   1. Convert the local embedding_A to a DTensor with Replicate placement. 
+            #   1. Convert the local embedding_A to a DTensor with Replicate placement.
             #      It does not involve any communication.
             #   2. Perform the matrix multiplication with embedding_B, which is sharded across devices.
             #   3. Gtaher the output slices to get the full output.
