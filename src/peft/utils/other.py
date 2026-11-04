@@ -866,6 +866,13 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         if adapter_name is None:
             return self.original_module
 
+        if len(adapter_name) != 1:
+            raise RuntimeError(
+                f"Something went wrong, cannot merge {adapter_name} as only exactly one adapter can be merged. "
+                "Please open an issue and report the error: https://github.com/huggingface/peft/issues."
+            )
+
+        adapter_name = adapter_name[0]  # ModulesToSaveWrapper only allows one adapter
         new_module = self.modules_to_save[adapter_name]
 
         # TODO: not sure if this is still a sensible thing to do. We would basically have to
