@@ -19,8 +19,10 @@ style:
 	ruff format $(check_dirs)
 	doc-builder style src/peft tests docs/source --max_len 119
 
+# NOTE: the test target is temporarily filtered to the merge/unmerge roundtrip test only -- this PR is not meant to be
+# merged, it is just a convenient way to run these tests in CI.
 test:
-	python -m pytest -n 3 tests/ $(if $(IS_GITHUB_CI),--report-log "ci_tests.log",)
+	python -m pytest -n 3 tests/ -k "test_merge_unmerge_restores_base_weights" $(if $(IS_GITHUB_CI),--report-log "ci_tests.log",)
 
 # Run serially on macOS to limit memory usage.
 test_macos:

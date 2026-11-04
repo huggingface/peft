@@ -25,12 +25,16 @@ from datasets import load_dataset
 
 from peft import (
     AdaLoraConfig,
+    FrodConfig,
+    HiraConfig,
     IA3Config,
     LNTuningConfig,
     LoraConfig,
     MissConfig,
+    PeanutConfig,
     PromptLearningConfig,
     TinyLoraConfig,
+    TrainableTokensConfig,
     VBLoRAConfig,
 )
 from peft.import_utils import (
@@ -317,6 +321,55 @@ def set_init_weights_false(config_cls, kwargs):
     else:
         kwargs["init_weights"] = False
     return kwargs
+
+
+def perturb_peft_adapter_weights(model, std=1.0, seed=0):
+    # Give the adapter weights a random offset, so that merging it is not an identity transform.
+    #
+    # This is used instead of `set_init_weights_false`, which asks the PEFT method for a non-identity init through the
+    # config (e.g. init_lora_weights=False). That relies on each method implementing the flag, and it says nothing
+    # about the size of the resulting merge delta. Perturbing the weights directly works the same for every method:
+    # all parameters that require grad belong to the adapter (the base model is frozen), so adding noise to them
+    # gives a non-trivial adapter that is independent of the method specific init.
+    #
+    # The perturbation is deliberately not small. With a small perturbation the merge delta can be tiny compared to
+    # the base weights, in which case adding it is exact and even a lossy merge/unmerge roundtrip restores the
+    # weights, which is exactly the artifact this helper is meant to avoid.
+    generator = torch.Generator().manual_seed(seed)
+    with torch.no_grad():
+        for _, param in model.named_parameters():
+            if not param.requires_grad or not param.is_floating_point():
+                continue
+            noise = torch.randn(param.shape, generator=generator, dtype=torch.float32) * std
+            param.add_(noise.to(device=param.device, dtype=param.dtype))
+
+
+# Merging an adapter into the base weights and unmerging it again is a lossy operation in floating point for most PEFT
+# methods: merging computes W + delta and unmerging computes W - delta again, and (W + delta) - delta is not W
+# whenever W + delta crosses a binade boundary. Methods that keep a copy of the pre-merge base weights and copy them
+# back on unmerge do restore the base weights bit for bit.
+_MERGE_UNMERGE_EXACT_CONFIGS = (FrodConfig, HiraConfig, PeanutConfig, TrainableTokensConfig)
+
+# A few parametrizations of the non-exact methods still restore the weights, but only by numerical accident: the tensors
+# involved are tiny and the merge barely changes them, so no rounding happens and the subtraction cancels out. These
+# have to be excluded from the xfail marks, otherwise the strict xfail would turn them into errors.
+_MERGE_UNMERGE_ACCIDENTALLY_EXACT = {
+    # OFT on 2D convolutions: the merge only changes 4 to 6 out of 450 entries, by about one ulp of the base weights,
+    # no matter how large the adapter weights are, so the round trip cannot lose precision here. Not an artifact of
+    # the initialization, which is why this is a fixed list instead of something the test can detect.
+    ("OFTConfig", "Conv2d 3 OFT", "float16"),
+    ("OFTConfig", "Conv2d 3 OFT", "bfloat16"),
+    ("OFTConfig", "Conv2d 5 OFT", "float16"),
+    ("OFTConfig", "Conv2d 5 OFT", "bfloat16"),
+}
+
+
+def merge_unmerge_restores_exactly(config_cls, dtype, case_name) -> bool:
+    """Whether merging and unmerging an adapter is expected to restore the base weights bit for bit."""
+    if issubclass(config_cls, _MERGE_UNMERGE_EXACT_CONFIGS):
+        return True
+    key = (config_cls.__name__, case_name, str(dtype).removeprefix("torch."))
+    return key in _MERGE_UNMERGE_ACCIDENTALLY_EXACT
 
 
 @contextmanager
