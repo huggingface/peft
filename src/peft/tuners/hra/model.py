@@ -39,7 +39,7 @@ class HRAModel(BaseTuner):
     Example:
         ```py
         >>> from diffusers import StableDiffusionPipeline
-        >>> from peft import HRAModel, HRAConfig
+        >>> from peft import HRAConfig, get_peft_model
 
         >>> config_te = HRAConfig(
         ...     r=8,
@@ -62,8 +62,8 @@ class HRAModel(BaseTuner):
         ... )
 
         >>> model = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5")
-        >>> model.text_encoder = HRAModel(model.text_encoder, config_te, "default")
-        >>> model.unet = HRAModel(model.unet, config_unet, "default")
+        >>> model.text_encoder = get_peft_model(model.text_encoder, config_te)
+        >>> model.unet = get_peft_model(model.unet, config_unet)
         ```
 
     **Attributes**:
