@@ -301,7 +301,7 @@ def get_peft_model_state_dict(
             # not needed.
             _model = model.get_base_model() if hasattr(model, "get_base_model") else model
             embedding_is_targeted = any(
-                match_target_against_key(config.target_modules, k)
+                match_target_against_key(config.target_modules, remove_torch_wrapper_names(k))
                 for k, _ in _model.named_modules()
                 if any(re.match(rf"(.*\.)?{e}$", k) for e in EMBEDDING_LAYER_NAMES)
             )
@@ -358,7 +358,7 @@ def get_peft_model_state_dict(
             if not embedding_is_targeted or has_valid_embedding_base_layer(layer):
                 embedding_module_name = get_embedding_layer_name(model, layer, embedding_is_targeted)
                 if embedding_module_name:
-                    embedding_prefix = f"{embedding_module_name}."
+                    embedding_prefix = f"{remove_torch_wrapper_names(embedding_module_name)}."
                     to_return.update({k: v for k, v in state_dict.items() if k.startswith(embedding_prefix)})
     elif save_embedding_layers:
         warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")

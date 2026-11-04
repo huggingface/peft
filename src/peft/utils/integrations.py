@@ -112,8 +112,8 @@ def get_fsdp_modules(model: nn.Module) -> list[nn.Module]:
 def remove_torch_wrapper_names(name: str) -> str:
     """Remove the names of torch's FSDP and activation checkpointing wrappers from a module or parameter name.
 
-    These wrappers add a level to the names in `named_modules()` and `named_parameters()`, at any depth of the model,
-    but their state dict hooks remove that level from the state dict keys.
+    These wrappers add a level to the names in `named_modules()` and `named_parameters()`, at any depth of the model.
+    `state_dict` keys need no clean up because the wrappers take care of it.
     """
     return ".".join(part for part in name.split(".") if part not in _TORCH_WRAPPER_NAMES)
 
