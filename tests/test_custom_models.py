@@ -1412,6 +1412,13 @@ ALL_PEFT_CONFIG_CASES = [
     next(row for row in TEST_CASES if row[2] is config_cls) for config_cls in ALL_PEFT_CONFIG_CLASSES
 ]
 
+MODULES_TO_SAVE_TEST_CASES = []
+for config_cls in ALL_PEFT_CONFIG_CLASSES:
+    for case in TEST_CASES:
+        if case[1] == "MLP" and case[2] is config_cls and case[3].get("modules_to_save"):
+            MODULES_TO_SAVE_TEST_CASES.append(case)
+            break
+
 # For this test matrix, each tuple consists of:
 # - test name
 # - tuner method
@@ -2689,6 +2696,14 @@ class TestPeftCustomModel(PeftCommonTester):
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize(
+        "test_name, model_id, config_cls, config_kwargs",
+        MODULES_TO_SAVE_TEST_CASES,
+    )
+    def test_merge_layers_modules_to_save_selection(self, test_name, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_merge_layers_multi(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
