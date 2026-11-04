@@ -42,7 +42,6 @@ Llama-Adapter may not be the best choice when:
 - Your model is not a Llama, Mistral, or GPT-2 model. Other architectures raise a `ValueError`. Consider [LoRA](./lora) instead.
 - You need zero inference overhead. The adapter cannot be merged into the base weights (`merge_and_unload()` is not supported), so each adapted layer attends over `adapter_len` additional tokens at inference time.
 - You want several adapters to be active at the same time. Only one adapter can be active, and adaption prompts cannot be stacked on the same attention module.
-- You want to pass `inference_mode=True` to `set_adapter`, which is not supported. Set `inference_mode=True` on the config instead, or load the adapter with [`~PeftModel.from_pretrained`], which loads it frozen unless `is_trainable=True` is passed.
 
 ## Benchmark overview
 
