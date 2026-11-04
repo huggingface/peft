@@ -26,6 +26,13 @@ A collection of helper functions for PEFT.
 [[autodoc]] helpers.DoraCaching
     - all
 
+## Creating a dummy LoRA configuration for hotswapping
+
+See [starting with a dummy adapter](hotswap#starting-with-a-dummy-adapter) for the workflow and command-line script.
+
+[[autodoc]] helpers.create_dummy_lora_config
+    - all
+
 ## KappaTune target selection
 
 `KappaTuneSelector` and `find_kappa_target_modules` implement a general target selection process from the [KappaTune paper](https://arxiv.org/abs/2506.16289). 
