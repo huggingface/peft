@@ -105,16 +105,26 @@ class TestShardedBaseLayerShapes:
             fully_shard(layer, mesh=mesh)
         fully_shard(model, mesh=mesh)
 
+        target_modules = [
+            "embed_tokens",
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ]
         # Inject after sharding to check shape inference from FSDP-managed base weights.
         torch.manual_seed(0)
-        model = get_peft_model(model, LoraConfig(target_modules="all-linear", init_lora_weights=False))
+        model = get_peft_model(model, LoraConfig(target_modules=target_modules, init_lora_weights=False))
 
         # Check that the LoRA adapters are not DTensors.
         # The adapters are injected after fully_shard, so they are not sharded and remain regular tensors.
         assert all(not isinstance(param, DTensor) for name, param in model.named_parameters() if "lora_" in name)
 
         torch.manual_seed(0)
-        reference = get_peft_model(reference, LoraConfig(target_modules="all-linear", init_lora_weights=False))
+        reference = get_peft_model(reference, LoraConfig(target_modules=target_modules, init_lora_weights=False))
 
         # Check that global shapes match the reference model, which is not sharded.
         shapes = {name: param.shape for name, param in model.named_parameters() if "lora_" in name}
