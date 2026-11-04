@@ -74,6 +74,7 @@ from peft import (
     WaveFTConfig,
     get_peft_model,
 )
+from peft.utils import activation_checkpointing_enable
 
 from .testing_common import PeftCommonTester, skip_non_prompt_learning
 from .testing_utils import device_count, hub_online_once, load_dataset_english_quotes, set_init_weights_false
@@ -1421,7 +1422,7 @@ class TestDecoderModels(PeftCommonTester):
             pytest.skip("Skip on multi-GPU setups")
         peft_config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
         base_model = self.transformers_class.from_pretrained(model_id)
-        base_model.gradient_checkpointing_enable()
+        activation_checkpointing_enable(base_model)
 
         try:
             model = get_peft_model(base_model, peft_config)
