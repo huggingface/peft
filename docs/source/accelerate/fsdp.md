@@ -52,20 +52,14 @@ trainer.save_model()
 
 All ranks must participate in the gather; only the main process writes the adapter files. Gathering the full state dictionary temporarily increases memory use.
 
-For inference, resize the base model's embeddings to match the tokenizer saved with the adapter. The SFT example pads the vocabulary size to a multiple of 8, including when it shrinks the original embeddings:
+For inference, load the exported adapter:
 
 ```python
 import torch
 
-from peft import PeftConfig, PeftModel
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import AutoPeftModelForCausalLM
 
-adapter_dir = "qwen-sft-lora-fsdp2"
-peft_config = PeftConfig.from_pretrained(adapter_dir)
-tokenizer = AutoTokenizer.from_pretrained(adapter_dir)
-base_model = AutoModelForCausalLM.from_pretrained(peft_config.base_model_name_or_path, dtype=torch.float32)
-base_model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
-model = PeftModel.from_pretrained(base_model, adapter_dir)
+model = AutoPeftModelForCausalLM.from_pretrained("qwen-sft-lora-fsdp2", dtype=torch.float32)
 ```
 
 ## FSDP1 with Accelerate
