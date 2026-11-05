@@ -162,7 +162,7 @@ class TestInjectAdapterFromStateDict:
     @pytest.mark.parametrize(
         "model_cls_and_id",
         [
-            (AutoModelForCausalLM, "trl-internal-testing/tiny-random-LlamaForCausalLM"),
+            (AutoModelForCausalLM, "peft-internal-testing/tiny-random-LlamaForCausalLM"),
             (AutoModel, "peft-internal-testing/tiny-random-BertModel"),
             (AutoModelForSeq2SeqLM, "peft-internal-testing/tiny-random-BartForConditionalGeneration"),
             (AutoModelForSequenceClassification, "peft-internal-testing/tiny-random-RobertaForSequenceClassification"),
@@ -505,7 +505,7 @@ class TestInjectAdapterFromStateDict:
     def test_inject_from_state_dict_compiled_model(self, compile_initial_model):
         # If we directly inject the adapter into the model from a `state_dict`, if the model is compiled, the
         # keys would not match because they contain the `'_orig_mod.'` prefix from the compilation. See #2957.
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         config = LoraConfig()
 
         with hub_online_once(model_id):

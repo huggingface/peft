@@ -34,10 +34,10 @@ from .utils import CONFIG_NAME, PeftType, TaskType
 MIN_EXPECTED_CONFIG_KEYS = {"peft_type"}
 
 # The adapter_config.json is written with sorted keys, except for the dicts stored under these keys, whose order has to
-# survive a save/load round trip. For rank_pattern and alpha_pattern, the order matters because when more than one key
-# matches a module, the first one wins. If another config argument needs its order preserved, add it here and extend
-# this comment.
-CONFIG_KEYS_WITH_PRESERVED_ORDER = {"rank_pattern", "alpha_pattern"}
+# survive a save/load round trip. For rank_pattern, alpha_pattern and paca_indices_pattern, the order matters because
+# when more than one key matches a module, the first one wins. If another config argument needs its order preserved,
+# add it here and extend this comment.
+CONFIG_KEYS_WITH_PRESERVED_ORDER = {"rank_pattern", "alpha_pattern", "paca_indices_pattern"}
 
 
 def _check_and_remove_unused_kwargs(cls, kwargs):

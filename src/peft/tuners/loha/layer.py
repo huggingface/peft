@@ -265,7 +265,7 @@ class LoHaLayer(nn.Module, LycorisLayer):
 
         return weight
 
-    def get_effective_AB(self, adapter_name: str) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_effective_AB(self, adapter_name: str, apply_rank_dropout: bool) -> tuple[torch.Tensor, torch.Tensor]:
         """Return factor-sized matrices (A, B) such that scaling * B @ A equals the 2D delta weight.
 
         This uses the Khatri-Rao identity (w1_a @ w1_b) * (w2_a @ w2_b) = face_split(w1_a, w2_a) @ khatri_rao(w1_b,
@@ -284,8 +284,8 @@ class LoHaLayer(nn.Module, LycorisLayer):
 
         # Perform rank dropout during training; masking the rows of B is equivalent to masking the rows of the delta
         # weight as done in get_delta_weight
-        rank_dropout = self.rank_dropout[adapter_name]
-        if self.training and rank_dropout:
+        if apply_rank_dropout:
+            rank_dropout = self.rank_dropout[adapter_name]
             drop = (torch.rand(B.size(0)) > rank_dropout).to(B.dtype)
             drop = drop.view(-1, 1).to(B.device)
             drop /= drop.mean()
@@ -383,40 +383,27 @@ class Conv2d(LoHaLayer):
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
+        apply_rank_dropout = self.training and bool(self.rank_dropout[adapter_name])
         base_layer = self.get_base_layer()
         if self.use_khatri_rao[adapter_name]:
             # Factored execution: the flattened delta weight is B @ A, so the delta conv splits into a conv with the
             # rows of A as kernels, followed by a 1x1 conv with B. For grouped convs, A is tiled so that the inputs of
             # each group are projected onto the same r² effective kernels.
-            A, B = self.get_effective_AB(adapter_name)
+            A, B = self.get_effective_AB(adapter_name, apply_rank_dropout=apply_rank_dropout)
             input = self._cast_input_dtype(input, A.dtype)
             groups = base_layer.groups
             weight_A = A.view(-1, *base_layer.weight.shape[1:])
             if groups > 1:
                 weight_A = weight_A.repeat(groups, 1, 1, 1)
-            hidden = F.conv2d(
-                input,
-                weight_A,
-                stride=base_layer.stride,
-                padding=base_layer.padding,
-                dilation=base_layer.dilation,
-                groups=groups,
-            )
+            # don't add bias here, because the bias is already included in the output of the base_layer
+            hidden = base_layer._conv_forward(input, weight_A, bias=None)
             weight_B = B.unsqueeze(-1).unsqueeze(-1)
             result = self.scaling[adapter_name] * F.conv2d(hidden, weight_B, groups=groups)
         else:
-            apply_rank_dropout = self.training and bool(self.rank_dropout[adapter_name])
             delta_weight = self.get_delta_weight(adapter_name, apply_rank_dropout=apply_rank_dropout)
             input = self._cast_input_dtype(input, delta_weight.dtype)
             # don't add bias here, because the bias is already included in the output of the base_layer
-            result = F.conv2d(
-                input,
-                delta_weight,
-                stride=base_layer.stride,
-                padding=base_layer.padding,
-                dilation=base_layer.dilation,
-                groups=base_layer.groups,
-            )
+            result = base_layer._conv_forward(input, delta_weight, bias=None)
         return result
 
     def __repr__(self) -> str:
@@ -446,37 +433,23 @@ class Conv1d(LoHaLayer):
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
         base_layer = self.get_base_layer()
+        apply_rank_dropout = self.training and bool(self.rank_dropout[adapter_name])
         if self.use_khatri_rao[adapter_name]:
             # Factored execution, see the comment in Conv2d._get_delta_activations
-            A, B = self.get_effective_AB(adapter_name)
+            A, B = self.get_effective_AB(adapter_name, apply_rank_dropout=apply_rank_dropout)
             input = self._cast_input_dtype(input, A.dtype)
             groups = base_layer.groups
             weight_A = A.view(-1, *base_layer.weight.shape[1:])
             if groups > 1:
                 weight_A = weight_A.repeat(groups, 1, 1)
-            hidden = F.conv1d(
-                input,
-                weight_A,
-                stride=base_layer.stride,
-                padding=base_layer.padding,
-                dilation=base_layer.dilation,
-                groups=groups,
-            )
+            hidden = base_layer._conv_forward(input, weight_A, bias=None)
             weight_B = B.unsqueeze(-1)
             result = self.scaling[adapter_name] * F.conv1d(hidden, weight_B, groups=groups)
         else:
-            apply_rank_dropout = self.training and bool(self.rank_dropout[adapter_name])
             delta_weight = self.get_delta_weight(adapter_name, apply_rank_dropout=apply_rank_dropout)
             input = self._cast_input_dtype(input, delta_weight.dtype)
             # don't add bias here, because the bias is already included in the output of the base_layer
-            result = F.conv1d(
-                input,
-                delta_weight,
-                stride=base_layer.stride,
-                padding=base_layer.padding,
-                dilation=base_layer.dilation,
-                groups=base_layer.groups,
-            )
+            result = base_layer._conv_forward(input, delta_weight, bias=None)
         return result
 
     def __repr__(self) -> str:

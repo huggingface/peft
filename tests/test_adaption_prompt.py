@@ -31,7 +31,7 @@ from .testing_utils import hub_online_once
 
 MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-gpt2",
-    "trl-internal-testing/tiny-random-LlamaForCausalLM",
+    "peft-internal-testing/tiny-random-LlamaForCausalLM",
     "hf-internal-testing/tiny-random-MistralForCausalLM",
 ]
 
