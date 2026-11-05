@@ -14,6 +14,7 @@
 
 """Shared adapter configuration and training records for the Cortex examples."""
 
+import argparse
 import hashlib
 import json
 from copy import deepcopy
@@ -24,10 +25,30 @@ import torch
 from peft import CortexConfig, LoraConfig
 
 
-def warmup_kwargs(ratio: float) -> dict:
-    """Use the warmup-ratio spelling supported by the installed Transformers."""
+def add_warmup_arguments(parser: argparse.ArgumentParser) -> None:
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--warmup-ratio", type=float, help="Fraction of optimizer steps spent on warmup (default: 0.1)")
+    group.add_argument("--warmup-steps", type=int, help="Number of warmup optimizer steps; use 0 to disable warmup")
+
+
+def validate_warmup(args, parser: argparse.ArgumentParser) -> None:
+    if args.warmup_steps is not None:
+        if args.warmup_steps < 0:
+            parser.error("--warmup-steps must be a nonnegative integer.")
+    elif args.warmup_ratio is None:
+        args.warmup_ratio = 0.1
+    elif not 0 <= args.warmup_ratio < 1:
+        parser.error("--warmup-ratio must be in [0, 1).")
+
+
+def warmup_kwargs(ratio: float | None, steps: int | None) -> dict:
+    """Map the selected warmup unit to the installed Transformers API."""
     from transformers import TrainingArguments
 
+    if steps is not None:
+        return {"warmup_steps": steps}
+
+    # Newer Transformers accepts a fraction of total steps in warmup_steps.
     if "warmup_ratio" in TrainingArguments.__dataclass_fields__:
         return {"warmup_ratio": ratio}
     return {"warmup_steps": ratio}

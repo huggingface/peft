@@ -18,14 +18,14 @@ from torch.nn import functional as F
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
-from .config import CortexConfig
+from .config import CortexConfig, CortexMoeSpec
 from .initialization import initialize_branch
-from .runtime import check_no_offload
+from .runtime import check_expert_forward, check_no_offload
 from .structure import MlpStructure
 
 
 class ExpertLinear(nn.Module):
-    """One projection per expert, stored as [E, out, in].
+    """One linear projection per expert, with weights stored as [E, out, in].
 
     Expert slices belong to one Parameter. Unselected slices receive zero gradients when another slice participates in
     the graph; standard AdamW still applies decay and existing momentum and shares its step counter across slices.
@@ -53,7 +53,12 @@ class ExpertLinear(nn.Module):
 
 
 class CortexLayer(nn.Module, BaseTunerLayer):
-    """Flat adapter storage compatible with PEFT checkpoint name handling."""
+    """Shared base for Cortex adapters on dense FFNs and packed experts.
+
+    Manages adapter projections, initialization, and merge state. Flat ModuleDicts keyed by adapter name keep parameter
+    names compatible with PEFT checkpoints. The main branch uses cortex_*; routed_public stores its additional public
+    branch in cortex_shared_*.
+    """
 
     adapter_layer_names = (
         "cortex_gate",
@@ -74,7 +79,33 @@ class CortexLayer(nn.Module, BaseTunerLayer):
         *,
         role: str = "dense",
         public_scale: float | None = None,
+        routing_args: tuple[str, str] | None = None,
+        moe_spec: CortexMoeSpec | None = None,
     ) -> None:
+        """Initialize the wrapper and its first adapter.
+
+        Args:
+            base_layer (`nn.Module`):
+                Native FFN or packed experts module to wrap.
+            adapter_name (`str`):
+                Name of the first adapter added to this wrapper.
+            config (`CortexConfig`):
+                Configuration used to create and initialize the adapter.
+            structure (`MlpStructure`):
+                Resolved FFN dimensions, projection layout, activation, and field mappings.
+            role (`str`, *optional*, defaults to `"dense"`):
+                `dense` for an ordinary FFN, `shared` for a native shared FFN, `routed` for per-expert branches,
+                `public` for a branch evaluated for every token, or `routed_public` for both routed and public
+                branches.
+            public_scale (`float`, *optional*):
+                Proven constant sum of selected routing weights, used to rescale the down projection when merging an
+                unweighted public branch. `None` means this sum has not been established.
+            routing_args (`tuple[str, str]`, *optional*):
+                Expert forward argument names in `(indices_name, weights_name)` order. For packed experts, `None`
+                resolves these names from a supported native signature.
+            moe_spec (`CortexMoeSpec`, *optional*):
+                Resolved field mapping for the enclosing MoE block, when applicable.
+        """
         super().__init__()
         self.base_layer = base_layer
         self.structure = structure
@@ -82,6 +113,10 @@ class CortexLayer(nn.Module, BaseTunerLayer):
         self.role = role
         self.per_expert = self.role in {"routed", "routed_public"}
         self.public_scale = public_scale
+        self.routing_args = routing_args
+        self.moe_spec = moe_spec
+        if structure.packed and routing_args is None:
+            self.routing_args = check_expert_forward(base_layer, type(base_layer).__name__)
         self.public_weighting = {}
         for name in self.adapter_layer_names:
             setattr(self, name, nn.ModuleDict())
@@ -97,16 +132,18 @@ class CortexLayer(nn.Module, BaseTunerLayer):
             raise ValueError(f"Adapter {adapter_name!r} already exists in this layer.")
         if self.merged:
             raise ValueError("Unmerge before adding an adapter.")
+
         self.public_weighting[adapter_name] = config.public_weighting
         width = config.k
         if self.per_expert:
             width = config.k_routed or width
         elif self.role in {"shared", "public"}:
             width = config.k_shared or width
+
         self._add_branch(adapter_name, config, width, "", self.per_expert)
         if self.role == "routed_public":
             self._add_branch(adapter_name, config, config.k_shared or config.k, "shared_", False)
-        self._move_adapter_to_device_of_base_layer(adapter_name)
+
         initialize_branch(self, adapter_name, config, per_expert=self.per_expert)
         if self.role == "routed_public":
             initialize_branch(self, adapter_name, config, prefix="shared_")
@@ -122,40 +159,62 @@ class CortexLayer(nn.Module, BaseTunerLayer):
         if self.structure.has_gate:
             dimensions["gate"] = dimensions["up"]
         for kind, dims in dimensions.items():
+            native_weight, native_bias = self._native_projection(kind)
             bias = config.adapter_bias
             if bias is None:
-                # Inspect parameter presence only, including on meta/ZeRO-sharded base layers.
-                source_kind = "gate_up" if self.structure.fused and kind in ("gate", "up") else kind
-                source = self.get_base_layer()
-                if self.structure.packed:
-                    native_bias = getattr(source, source_kind + "_proj_bias", None)
-                else:
-                    native_bias = getattr(getattr(source, source_kind + "_proj"), "bias", None)
                 bias = native_bias is not None
             layer = projection(*dims, bias=bias)
+            # A meta placeholder has no storage yet, but its dtype still describes how to load the checkpoint.
+            device = layer.weight.device if layer.weight.is_meta else native_weight.device
+            layer.to(device=device, dtype=native_weight.dtype)
             getattr(self, f"cortex_{prefix}{kind}")[name] = layer
 
-    def _get_base_layer_device_and_dtype(self, base_layer: nn.Module) -> tuple[torch.device, torch.dtype]:
-        reference = next(base_layer.parameters())
-        return reference.device, reference.dtype
+    def _native_projection(self, kind: str) -> tuple[nn.Parameter, nn.Parameter | None]:
+        # Gate and up may share a single packed parameter. Inspect its metadata without gathering ZeRO shards.
+        if self.structure.fused and kind in ("gate", "up"):
+            kind = "gate_up"
+        base = self.get_base_layer()
+        name = getattr(self.structure.ffn_spec, kind + "_proj")
+        projection = getattr(base, name)
+        if self.structure.packed:
+            return projection, getattr(base, name + "_bias", None)
+        return projection.weight, projection.bias
+
+    def _move_adapter_to_device_of_base_layer(self, adapter_name: str, device: torch.device | None = None) -> None:
+        # Called after assign=True materializes the checkpoint. The prepared adapter dtype may be FP32
+        # even when the native projection is BF16.
+        for attr in self.adapter_layer_names:
+            adapters = getattr(self, attr)
+            if adapter_name not in adapters:
+                continue
+            adapter = adapters[adapter_name]
+            if any(parameter.is_meta for parameter in adapter.parameters()):
+                continue
+            kind = attr.rsplit("_", 1)[-1]
+            weight, _ = self._native_projection(kind)
+            adapter.to(device=weight.device if device is None else device)
 
     def _branch(
         self, x: torch.Tensor, name: str, expert: int | None = None, prefix: str = "", views=None
     ) -> torch.Tensor:
         up = getattr(self, f"cortex_{prefix}up")[name]
         down = getattr(self, f"cortex_{prefix}down")[name]
-        x = self._cast_input_dtype(x, up.weight.dtype)
 
         def project(kind, projection, inputs):
             if expert is None:
                 return projection(inputs)
             return projection(inputs, expert, None if views is None else views[kind])
 
+        up_input = self._cast_input_dtype(x, up.weight.dtype)
         gate_value = None
         if self.structure.has_gate:
-            gate_value = project("gate", getattr(self, f"cortex_{prefix}gate")[name], x)
-        hidden = self.structure.activate(gate_value, project("up", up, x))
-        return project("down", down, hidden)
+            gate = getattr(self, f"cortex_{prefix}gate")[name]
+            gate_input = up_input
+            if gate.weight.dtype != up.weight.dtype:
+                gate_input = self._cast_input_dtype(x, gate.weight.dtype)
+            gate_value = project("gate", gate, gate_input)
+        hidden = self.structure.activate(gate_value, project("up", up, up_input))
+        return project("down", down, self._cast_input_dtype(hidden, down.weight.dtype))
 
     def merge_names(self, adapter_names: list[str] | None = None) -> list[str]:
         names = self.active_adapters if adapter_names is None else adapter_names
@@ -188,7 +247,7 @@ class CortexLayer(nn.Module, BaseTunerLayer):
 
         if self._merge_state is not None:
             check_no_offload(self)
-            spec = describe_mlp(self.base_layer)
+            spec = describe_mlp(self.base_layer, spec=self.structure.ffn_spec)
             components = original_components(
                 read_components(self.base_layer, spec=spec), self._merge_state["width"], self._original_down_bias
             )
@@ -213,7 +272,11 @@ class CortexLayer(nn.Module, BaseTunerLayer):
 
 
 class CortexMLP(CortexLayer):
-    """Branch inside a dense or native shared FFN, preserving outer operations."""
+    """Add Cortex branches to a dense or native shared FFN.
+
+    The native forward supplies the base output; active, unmerged adapter branches are added to it. Any auxiliary tuple
+    outputs are preserved.
+    """
 
     def forward(self, hidden_states: torch.Tensor, *args, **kwargs) -> torch.Tensor | tuple[object, ...]:
         if self.disable_adapters and self.merged:
@@ -231,11 +294,14 @@ class CortexMLP(CortexLayer):
 
 
 class CortexExperts(CortexLayer):
-    """Reference backend using original routing without per-token weight copies.
+    """Add routed and public Cortex branches using the native expert selections and weights.
 
-    Each selected expert processes its token group with ordinary linear calls. This Python loop is a correctness
-    backend, not a fused production kernel. The native base output and routed increments are accumulated separately;
-    their mathematical sum need not reproduce the floating-point rounding of a legacy combined expert forward.
+    Routed branches process each selected expert's token group and accumulate weighted increments. Public branches are
+    evaluated once for all tokens, with optional weighting by the sum of routing weights.
+
+    This reference backend uses a Python loop with ordinary linear calls, avoiding per-token weight copies. It has no
+    fused kernel. The native base output and routed increments are accumulated separately, so floating-point rounding
+    may differ from a combined expert forward.
     """
 
     def _public_branch(
@@ -252,16 +318,28 @@ class CortexExperts(CortexLayer):
     def forward(self, hidden_states: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         if self.disable_adapters and self.merged:
             self.unmerge()
-        result = self.base_layer(hidden_states, *args, **kwargs)
         names = self.merge_names()
         if self.disable_adapters or not names:
-            return result
-        indices = args[0] if args else kwargs.get("top_k_index", kwargs.get("router_indices"))
-        weights = args[1] if len(args) > 1 else kwargs.get("top_k_weights", kwargs.get("routing_weights"))
-        if hidden_states.ndim != 2 or indices is None or weights is None or indices.shape != weights.shape:
-            raise ValueError("Expected [tokens, hidden] inputs and [tokens, top_k] routing.")
-        if indices.ndim != 2 or indices.shape[0] != hidden_states.shape[0]:
-            raise ValueError("Routing indices and hidden states have inconsistent token counts.")
+            return self.base_layer(hidden_states, *args, **kwargs)
+
+        index_name, weight_name = self.routing_args
+        indices = args[0] if args else kwargs.get(index_name)
+        weights = args[1] if len(args) > 1 else kwargs.get(weight_name)
+        if not isinstance(indices, torch.Tensor) or indices.dtype not in (torch.int32, torch.int64):
+            raise ValueError("Cortex expects integer routing indices (int32 or int64).")
+        if not isinstance(weights, torch.Tensor) or not weights.is_floating_point():
+            raise ValueError("Cortex expects floating-point routing weights.")
+        if (
+            hidden_states.ndim != 2
+            or indices.ndim != 2
+            or indices.shape != weights.shape
+            or indices.shape[0] != hidden_states.shape[0]
+        ):
+            raise ValueError(
+                "Expected [tokens, hidden] inputs and matching [tokens, top_k] routing indices and weights."
+            )
+
+        result = self.base_layer(hidden_states, *args, **kwargs)
         for name in names:
             if self.per_expert:
                 delta = torch.zeros_like(result)

@@ -32,13 +32,10 @@ import torch
 import torch.nn.functional as F
 from consolidate import (
     DATASET_REPO_ID,
-    file_sha256,
     generate_answer,
-    generation_status,
     load_base,
     load_prepared_metadata,
     load_source,
-    parse_response,
     prompt_ids,
     prompt_messages,
     read_json,
@@ -54,7 +51,8 @@ from peft import PeftConfig, PeftModel
 
 # This example is also runnable directly from this subdirectory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from chat_utils import final_answer_prefix
+from chat_utils import final_answer_prefix, generation_status, parse_response
+from training_utils import file_sha256
 
 
 # Match the research CODE evaluation; top-p/top-k remain checkpoint defaults.

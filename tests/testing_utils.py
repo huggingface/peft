@@ -408,35 +408,35 @@ def require_transformers_model(kind, *, packed=False):
         pytest.skip(f"Transformers does not provide the {kind} architecture")
 
 
-def create_tiny_causal_lm(kind):
+def create_tiny_causal_lm(kind, **architecture_options):
     """Build a local random dense or MoE causal LM with eager native backends."""
     from transformers import AutoConfig, AutoModelForCausalLM
 
     require_transformers_model(kind, packed=kind in {"gpt_oss", "qwen3_moe", "mixtral", "olmoe", "gemma4_text"})
-    config = AutoConfig.for_model(
-        kind,
-        vocab_size=32,
-        hidden_size=16,
-        intermediate_size=24,
-        num_hidden_layers=2,
-        num_attention_heads=2,
-        num_key_value_heads=1,
-        head_dim=8,
-        num_experts=3,
-        num_local_experts=3,
-        num_experts_per_tok=2,
-        moe_intermediate_size=12,
-        enable_moe_block=True,
-        top_k_experts=2,
-        num_kv_shared_layers=0,
-        global_head_dim=8,
-        hidden_size_per_layer_input=0,
-        max_position_embeddings=131072 if kind == "gpt_oss" else 64,
-        pad_token_id=0,
-        bos_token_id=1,
-        eos_token_id=2,
-        tie_word_embeddings=False,
-    )
+    defaults = {
+        "vocab_size": 32,
+        "hidden_size": 16,
+        "intermediate_size": 24,
+        "num_hidden_layers": 2,
+        "num_attention_heads": 2,
+        "num_key_value_heads": 1,
+        "head_dim": 8,
+        "num_experts": 3,
+        "num_local_experts": 3,
+        "num_experts_per_tok": 2,
+        "moe_intermediate_size": 12,
+        "enable_moe_block": True,
+        "top_k_experts": 2,
+        "num_kv_shared_layers": 0,
+        "global_head_dim": 8,
+        "hidden_size_per_layer_input": 0,
+        "max_position_embeddings": 131072 if kind == "gpt_oss" else 64,
+        "pad_token_id": 0,
+        "bos_token_id": 1,
+        "eos_token_id": 2,
+        "tie_word_embeddings": False,
+    }
+    config = AutoConfig.for_model(kind, **(defaults | architecture_options))
     config._attn_implementation = "eager"
     config._experts_implementation = "eager"
     return AutoModelForCausalLM.from_config(config)

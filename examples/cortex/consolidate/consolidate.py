@@ -39,10 +39,12 @@ from peft import PeftModel, get_peft_model
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from chat_utils import generation_kwargs, generation_status, parse_response, render_messages
 from training_utils import (
+    add_warmup_arguments,
     build_adapter_config,
     file_sha256,
     initialize_adapter,
     resolve_deepspeed,
+    validate_warmup,
     warmup_kwargs,
     write_training_run,
 )
@@ -919,7 +921,7 @@ def train(args):
         save_strategy="no",
         report_to="none",
         seed=args.seed,
-        **warmup_kwargs(args.warmup_ratio),
+        **warmup_kwargs(args.warmup_ratio, args.warmup_steps),
     )
     if training_args.world_size != 1 or training_args.n_gpu > 1:
         raise ValueError("This example uses one GPU; select one with CUDA_VISIBLE_DEVICES and launch one process.")
@@ -1059,7 +1061,7 @@ def parse_args(argv=None):
         default=3072,
         help="Student prompt plus answer cap; right-truncate training only",
     )
-    parser.add_argument("--warmup-ratio", type=float, default=0.1)
+    add_warmup_arguments(parser)
     parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument("--lr-scheduler-type", choices=["constant", "linear", "cosine"], default="cosine")
     parser.add_argument("--deepspeed", default="none", help="none, zero0, or a DeepSpeed config path")
@@ -1077,6 +1079,7 @@ def parse_args(argv=None):
     parser.add_argument("--kl-weight", type=float, default=1.0)
     parser.add_argument("--mse-weight", type=float, default=1.0)
     args = parser.parse_args(argv)
+    validate_warmup(args, parser)
     if args.backend != "cortex" and (args.adapter_bias is not None or args.adapter_bias_init != "uniform"):
         parser.error("Cortex bias options require --backend cortex.")
     if args.stage == "prepare" and not args.model_name_or_path:
@@ -1101,8 +1104,8 @@ def parse_args(argv=None):
             parser.error(f"--{key.replace('_', '-')} must be positive.")
     if not math.isfinite(args.epochs) or args.epochs <= 0:
         parser.error("--epochs must be finite and positive.")
-    if not 0 <= args.warmup_ratio < 1 or not math.isfinite(args.weight_decay) or args.weight_decay < 0:
-        parser.error("Warmup ratio must be in [0, 1) and weight decay must be finite and nonnegative.")
+    if not math.isfinite(args.weight_decay) or args.weight_decay < 0:
+        parser.error("Weight decay must be finite and nonnegative.")
     if args.max_steps == 0 or args.max_steps < -1:
         parser.error("--max-steps must be -1 or a positive integer.")
     if args.teacher_top_k < 0:

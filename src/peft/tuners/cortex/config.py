@@ -20,6 +20,139 @@ from peft.config import PeftConfig
 from peft.utils import PeftType
 
 
+def _check_attribute(name: str, value: str | None, *, optional: bool = False) -> None:
+    if optional and value is None:
+        return
+    if not isinstance(value, str) or not value.isidentifier():
+        raise ValueError(f"{name} must be a direct attribute name, without dots.")
+
+
+@dataclass(frozen=True)
+class CortexFfnSpec:
+    """Describe a dense FFN or packed experts using Cortex's supported arithmetic.
+
+    This same description is used by the built-in registry and `CortexConfig.ffn_specs`. Attribute names refer to
+    direct children or parameters of the FFN. Shapes, dtypes and activation functions are checked on the actual module.
+    Changing names does not add support for a different forward computation.
+
+    Args:
+        packed (`bool`, *optional*, defaults to `False`):
+            Whether projections are three-dimensional expert parameters rather than `nn.Linear` modules.
+        has_gate (`bool`, *optional*, defaults to `True`):
+            Whether the FFN multiplies activated gate channels by up channels.
+        activation (`str`, *optional*, defaults to `"standard"`):
+            Supported arithmetic: `"standard"`, `"clipped"`, or `"offset_gated"`.
+        gate_proj (`str`, *optional*, defaults to `"gate_proj"`):
+            Gate projection attribute for separate gated projections.
+        up_proj (`str`, *optional*, defaults to `"up_proj"`):
+            Up projection attribute.
+        down_proj (`str`, *optional*, defaults to `"down_proj"`):
+            Down projection attribute.
+        gate_up_proj (`str`, *optional*, defaults to `"gate_up_proj"`):
+            Fused gate/up projection attribute, used when present. Set to `None` to require separate projections.
+            Packed projection biases use the corresponding projection name followed by `"_bias"`.
+        act_fn (`str`, *optional*, defaults to `"act_fn"`):
+            Parameter-free elementwise activation attribute.
+        width_field (`str`, *optional*, defaults to `"intermediate_size"`):
+            Field on the owning model configuration used to reconstruct this FFN's intermediate width.
+        shared_width_field (`str`, *optional*):
+            Alternative configuration field when this FFN is a native shared expert.
+        shared_multiplier (`str`, *optional*):
+            Configuration field multiplying `shared_width_field` to obtain the shared FFN's actual width.
+        width_attributes (`tuple[str, ...]`, *optional*, defaults to `("intermediate_dim", "intermediate_size")`):
+            Width attributes on the FFN itself to update during merging, when present.
+    """
+
+    packed: bool = False
+    has_gate: bool = True
+    activation: str = "standard"
+    gate_proj: str = "gate_proj"
+    up_proj: str = "up_proj"
+    down_proj: str = "down_proj"
+    gate_up_proj: str | None = "gate_up_proj"
+    act_fn: str = "act_fn"
+    width_field: str = "intermediate_size"
+    shared_width_field: str | None = None
+    shared_multiplier: str | None = None
+    width_attributes: tuple[str, ...] = ("intermediate_dim", "intermediate_size")
+
+    def __post_init__(self):
+        if type(self.packed) is not bool or type(self.has_gate) is not bool:
+            raise TypeError("packed and has_gate must be bools.")
+        if self.activation not in ("standard", "clipped", "offset_gated"):
+            raise ValueError("activation must be 'standard', 'clipped', or 'offset_gated'.")
+        if not self.has_gate and self.activation != "standard":
+            raise ValueError("Clipped and offset-gated arithmetic require has_gate=True.")
+        for name in ("gate_proj", "up_proj", "down_proj", "act_fn", "width_field"):
+            _check_attribute(name, getattr(self, name))
+        for name in ("gate_up_proj", "shared_width_field", "shared_multiplier"):
+            _check_attribute(name, getattr(self, name), optional=True)
+        if self.shared_multiplier is not None and self.shared_width_field is None:
+            raise ValueError("shared_multiplier requires shared_width_field.")
+        projections = [self.up_proj, self.down_proj]
+        if self.has_gate:
+            projections.append(self.gate_proj)
+            if self.gate_up_proj is not None:
+                projections.append(self.gate_up_proj)
+        if len(set(projections)) != len(projections) or self.act_fn in projections:
+            raise ValueError("Projection and activation attribute names must be distinct.")
+        if not isinstance(self.width_attributes, (list, tuple)):
+            raise TypeError("width_attributes must be a list or tuple of attribute names.")
+        for name in self.width_attributes:
+            _check_attribute("width_attributes", name)
+        if len(set(self.width_attributes)) != len(self.width_attributes):
+            raise ValueError("width_attributes must not contain duplicate names.")
+        if set(self.width_attributes).intersection(projections + [self.act_fn]):
+            raise ValueError("width_attributes must not overwrite projections or the activation.")
+        object.__setattr__(self, "width_attributes", tuple(self.width_attributes))
+
+
+@dataclass(frozen=True)
+class CortexMoeSpec:
+    """Describe the native MoE boundaries without replacing its router.
+
+    Args:
+        experts (`str`, *optional*, defaults to `"experts"`):
+            Direct child containing packed routed expert parameters. Describe nonstandard projection names with a
+            `CortexFfnSpec` for that child's class.
+        shared_modules (`tuple[str, ...]`, *optional*):
+            Direct child names of native shared FFNs. `None` discovers conventional names but does not establish
+            absence on a user-described block; an empty tuple explicitly declares no shared FFNs in this block.
+        enabled_attribute (`str`, *optional*):
+            Boolean attribute on the parent indicating whether its MoE path is enabled.
+        routing_indices (`str`, *optional*):
+            Expert forward argument containing selected expert IDs. Specify together with `routing_weights` when the
+            routing arguments use nonstandard names. The first argument must be named `hidden_states`, followed by
+            indices and weights, and all three must accept positional calls. This does not rename the input argument.
+        routing_weights (`str`, *optional*):
+            Expert forward argument containing weights for the selected experts. This does not declare normalization or
+            authorize merging an unweighted public branch.
+    """
+
+    experts: str = "experts"
+    shared_modules: tuple[str, ...] | None = None
+    enabled_attribute: str | None = None
+    routing_indices: str | None = None
+    routing_weights: str | None = None
+
+    def __post_init__(self):
+        _check_attribute("experts", self.experts)
+        for name in ("enabled_attribute", "routing_indices", "routing_weights"):
+            _check_attribute(name, getattr(self, name), optional=True)
+        if (self.routing_indices is None) != (self.routing_weights is None):
+            raise ValueError("Specify routing_indices and routing_weights together.")
+        if self.routing_indices is not None and self.routing_indices == self.routing_weights:
+            raise ValueError("routing_indices and routing_weights must name different arguments.")
+        if self.shared_modules is not None:
+            if not isinstance(self.shared_modules, (list, tuple)):
+                raise TypeError("shared_modules must be a list or tuple of child names, or None.")
+            for name in self.shared_modules:
+                _check_attribute("shared_modules", name)
+            if len(set(self.shared_modules)) != len(self.shared_modules) or self.experts in self.shared_modules:
+                raise ValueError("Routed and shared expert names must be distinct.")
+            object.__setattr__(self, "shared_modules", tuple(self.shared_modules))
+
+
 @dataclass
 class CortexConfig(PeftConfig):
     """Configuration for Cortex's additive FFN channels.
@@ -30,18 +163,29 @@ class CortexConfig(PeftConfig):
             low-rank matrix factorization rank.
         target_modules (`Union[list[str], set[str], str]`, *optional*):
             Complete FFN or MoE blocks to adapt. A list or set matches exact names or suffixes; a string is a full
-            regular expression. If unset, discover registered native FFN structures. Individual projections and
-            `"all-linear"` are not supported. Custom FFNs require explicit selection and a supported structure.
+            regular expression. If unset, discover native Transformers FFNs using registered layouts or standard FFN
+            and expert conventions. Cortex warns when it infers an unregistered layout. Individual projections and
+            `"all-linear"` are not supported. Custom PyTorch FFNs require explicit selection or a user-provided spec.
             Explicitly selecting an experts module selects routed branches, regardless of `moe_target`. Select its
             parent MoE block to choose branches with `moe_target`. Auto-discovery skips existing auxiliary training
             wrappers, including `modules_to_save`, and their descendants. Explicit targets cannot enter these wrappers.
         exclude_modules (`Union[list[str], set[str], str]`, *optional*):
             Blocks or resolved FFNs to exclude, using the same name-matching rules as `target_modules`.
+        ffn_specs (`dict[str, CortexFfnSpec]`, *optional*):
+            Explicit FFN descriptions keyed by class name or fully qualified class name. A qualified name takes
+            precedence. Values may also be dictionaries restored from JSON. Each value is a complete description,
+            replacing the built-in default for that class. These classes participate in automatic discovery, and their
+            descriptions also apply to unadapted FFNs that share an export width. Provide the complete model structure
+            descriptions in every adapter configuration, even when targeting different layers.
+        moe_specs (`dict[str, CortexMoeSpec]`, *optional*):
+            Explicit MoE descriptions, with the same class-name matching as `ffn_specs`. These locate routed and shared
+            branches; they do not prove routing normalization for public-branch merging.
         moe_target (`Union[str, list[str]]`, *optional*, defaults to `"shared"`):
             Which MoE branches to extend: `"routed"` adds channels to each routed expert; `"shared"` extends native
-            shared FFNs, or adds one public branch if none exist. Use `["shared", "routed"]` for both. Native shared
-            gates and normalization remain in place. Dense FFNs are unaffected. Adapters may use different selections
-            on different physical FFNs; adapters sharing a physical FFN must resolve to the same branch role.
+            shared FFNs, or adds a public branch when the layout is known to have none. If an inferred layout cannot
+            establish where the shared FFN lives, select `"routed"` or add a layout rule. Use `["shared", "routed"]`
+            for both. Native shared gates and normalization remain in place. Dense FFNs are unaffected. Adapters
+            sharing a physical FFN must resolve to the same branch role.
         public_weighting (`str`, *optional*, defaults to `"unweighted"`):
             How to weight an added public branch. `"unweighted"` adds its output directly. `"routing"` multiplies it by
             the sum of the selected native router weights, enabling merging with unnormalized top-k routing. This
@@ -86,6 +230,8 @@ class CortexConfig(PeftConfig):
     k: int = field(default=16, metadata={"help": "Intermediate width of each Cortex branch."})
     target_modules: list[str] | set[str] | str | None = field(default=None)
     exclude_modules: list[str] | set[str] | str | None = field(default=None)
+    ffn_specs: dict[str, CortexFfnSpec] = field(default_factory=dict)
+    moe_specs: dict[str, CortexMoeSpec] = field(default_factory=dict)
     moe_target: Literal["shared", "routed"] | list[str] = field(default="shared")
     public_weighting: Literal["unweighted", "routing"] = field(
         default="unweighted", metadata={"help": "Weight an added public branch by the selected routing mass."}
@@ -106,6 +252,20 @@ class CortexConfig(PeftConfig):
     def __post_init__(self):
         super().__post_init__()
         self.peft_type = PeftType.CORTEX
+        for name, spec_type in (("ffn_specs", CortexFfnSpec), ("moe_specs", CortexMoeSpec)):
+            values = getattr(self, name)
+            if not isinstance(values, dict):
+                raise TypeError(f"{name} must map class names to {spec_type.__name__} descriptions.")
+            normalized = {}
+            for key, value in values.items():
+                if not isinstance(key, str) or not key or any(not part.isidentifier() for part in key.split(".")):
+                    raise ValueError(f"{name} keys must be class names or fully qualified class names.")
+                if isinstance(value, dict):
+                    value = spec_type(**value)
+                if not isinstance(value, spec_type):
+                    raise TypeError(f"{name}[{key!r}] must be a {spec_type.__name__} or a dictionary.")
+                normalized[key] = value
+            setattr(self, name, normalized)
         for name in ("k", "k_shared", "k_routed"):
             value = getattr(self, name)
             if value is None and name != "k":

@@ -31,6 +31,8 @@ from peft import (
     C3AConfig,
     CartridgeConfig,
     CortexConfig,
+    CortexFfnSpec,
+    CortexMoeSpec,
     CPTConfig,
     DeftConfig,
     DeloraConfig,
@@ -854,4 +856,53 @@ class TestCortexConfig:
     )
     def test_invalid_initialization_config(self, kwargs):
         with pytest.raises(ValueError):
+            CortexConfig(**kwargs)
+
+    @pytest.mark.parametrize("as_dict", [False, True])
+    @pytest.mark.parametrize("shared_modules", [None, (), ("shared_branch",)])
+    def test_structure_specs_survive_json_roundtrip(self, as_dict, shared_modules, tmp_path):
+        ffn = CortexFfnSpec(
+            gate_proj="w1",
+            up_proj="w3",
+            down_proj="w2",
+            act_fn="activation",
+            width_field="ffn_channels",
+            width_attributes=("channels",),
+        )
+        moe = CortexMoeSpec(
+            experts="bank",
+            shared_modules=shared_modules,
+            routing_indices="selected_ids",
+            routing_weights="selected_weights",
+        )
+        config = CortexConfig(ffn_specs={"CustomFfn": ffn}, moe_specs={"CustomMoe": moe})
+        if as_dict:
+            config = CortexConfig(**json.loads(json.dumps(config.to_dict())))
+        config.save_pretrained(tmp_path)
+        loaded = PeftConfig.from_pretrained(tmp_path)
+
+        assert isinstance(loaded.ffn_specs["CustomFfn"], CortexFfnSpec)
+        assert isinstance(loaded.moe_specs["CustomMoe"], CortexMoeSpec)
+        assert loaded.ffn_specs["CustomFfn"] == ffn
+        assert loaded.moe_specs["CustomMoe"] == moe
+        assert loaded.moe_specs["CustomMoe"].shared_modules == shared_modules
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"ffn_specs": {"CustomFfn": {"down_proj": ""}}},
+            {"ffn_specs": {"CustomFfn": {"up_proj": "nested.up"}}},
+            {"ffn_specs": {"CustomFfn": {"packed": "yes"}}},
+            {"ffn_specs": {"CustomFfn": {"activation": "unknown"}}},
+            {"ffn_specs": {"CustomFfn": {"gate_proj": "up_proj"}}},
+            {"ffn_specs": {"CustomFfn": {"width_attributes": ["up_proj"]}}},
+            {"moe_specs": {"CustomMoe": {"experts": "common", "shared_modules": ["common"]}}},
+            {"moe_specs": {"CustomMoe": {"experts": ""}}},
+            {"moe_specs": {"CustomMoe": {"shared_modules": "common"}}},
+            {"moe_specs": {"CustomMoe": {"routing_indices": "ids"}}},
+            {"moe_specs": {"CustomMoe": {"routing": "unit"}}},
+        ],
+    )
+    def test_invalid_structure_specs_fail_at_configuration(self, kwargs):
+        with pytest.raises((TypeError, ValueError)):
             CortexConfig(**kwargs)

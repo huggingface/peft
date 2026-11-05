@@ -15,11 +15,14 @@
 """Checks for execution modes that change the audited FFN contract."""
 
 from functools import lru_cache, partial
+from inspect import Parameter, signature
 from types import CodeType
 from typing import Any
 
 from accelerate.hooks import add_hook_to_module
 from torch import nn
+
+from .config import CortexMoeSpec
 
 
 @lru_cache
@@ -57,9 +60,8 @@ def check_no_offload(model: nn.Module) -> None:
         )
 
 
-def check_moe_forward(module: nn.Module) -> None:
-    # kernels.kernelize binds a replacement forward to the instance. A decorator
-    # alone, or kernelize falling back to the native class forward, is harmless.
+def _effective_forward(module: nn.Module):
+    """Find the callable that a non-offloading Accelerate hook actually dispatches to."""
     forward = module.forward
     if (
         isinstance(forward, partial)
@@ -73,7 +75,39 @@ def check_moe_forward(module: nn.Module) -> None:
     ):
         # Follow the actual dispatch target, not __wrapped__, which is only
         # metadata and can remain native after a bypassing replacement.
-        forward = getattr(module, "_old_forward", None)
+        return getattr(module, "_old_forward", None)
+    return forward
+
+
+def check_expert_forward(module: nn.Module, path: str, moe_spec: CortexMoeSpec | None = None) -> tuple[str, str]:
+    # The registered MoE parents pass hidden states, expert IDs, and weights positionally.
+    # Verify that order once before installing any wrappers, including on checkpoint reload.
+    expected = (
+        f"Cortex expects {path}.forward to take hidden_states, routing indices and weights in that order, "
+        "with all three accepting positional arguments"
+    )
+    try:
+        sig = signature(_effective_forward(module))
+        args = sig.bind(None, None, None)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{expected}: {exc}") from exc
+
+    names = tuple(name for name in args.arguments if sig.parameters[name].kind != Parameter.VAR_POSITIONAL)
+    supported = (
+        ("hidden_states", "top_k_index", "top_k_weights"),
+        ("hidden_states", "router_indices", "routing_weights"),
+    )
+    if moe_spec is not None and moe_spec.routing_indices is not None:
+        supported = (("hidden_states", moe_spec.routing_indices, moe_spec.routing_weights),)
+    if names not in supported:
+        raise ValueError(f"{expected}; found {sig}.")
+    return names[1:]
+
+
+def check_moe_forward(module: nn.Module) -> None:
+    # kernels.kernelize binds a replacement forward to the instance. A decorator
+    # alone, or kernelize falling back to the native class forward, is harmless.
+    forward = _effective_forward(module)
     if getattr(forward, "__self__", None) is not module or getattr(forward, "__func__", None) is not _native_forward(
         type(module)
     ):

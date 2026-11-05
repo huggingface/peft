@@ -18,20 +18,65 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import torch
 from torch import nn
 from transformers import PretrainedConfig
 
+from peft.tuners.tuners_utils import _is_key_under_prefixes
 from peft.utils.other import ModulesToSaveWrapper
 
 from .runtime import check_no_offload
-from .structure import DENSE, EXPERTS, MlpStructure, describe_mlp, native_name, read_components, unwrap, width_binding
+from .structure import (
+    MlpStructure,
+    describe_mlp,
+    explicit_spec,
+    is_ffn_candidate,
+    is_moe,
+    is_registered_layout,
+    read_components,
+    resolve_moe_spec,
+    text_backbone_prefixes,
+    unwrap,
+    width_binding,
+)
 
 
 if TYPE_CHECKING:
+    from .config import CortexFfnSpec, CortexMoeSpec
     from .layer import CortexLayer
+
+
+@dataclass
+class _ExportCandidate:
+    """An FFN and its possible constructor-width bindings, before export validation."""
+
+    path: str
+    module: nn.Module
+    config: PretrainedConfig | None
+    fields: tuple[str, ...]
+    multiplier: int
+
+
+@dataclass
+class _ExportMember:
+    """A native FFN whose width must track its export group's config field."""
+
+    module: nn.Module
+    multiplier: int
+    ffn_spec: CortexFfnSpec
+
+
+@dataclass
+class _ExportGroup:
+    """The shared constructor width and all FFNs that must be padded to match it."""
+
+    config: PretrainedConfig
+    field: str
+    width: int = 0
+    members: list[_ExportMember] = field(default_factory=list)
 
 
 def unmerge_state(module: nn.Module, spec: MlpStructure) -> dict[str, Any]:
@@ -39,17 +84,13 @@ def unmerge_state(module: nn.Module, spec: MlpStructure) -> dict[str, Any]:
     attributes = [
         (
             module,
-            {
-                name: getattr(module, name)
-                for name in ("intermediate_dim", "intermediate_size")
-                if hasattr(module, name)
-            },
+            {name: getattr(module, name) for name in spec.ffn_spec.width_attributes if hasattr(module, name)},
         )
     ]
     if not spec.packed:
         kinds = ("gate_up", "down") if spec.fused else (("gate", "up", "down") if spec.has_gate else ("up", "down"))
         for kind in kinds:
-            projection = getattr(module, kind + "_proj")
+            projection = getattr(module, getattr(spec.ffn_spec, kind + "_proj"))
             attributes.append(
                 (projection, {name: getattr(projection, name) for name in ("in_features", "out_features")})
             )
@@ -100,11 +141,12 @@ def _apply_components(
         bias = key.endswith("_bias")
         if spec.transposed and not bias:
             value = value.transpose(-1, -2)
+        projection_name = getattr(spec.ffn_spec, kind + "_proj")
         if spec.packed:
-            attr = kind + "_proj" + ("_bias" if bias else "")
+            attr = projection_name + ("_bias" if bias else "")
             destination = module
         else:
-            destination = getattr(module, kind + "_proj")
+            destination = getattr(module, projection_name)
             attr = "bias" if bias else "weight"
             if not bias:
                 assignments.extend(
@@ -113,7 +155,7 @@ def _apply_components(
         original = getattr(destination, attr)
         assignments.append((destination, attr, nn.Parameter(value.to(original).contiguous(), requires_grad=False)))
     width = components["down"].shape[-1]
-    for attr in ("intermediate_dim", "intermediate_size"):
+    for attr in spec.ffn_spec.width_attributes:
         if hasattr(module, attr):
             assignments.append((module, attr, width))
     assignments.extend(attributes)
@@ -180,7 +222,7 @@ def _merge_components(
         if safe_merge and not torch.isfinite(value).all():
             raise ValueError("Non-finite values detected during safe Cortex merge.")
 
-    spec = describe_mlp(layer.base_layer)
+    spec = describe_mlp(layer.base_layer, spec=layer.structure.ffn_spec)
     original = read_components(layer.base_layer, spec=spec)
     values = dict(original)
     for value in values.values():
@@ -228,8 +270,8 @@ def merged_components(
 
 
 @torch.no_grad()
-def pad_width(module: nn.Module, width: int) -> None:
-    spec = describe_mlp(module)
+def pad_width(module: nn.Module, width: int, *, ffn_spec: CortexFfnSpec | None = None) -> None:
+    spec = describe_mlp(module, spec=ffn_spec)
     added = width - spec.intermediate_dim
     if added <= 0:
         return
@@ -244,7 +286,13 @@ def pad_width(module: nn.Module, width: int) -> None:
     _apply_components(module, values, spec=spec)
 
 
-def export_plan(model: nn.Module, adapter_names: list[str] | None) -> list[dict[str, Any]]:
+def export_plan(
+    model: nn.Module,
+    adapter_names: list[str] | None,
+    *,
+    ffn_specs: dict[str, CortexFfnSpec] | None = None,
+    moe_specs: dict[str, CortexMoeSpec] | None = None,
+) -> list[_ExportGroup]:
     """Preflight all config-coupled FFNs, including unadapted layers.
 
     Shared and routed FFNs sometimes use the same config field. Round up that field and zero-pad other members so
@@ -262,11 +310,12 @@ def export_plan(model: nn.Module, adapter_names: list[str] | None) -> list[dict[
     root_config = getattr(model, "config", None)
     serialized = {id(config): config for config in configs(root_config)}
 
-    def walk(module, path, owner):
+    def walk(module, path, owner, shared=False):
         if isinstance(module, ModulesToSaveWrapper):
-            module = (
-                module.modules_to_save[module.active_adapter] if module.active_adapters else module.original_module
-            )
+            # Plan padding for the same copy that unloading will retain.
+            selected = module.active_adapters if adapter_names is None else adapter_names
+            adapter = module.check_set_adapter(selected) if selected else None
+            module = module.modules_to_save[adapter] if adapter is not None else module.original_module
         local = getattr(unwrap(module), "config", None)
         if isinstance(local, PretrainedConfig):
             if id(local) in serialized:
@@ -278,36 +327,93 @@ def export_plan(model: nn.Module, adapter_names: list[str] | None) -> list[dict[
                 owner = candidates[0]
             # A modules_to_save deepcopy carries a private config. The native
             # constructor still obtains its dimensions from the serialized owner.
-        yield path, module, owner
+        yield path, module, owner, shared
         if isinstance(module, CortexLayer):
             return
+        shared_modules = ("shared_expert", "shared_experts")
+        if is_moe(module, moe_specs) and (
+            is_registered_layout(module) or explicit_spec(module, moe_specs) is not None
+        ):
+            shared_modules = resolve_moe_spec(module, moe_specs).shared_modules or ()
         for name, child in module.named_children():
-            yield from walk(child, f"{path}.{name}" if path else name, owner)
+            yield from walk(child, f"{path}.{name}" if path else name, owner, name in shared_modules)
 
-    groups = {}
-    for path, module, owner in walk(model, "", root_config):
+    candidates = []
+    changed_fields = set()
+    changed_configs = set()
+    text_roots = text_backbone_prefixes(model)
+    for path, module, owner, shared in walk(model, "", root_config):
         base = unwrap(module)
-        if native_name(base) not in DENSE | EXPERTS:
+        if not is_ffn_candidate(base, ffn_specs):
             continue
-        spec = describe_mlp(base)
-        config, field, multiplier = width_binding(base, path, owner)
+        if (
+            text_roots is not None
+            and not is_registered_layout(base)
+            and explicit_spec(base, ffn_specs) is None
+            and not _is_key_under_prefixes(path, text_roots)
+        ):
+            continue
+        config, fields, multiplier = width_binding(base, path, owner, ffn_specs, shared=shared)
+        candidates.append(_ExportCandidate(path, module, config, fields, multiplier))
+        if isinstance(module, CortexLayer) and (module.merged or module.merge_names(adapter_names)):
+            changed_configs.add(id(config))
+            changed_fields.update((id(config), field) for field in fields)
+
+    groups: dict[tuple[int, str], _ExportGroup] = {}
+    for candidate in candidates:
+        path, module, config = candidate.path, candidate.module, candidate.config
+        fields, multiplier = candidate.fields, candidate.multiplier
+        if id(config) not in changed_configs:
+            continue
+        if not fields:
+            # Even an untargeted sibling can depend on a width that is about to change.
+            raise ValueError(
+                f"Cannot determine export width for {path}: no conventional intermediate-width field on the "
+                "owning config. Save the adapter checkpoint or add a dedicated export rule."
+            )
+        if not any((id(config), field) in changed_fields for field in fields):
+            continue
+        if len(fields) != 1:
+            raise ValueError(
+                f"Ambiguous export width for {path}: {', '.join(fields)} could set its intermediate width. "
+                "Save the adapter checkpoint or add a dedicated export rule."
+            )
+        field = fields[0]
+        base = unwrap(module)
+        spec = describe_mlp(base, ffn_specs)
+        if not is_registered_layout(base) or explicit_spec(base, ffn_specs) is not None:
+            # A previous merge_adapter widens the tensor but leaves the serialized config unchanged.
+            original = (
+                module._merge_state["width"]
+                if isinstance(module, CortexLayer) and module.merged
+                else spec.intermediate_dim
+            )
+            if getattr(config, field, None) * multiplier != original:
+                raise ValueError(
+                    f"Cannot determine export width for {path}: expected config.{field} to match its original "
+                    f"width {original}. Save the adapter checkpoint or add a dedicated export rule."
+                )
+
         desired = spec.intermediate_dim
         if isinstance(module, CortexLayer):
             for name in module.merge_names(adapter_names):
                 desired += module.cortex_up[name].weight.shape[-2]
                 if module.role == "routed_public":
                     desired += module.cortex_shared_up[name].weight.shape[-2]
-        group = groups.setdefault((id(config), field), {"config": config, "field": field, "width": 0, "members": []})
-        group["width"] = max(group["width"], math.ceil(desired / multiplier))
-        group["members"].append((base, multiplier))
+
+        # All FFNs built from this config field must fit when the native model is reloaded.
+        group = groups.setdefault((id(config), field), _ExportGroup(config=config, field=field))
+        group.width = max(group.width, math.ceil(desired / multiplier))
+        group.members.append(_ExportMember(module=base, multiplier=multiplier, ffn_spec=spec.ffn_spec))
     return list(groups.values())
 
 
-def apply_export_plan(plan: list[dict[str, Any]]) -> None:
+def apply_export_plan(plan: list[_ExportGroup]) -> None:
     for group in plan:
-        for module, multiplier in group["members"]:
-            pad_width(module, multiplier * group["width"])
+        for member in group.members:
+            module = member.module
+            pad_width(module, member.multiplier * group.width, ffn_spec=member.ffn_spec)
             local = getattr(module, "config", None)
-            if type(local) is type(group["config"]):
-                setattr(local, group["field"], group["width"])
-        setattr(group["config"], group["field"], group["width"])
+            if type(local) is type(group.config):
+                setattr(local, group.field, group.width)
+        setattr(group.config, group.field, group.width)

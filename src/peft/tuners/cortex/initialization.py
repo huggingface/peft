@@ -51,10 +51,15 @@ def _sample_branch(layer: CortexLayer, projections: dict[str, nn.Module], per_ex
     base = layer.get_base_layer()
     # Only gather gate/up parameters. In particular, do not gather a large down
     # projection whose values are not used by sampling.
-    source_params = [p for name, p in base.named_parameters() if not name.startswith("down_proj")]
+    kinds = ("gate", "up") if layer.structure.has_gate else ("up",)
+    source_params = list(
+        dict.fromkeys(
+            parameter for kind in kinds for parameter in layer._native_projection(kind) if parameter is not None
+        )
+    )
     with gather_params_ctx(source_params, modifier_rank=None):
         _require_materialized(source_params)
-        source = read_components(base, include_down=False)
+        source = read_components(base, include_down=False, spec=layer.structure)
         spec = layer.structure
         width = projections["up"].weight.shape[-2]
         for expert in range(spec.num_experts if per_expert else 1):

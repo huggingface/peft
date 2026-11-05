@@ -39,7 +39,7 @@ from peft import CortexConfig, get_peft_model
 # This example is also runnable directly from either subdirectory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from chat_utils import tokenize_assistant_turn
-from training_utils import warmup_kwargs
+from training_utils import add_warmup_arguments, validate_warmup, warmup_kwargs
 
 
 def training_messages(row: dict) -> list[dict] | None:
@@ -133,7 +133,7 @@ def parse_args(argv=None):
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=1)
     parser.add_argument("--learning-rate", type=float, default=5e-4)
-    parser.add_argument("--warmup-ratio", type=float, default=0.1)
+    add_warmup_arguments(parser)
     parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument("--lr-scheduler-type", choices=["cosine", "linear", "constant"], default="cosine")
     parser.add_argument("--seed", type=int, default=42)
@@ -145,14 +145,15 @@ def parse_args(argv=None):
     )
     parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], default="medium")
     args = parser.parse_args(argv)
+    validate_warmup(args, parser)
     if min(args.max_train_length, args.batch_size, args.gradient_accumulation_steps) < 1:
         parser.error("Lengths, batch size, and gradient accumulation must be positive.")
     if args.max_steps != -1 and args.max_steps < 1:
         parser.error("--max-steps must be positive or -1 to use epochs.")
     if not math.isfinite(args.epochs) or args.epochs <= 0:
         parser.error("--epochs must be finite and positive.")
-    if not 0 <= args.warmup_ratio < 1 or not math.isfinite(args.weight_decay) or args.weight_decay < 0:
-        parser.error("Warmup ratio must be in [0, 1); weight decay must be finite and nonnegative.")
+    if not math.isfinite(args.weight_decay) or args.weight_decay < 0:
+        parser.error("Weight decay must be finite and nonnegative.")
     if not math.isfinite(args.learning_rate) or args.learning_rate <= 0:
         parser.error("Learning rate must be finite and positive.")
     if args.k < 1:
@@ -176,7 +177,7 @@ def main(argv=None):
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         weight_decay=args.weight_decay,
         lr_scheduler_type=args.lr_scheduler_type,
-        **warmup_kwargs(args.warmup_ratio),
+        **warmup_kwargs(args.warmup_ratio, args.warmup_steps),
         per_device_train_batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         optim="adamw_torch",

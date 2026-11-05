@@ -1873,7 +1873,7 @@ class TestCortexNativeDecoderModels:
             CortexConfig(k=3, moe_target="shared", task_type="CAUSAL_LM", exclude_modules=["model.layers.1.mlp"]),
         )
         assert sum(isinstance(m, CortexLayer) for m in model.modules()) == 1
-        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        activation_checkpointing_enable(model, {"use_reentrant": False})
         tokens = torch.randint(3, 32, (1, 5))
         model(tokens, labels=tokens, use_cache=False).loss.backward()
         first = next(m for m in model.modules() if isinstance(m, CortexLayer))
