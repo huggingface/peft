@@ -2329,6 +2329,12 @@ class TestAdaLoraInitialization:
         with pytest.raises(ValueError, match=re.escape(msg)):
             AdaLoraConfig(target_modules=["linear"], total_step=1, orth_reg_weight=-0.5)
 
+    def test_adalora_conv2d_groups_raises(self):
+        model = nn.Sequential(nn.Conv2d(4, 8, 3, groups=2))
+        config = AdaLoraConfig(target_modules=["0"], total_step=1)
+        with pytest.raises(ValueError, match="AdaLoRA does not support Conv2d layers with groups > 1"):
+            get_peft_model(model, config)
+
     def get_model(self):
         class MyModule(nn.Module):
             def __init__(self):
