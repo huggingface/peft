@@ -92,9 +92,9 @@ def _skip_if_merging_not_supported(model_id, config_cls, config_kwargs):
         pytest.skip("Test not applicable for Activated LoRA")
     if issubclass(config_cls, OSFConfig):
         pytest.skip(f"Skipping test for {model_id} with {config_cls} as OSF adapter merge/unload are not implemented.")
-    if model_id.startswith("Conv2dGroups") and (config_cls in (LoraConfig, AdaLoraConfig)):
-        # LoRA and AdaLoRA adapters on conv layers with groups>1 cover all input channels, so they can't be merged
-        pytest.skip("Merging conv layers with groups>1 is not supported for LoRA and AdaLoRA.")
+    if model_id.startswith("Conv2dGroups") and (config_cls == LoraConfig):
+        # note: right now, only LoRA supports groups>1, if other PEFT methods add support, they might also need to skip
+        pytest.skip("Merging conv layers with groups>1 and LoRA is not supported.")
     if issubclass(config_cls, LilyConfig):
         pytest.skip("Lily does not support merging adapters, skipping this test.")
     if issubclass(config_cls, ShadowConfig):

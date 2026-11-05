@@ -224,6 +224,8 @@ class SVDConv2d(nn.Module, AdaLoraLayer):
         inference_mode = config.inference_mode
         if r < 0:
             raise ValueError(f"`r` should be a positive integer or 0, but the value passed is {r}")
+        if self.get_base_layer().groups > 1:
+            raise ValueError("AdaLoRA does not support Conv2d layers with groups > 1.")
 
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
@@ -234,9 +236,6 @@ class SVDConv2d(nn.Module, AdaLoraLayer):
         self.lora_dropout[adapter_name] = lora_dropout_layer
 
         base = self.get_base_layer()
-        if base.groups > 1:
-            warnings.warn("AdaLoRA adapter added to Conv2d layer with groups > 1. Merging is not supported.")
-
         k = base.kernel_size[0] * base.kernel_size[1]
         # Right singular vectors: (r, in_channels * kH * kW)
         self.lora_A[adapter_name] = nn.Parameter(torch.randn(r, self.in_features * k))
@@ -272,10 +271,6 @@ class SVDConv2d(nn.Module, AdaLoraLayer):
         adapter_names = check_adapters_to_merge(self, adapter_names)
         if not adapter_names:
             return
-
-        base = self.get_base_layer()
-        if base.groups > 1:
-            raise NotImplementedError("Merging is not supported for Conv2d layers with groups > 1!")
 
         for active_adapter in adapter_names:
             base_layer = self.get_base_layer()
@@ -313,7 +308,7 @@ class SVDConv2d(nn.Module, AdaLoraLayer):
             * self.scaling[adapter]
             / (self.ranknum[adapter] + 1e-5)
         )
-        return delta.reshape(self.out_features, self.in_features, *self.get_base_layer().kernel_size)
+        return delta.reshape(self.get_base_layer().weight.shape)
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         if self.disable_adapters:
@@ -336,21 +331,10 @@ class SVDConv2d(nn.Module, AdaLoraLayer):
 
                 x = self._cast_input_dtype(x, lora_A.dtype)
                 base = self.get_base_layer()
-                delta_w = (lora_B @ (lora_A * lora_E) * scaling / ranknum).reshape(
-                    self.out_features, self.in_features, *base.kernel_size
-                )
-                # Like LoRA's lora_A, the adapter covers all input channels, so the convolution doesn't use groups.
-                # padding_mode is applied in the same way as in nn.Conv2d._conv_forward.
-                x_adapter = dropout(x)
-                padding = base.padding
-                if base.padding_mode != "zeros":
-                    x_adapter = nn.functional.pad(
-                        x_adapter, base._reversed_padding_repeated_twice, mode=base.padding_mode
-                    )
-                    padding = 0
+                delta_w = (lora_B @ (lora_A * lora_E) * scaling / ranknum).reshape(base.weight.shape)
                 # Use in-place add so result keeps its original dtype (matches SVDLinear);
                 # otherwise result would be upcast to lora_A.dtype and break subsequent fp16/bf16 ops.
-                result += nn.functional.conv2d(x_adapter, delta_w, None, base.stride, padding, base.dilation)
+                result += base._conv_forward(dropout(x), delta_w, None)
         return result
 
     def __repr__(self) -> str:
