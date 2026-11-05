@@ -62,6 +62,23 @@ from peft import AutoPeftModelForCausalLM
 model = AutoPeftModelForCausalLM.from_pretrained("qwen-sft-lora-fsdp2", dtype=torch.float32)
 ```
 
+If the SFT run added tokens that grew the base model's embeddings, match the training-time embedding size before loading the adapter. The SFT example pads grown embeddings to a multiple of 8:
+
+```python
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from peft import PeftConfig, PeftModel
+
+adapter_path = "qwen-sft-lora-fsdp2"
+config = PeftConfig.from_pretrained(adapter_path)
+tokenizer = AutoTokenizer.from_pretrained(adapter_path)
+base_model = AutoModelForCausalLM.from_pretrained(config.base_model_name_or_path, dtype=torch.float32)
+# Only needed if training grew the embeddings. Match the padding used by the SFT example.
+base_model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
+model = PeftModel.from_pretrained(base_model, adapter_path)
+```
+
 ## FSDP1 with Accelerate
 
 This section uses the SFT [training script](https://github.com/huggingface/peft/blob/main/examples/sft/train.py) to fine-tune Llama-70B with LoRA and FSDP1 on 8xH100 80GB GPUs on a single machine. You can scale to multiple machines by changing the Accelerate config.
