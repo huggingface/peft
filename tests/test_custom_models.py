@@ -93,6 +93,7 @@ from peft.tuners.lora.monteclora import MontecloraSampler
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
+from . import testing_common
 from .testing_common import (
     PeftCommonTester,
     _skip_if_merging_not_supported,
@@ -106,6 +107,18 @@ from .testing_utils import (
     set_init_weights_false,
 )
 from .testing_utils import create_tiny_causal_lm as tiny_model
+
+
+# Note about `save_pretrained` and `get_peft_model_state_dict`
+#
+# The base models in this file are defined locally and loaded through `MockTransformerWrapper`, so their "model ids"
+# (e.g. "MLP" or "Conv2d") are not Hub repo ids. With the default `save_embedding_layers="auto"`, saving such a model
+# makes PEFT ask the Hub whether the base model's `config.json` exists. That can never succeed for these ids, so it only
+# wastes a request (404, and rate limits when many tests save). Tests that save therefore pass
+# `save_embedding_layers=False`. Tests that save through the shared `_test_*` helpers don't have to: there,
+# `get_peft_model` has reset `base_model_name_or_path` to `None`, so `"auto"` never reaches the Hub. Saving the
+# embedding layers of custom models is covered by test_save_pretrained_targeting_lora_to_embedding_layer and its
+# variants, which pass the argument explicitly.
 
 
 def _zero_unilora_theta_d(model, adapter_name="default"):
@@ -1418,6 +1431,13 @@ ALL_PEFT_CONFIG_CASES = [
     next(row for row in TEST_CASES if row[2] is config_cls) for config_cls in ALL_PEFT_CONFIG_CLASSES
 ]
 
+MODULES_TO_SAVE_TEST_CASES = []
+for config_cls in ALL_PEFT_CONFIG_CLASSES:
+    for case in TEST_CASES:
+        if case[1] == "MLP" and case[2] is config_cls and case[3].get("modules_to_save"):
+            MODULES_TO_SAVE_TEST_CASES.append(case)
+            break
+
 # For this test matrix, each tuple consists of:
 # - test name
 # - tuner method
@@ -2583,6 +2603,14 @@ class TestPeftCustomModel(PeftCommonTester):
 
     transformers_class = MockTransformerWrapper
 
+    @pytest.fixture(autouse=True)
+    def allow_custom_models(self, monkeypatch):
+        # hub_online_once skips non-tiny models on MacOS CI runners unless is_custom_model=True is set. We want the
+        # tests in this test class to run, but the custom models are not recognized as tiny. Therefore, set
+        # is_custom_model explicitly to True. Note that this fixture is only active inside testing_common.py, so any
+        # test in this class that doesn't go through testing_common.py still must set this argument explicitly.
+        monkeypatch.setattr(testing_common, "hub_online_once", partial(hub_online_once, is_custom_model=True))
+
     def prepare_inputs_for_testing(self):
         X = torch.arange(90).view(9, 10).to(self.torch_device)
         return {"X": X}
@@ -2676,10 +2704,9 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_save_load_roundtrip_direct_injection(self, test_name, model_id, config_cls, config_kwargs):
         X = self.prepare_inputs_for_testing()
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
-        config = config_cls(
-            base_model_name_or_path=model_id,
-            **config_kwargs,
-        )
+        # Don't set base_model_name_or_path: model_id is not a Hub repo id here, so get_peft_model_state_dict would
+        # send a lookup for it to the Hub on each call, which only results in 404/429 errors.
+        config = config_cls(**config_kwargs)
 
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         torch.manual_seed(0)
@@ -2695,12 +2722,13 @@ class TestPeftCustomModel(PeftCommonTester):
         with torch.inference_mode():
             output_before = model(**X)
 
-        state_dict = get_peft_model_state_dict(model)
+        # See the note at the top of this file about `save_embedding_layers`.
+        state_dict = get_peft_model_state_dict(model, save_embedding_layers=False)
         del model
 
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         torch.manual_seed(54321)
-        model = inject_adapter_in_model(config_cls(base_model_name_or_path=model_id, **config_kwargs), model)
+        model = inject_adapter_in_model(config_cls(**config_kwargs), model)
         model.eval()
         load_result = set_peft_model_state_dict(model, state_dict)
         assert not load_result.unexpected_keys
@@ -2741,6 +2769,14 @@ class TestPeftCustomModel(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
+    @pytest.mark.parametrize(
+        "test_name, model_id, config_cls, config_kwargs",
+        MODULES_TO_SAVE_TEST_CASES,
+    )
+    def test_merge_layers_modules_to_save_selection(self, test_name, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_merge_layers_multi(model_id, config_cls, config_kwargs)
+
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
@@ -2767,7 +2803,11 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip("Merging with target_parameters is not supported for all PEFT methods.")
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
 
-        with hub_online_once(model_id):
+        # Explicitly set is_custom_model=True because the test would otherwise be skipped on MacOS CI (the model id is
+        # not detected to be 'tiny' and big models are skipped on MacOS). There is a monkey-patch fixture,
+        # allow_custom_models, which enables this. But the patch is only working inside of testing_common.py, so we need
+        # to set it explicitly here.
+        with hub_online_once(model_id, is_custom_model=True):
             base = self.transformers_class.from_pretrained(model_id)
             config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
             # Best-effort enable dropout for the various PEFT methods to check for deterministic merging.
@@ -3276,7 +3316,7 @@ class TestPeftCustomModel(PeftCommonTester):
         peft_params = [p for n, p in model.named_parameters() if model.prefix in n]
         assert all(p.dtype == expected_dtype for p in peft_params)
 
-        model.save_pretrained(tmp_path)
+        model.save_pretrained(tmp_path, save_embedding_layers=False)
         del model
 
         model = self.transformers_class.from_pretrained(model_id, dtype=dtype).to(self.torch_device)
@@ -3401,7 +3441,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # sanity check
         assert not torch.allclose(output_base, output_before, atol=atol, rtol=rtol)
 
-        model.save_pretrained(tmp_path)
+        model.save_pretrained(tmp_path, save_embedding_layers=False)
         del model
 
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
@@ -3463,7 +3503,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # is already covered in the previous test
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
-            model.save_pretrained(tmp_dirname)
+            model.save_pretrained(tmp_dirname, save_embedding_layers=False)
             model_from_pretrained = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
             params_after = get_state_dict(model_from_pretrained)
@@ -4538,7 +4578,8 @@ class TestPeftCustomModel(PeftCommonTester):
         # the default adapter.
         config0 = LoraConfig(task_type=TaskType.SEQ_CLS)
         config1 = LoraConfig(task_type=TaskType.SEQ_CLS)
-        model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
+        with hub_online_once("bert-base-uncased"):
+            model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
         model = get_peft_model(model, config0)
         # sanity check
         assert model.modules_to_save
@@ -4686,7 +4727,8 @@ class TestPeftCustomModel(PeftCommonTester):
         # module is implicitly targeted by modules_to_save twice.
         config0 = LoraConfig(task_type=TaskType.SEQ_CLS)
         config1 = LoraConfig(task_type=TaskType.SEQ_CLS)
-        model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
+        with hub_online_once("bert-base-uncased"):
+            model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
         model = get_peft_model(model, config0)
         model.add_adapter("other", config1)
 
@@ -4928,7 +4970,7 @@ class TestPeftCustomModel(PeftCommonTester):
             with open(os.path.join(tmp_dirname, "README.md"), "w") as f:
                 f.write(text)
 
-            model.save_pretrained(tmp_dirname)
+            model.save_pretrained(tmp_dirname, save_embedding_layers=False)
             with open(os.path.join(tmp_dirname, "README.md")) as f:
                 model_card = f.read()
 
@@ -4943,7 +4985,7 @@ class TestPeftCustomModel(PeftCommonTester):
         model = get_peft_model(model, config)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
-            model.save_pretrained(tmp_dirname)
+            model.save_pretrained(tmp_dirname, save_embedding_layers=False)
             with open(os.path.join(tmp_dirname, "README.md")) as f:
                 model_card = f.read()
 
@@ -4951,6 +4993,8 @@ class TestPeftCustomModel(PeftCommonTester):
         # rough check that the model card is pre-filled
         assert len(model_card) > 1000
 
+    # The tests below are the ones that cover `save_embedding_layers` for custom models, so unlike the other tests in
+    # this file (see the note at the top), they pass values other than `False` explicitly.
     @pytest.mark.parametrize("save_embedding_layers", ["auto", True, False])
     @pytest.mark.parametrize(
         "peft_config",
@@ -5020,7 +5064,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # note: not using the context manager here because it fails on Windows CI for some reason
         tmp_dirname = tempfile.mkdtemp()
         try:
-            model.save_pretrained(tmp_dirname)
+            model.save_pretrained(tmp_dirname, save_embedding_layers=False)
             model = ModelEmbConv1D(emb_size=105)
 
             # first check that this raises
@@ -5078,7 +5122,7 @@ class TestPeftCustomModel(PeftCommonTester):
         config = LoraConfig(target_modules=["linear"], modules_to_save=["norm"])
         model = get_peft_model(ModelWithBatchNorm(), config)
         model.base_model.model.norm.modules_to_save["default"].num_batches_tracked.fill_(7)
-        model.save_pretrained(tmp_path)
+        model.save_pretrained(tmp_path, save_embedding_layers=False)
         state_dict = safe_load_file(tmp_path / "adapter_model.safetensors")
         assert state_dict["base_model.model.norm.num_batches_tracked"].ndim == 0
 
@@ -5158,7 +5202,8 @@ class TestPeftCustomModel(PeftCommonTester):
 
     def test_gpt2_dora_merge_and_unload(self):
         # see https://github.com/huggingface/peft/pull/1588#discussion_r1537914207
-        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        with hub_online_once("gpt2"):
+            model = AutoModelForCausalLM.from_pretrained("gpt2")
         config = LoraConfig(task_type="CAUSAL_LM", use_dora=True)
         model = get_peft_model(model, config)
         # should not raise an error
@@ -5166,7 +5211,8 @@ class TestPeftCustomModel(PeftCommonTester):
 
     def test_gpt2_dora_merge_and_unload_safe_merge(self):
         # see https://github.com/huggingface/peft/pull/1588#discussion_r1537914207
-        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        with hub_online_once("gpt2"):
+            model = AutoModelForCausalLM.from_pretrained("gpt2")
         config = LoraConfig(task_type="CAUSAL_LM", use_dora=True)
         model = get_peft_model(model, config)
         # should not raise an error
@@ -5184,7 +5230,8 @@ class TestPeftCustomModel(PeftCommonTester):
         # Here we test the refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a ModuleDict
         # with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer. Since we want the
         # state_dict format not to change, we ensure that the ".weight" part of the key is removed.
-        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
+        with hub_online_once("peft-internal-testing/opt-125m"):
+            model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         config = LoraConfig(task_type="CAUSAL_LM", use_dora=True)
         model = get_peft_model(model, config)
         state_dict = model.state_dict()
@@ -5202,9 +5249,10 @@ class TestPeftCustomModel(PeftCommonTester):
             assert not any("lora_magnitude_vector.weight" in k for k in state_dict_adapter)
 
             del model
-            loaded = PeftModel.from_pretrained(
-                AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m"), tmp_dirname
-            )
+            with hub_online_once("peft-internal-testing/opt-125m"):
+                loaded = PeftModel.from_pretrained(
+                    AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m"), tmp_dirname
+                )
         finally:
             try:
                 shutil.rmtree(tmp_dirname)
@@ -5303,7 +5351,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # they are not adjusted.
         config = LoraConfig(target_modules=["mha"], init_lora_weights=False)
         model = get_peft_model(ModelMha(), config)
-        model.save_pretrained(tmp_path / "old")
+        model.save_pretrained(tmp_path / "old", save_embedding_layers=False)
 
         config_path = tmp_path / "old" / "adapter_config.json"
         config_dict = json.loads(config_path.read_text())
@@ -5319,7 +5367,7 @@ class TestPeftCustomModel(PeftCommonTester):
         assert torch.allclose(lora_B_loaded, factor * lora_B)
 
         # saving and loading the adapter again must not double the weight a second time
-        loaded.save_pretrained(tmp_path / "new")
+        loaded.save_pretrained(tmp_path / "new", save_embedding_layers=False)
         reloaded = PeftModel.from_pretrained(ModelMha(), tmp_path / "new")
         lora_B_reloaded = reloaded.base_model.model.mha.base_layer.out_proj.lora_B["default"].weight
         assert torch.allclose(lora_B_reloaded, lora_B_loaded)
@@ -5775,6 +5823,35 @@ class TestMultipleActiveAdapters:
             disabled_adapter_output = peft_model(**X)
 
         assert torch.allclose(disabled_adapter_output, base_output, atol=1e-4)
+
+    def test_oft_merge_multiple_active_adapters_matches_forward(self):
+        # OFT rotations compose in the opposite order on the weight than on the input, so merging
+        # multiple adapters must reverse their order.
+        torch.manual_seed(0)
+        model = MLP().to(self.torch_device).eval()
+        X = self.prepare_inputs_for_testing()
+
+        def config():
+            return OFTConfig(target_modules=["lin0"], r=2, oft_block_size=0, init_weights=False)
+
+        peft_model = get_peft_model(model, config(), adapter_name="adapter_1").eval()
+        peft_model.add_adapter("adapter_2", config())
+        self.set_multiple_active_adapters(peft_model, ["adapter_1", "adapter_2"])
+
+        with torch.inference_mode():
+            expected = peft_model(**X)
+
+        peft_model.merge_adapter()
+        with torch.inference_mode():
+            assert torch.allclose(peft_model(**X), expected, atol=1e-4)
+
+        peft_model.unmerge_adapter()
+        with torch.inference_mode():
+            assert torch.allclose(peft_model(**X), expected, atol=1e-4)
+
+        merged_model = peft_model.merge_and_unload()
+        with torch.inference_mode():
+            assert torch.allclose(merged_model(**X), expected, atol=1e-4)
 
     @pytest.mark.parametrize(
         "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
@@ -7860,7 +7937,7 @@ class TestRequiresGrad:
             config = config_cls(target_modules=["emb"], token_indices=[0, 2, 4])
 
         model = get_peft_model(model, config)
-        model.save_pretrained(tmp_path)
+        model.save_pretrained(tmp_path, save_embedding_layers=False)
         del model
 
         model = _deep_mlp_for_config(config_cls)
@@ -7871,6 +7948,7 @@ class TestRequiresGrad:
         if is_trainable:
             for name, param in model.named_parameters():
                 if skip_ranknum and "ranknum" in name:
+                    assert not param.requires_grad
                     continue
                 if ".default" in name:
                     assert param.requires_grad
@@ -7926,7 +8004,7 @@ class TestRequiresGrad:
     def test_loading_adapter_preserves_custom_requires_grad(self, tmp_path):
         config = LoraConfig(target_modules=["layers.0.lin0"])
         source_model = get_peft_model(DeepMLP(size=256), config)
-        source_model.save_pretrained(tmp_path)
+        source_model.save_pretrained(tmp_path, save_embedding_layers=False)
 
         model = get_peft_model(DeepMLP(size=256), config)
         # Emulate a user fine-tuning one base-model weight while intentionally freezing one adapter parameter.
@@ -7958,7 +8036,7 @@ class TestRequiresGrad:
         # targeting the different modules with modules_to_save:
         config = config_cls(target_modules=["layers.0.lin0"], modules_to_save=["layers.0.lin1"], **extra_kwargs)
         model = get_peft_model(model, config)
-        model.save_pretrained(tmp_path)
+        model.save_pretrained(tmp_path, save_embedding_layers=False)
         del model
 
         model = _deep_mlp_for_config(config_cls)
@@ -8000,7 +8078,7 @@ class TestRequiresGrad:
         # targeting the same modules with modules_to_save:
         config = LoraConfig(target_modules=["lin0"], trainable_token_indices={"emb": [0]})
         model = get_peft_model(model, config)
-        model.save_pretrained(tmp_path)
+        model.save_pretrained(tmp_path, save_embedding_layers=False)
         del model
 
         model = ModelEmbConv1D()
@@ -8026,6 +8104,54 @@ class TestRequiresGrad:
                     assert not param.requires_grad
         else:
             assert all(not p.requires_grad for p in model.parameters())
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    @pytest.mark.parametrize(
+        "low_cpu_mem_usage", [False, True], ids=["low_cpu_mem_usage=False", "low_cpu_mem_usage=True"]
+    )
+    @pytest.mark.parametrize(
+        "autocast_adapter_dtype", [False, True], ids=["autocast_adapter_dtype=False", "autocast_adapter_dtype=True"]
+    )
+    def test_loading_model_requires_grad_set_correctly_moving_parameters(
+        self, test_name, model_id, config_cls, config_kwargs, low_cpu_mem_usage, autocast_adapter_dtype
+    ):
+        # Ensure that the requires_grad attribute of the model parameters is not affected by possible
+        # movement/recreation of the parameters. To be more concrete, there was a bug before that
+        # _move_adapter_to_device_of_base_layer and cast_adapter_dtype would reassign parameters if the device or dtype
+        # were changed. This leads to the creation and registration of a new nn.Parameter in PyTorch, which by default
+        # has requires_grad=True, no matter what the previous value was. This can be triggered by changing the device or
+        # the dtype. As CI always runs on CPU, we trigger this via the dtype in this test. We test low_cpu_mem_usage and
+        # autocast_adapter_dtype, as they can affect the movement/creation of adapters.
+        if model_id != "MLP":
+            pytest.skip("Running this test only for MLP")
+
+        model = MLP()
+        config = config_cls(**config_kwargs)
+        model = get_peft_model(model, config)
+
+        requires_grad_before = {name: param.requires_grad for name, param in model.named_parameters()}
+        is_monteclora = config_kwargs.get("monteclora_config", None) is not None
+        if is_monteclora and low_cpu_mem_usage:
+            # When using MonteCLoRA with low_cpu_mem_usage, the sampler creation is deferred until after the first forward
+            requires_grad_before = {k: v for k, v in requires_grad_before.items() if "prior" not in k}
+
+        del model
+
+        model = MLP().half()  # <= this is needed to trigger recreation of the parameter
+        config = config_cls(**config_kwargs)
+        model = get_peft_model(
+            model, config, low_cpu_mem_usage=low_cpu_mem_usage, autocast_adapter_dtype=autocast_adapter_dtype
+        )
+
+        requires_grad_after = {name: param.requires_grad for name, param in model.named_parameters()}
+        del model
+
+        assert requires_grad_before.keys() == requires_grad_after.keys()
+        for key, val_before in requires_grad_before.items():
+            val_after = requires_grad_after[key]
+            assert val_before is val_after, (
+                f"requires_grad changed from {val_before} to {val_after} on {key} for {test_name}"
+            )
 
 
 # this is for PEFT methods that support mixed adapter batches.
@@ -8436,9 +8562,10 @@ class TestMixedAdapterBatches:
             toc = time.perf_counter()
             logs.append(toc - tic)
 
-        base_model = (
-            AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m").to(self.torch_device).eval()
-        )
+        with hub_online_once("peft-internal-testing/opt-125m"):
+            base_model = (
+                AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m").to(self.torch_device).eval()
+            )
         inputs = {"input_ids": torch.randint(0, 1000, (16, 64)).to(self.torch_device)}
         with timed():
             output_base = base_model(**inputs).logits
@@ -8609,7 +8736,7 @@ class TestDynamicDispatch:
         outputs_before = peft_model(inputs)  # does not raise
 
         sd_before = peft_model.state_dict()
-        peft_model.save_pretrained(tmp_path / "lora-custom-module")
+        peft_model.save_pretrained(tmp_path / "lora-custom-module", save_embedding_layers=False)
         del model, peft_model
 
         torch.manual_seed(0)  # same seed for base model
@@ -8636,7 +8763,8 @@ class TestDynamicDispatch:
     def test_override_lora_linear(self, custom_lora_cls):
         # in this test, we check if users can override default PEFT behavior by supplying a custom lora class that is
         # being used instead of lora.Linear
-        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
+        with hub_online_once("peft-internal-testing/opt-125m"):
+            model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         config = LoraConfig(task_type=TaskType.CAUSAL_LM)
         config._register_custom_module({nn.Linear: custom_lora_cls})
         peft_model = get_peft_model(model, config)
@@ -8827,7 +8955,7 @@ class TestPeftFsdpStateDict:
         with torch.no_grad():
             output_before = model(**X)
 
-        state_dict = get_peft_model_state_dict(model)
+        state_dict = get_peft_model_state_dict(model, save_embedding_layers=False)
         del model
 
         torch.manual_seed(0)
@@ -8886,7 +9014,7 @@ class TestPeftFsdpStateDict:
         with torch.no_grad():
             output_before = model(**X)
 
-        state_dict = get_peft_model_state_dict(model)
+        state_dict = get_peft_model_state_dict(model, save_embedding_layers=False)
         del model
 
         torch.manual_seed(0)
@@ -8956,6 +9084,48 @@ class TestFsdp2UnshardedParams:
                 param.grad = None
             model(X).sum().backward()
             assert all(param.grad is not None for param in lora_params)
+
+    @pytest.mark.parametrize("reshard_after_forward", [False, None])
+    def test_disable_adapter_after_forward_keeps_unsharded_params(self, reshard_after_forward):
+        # A reference pass between the forward and the backward runs on the parameters that the forward left
+        # registered, so exiting the context doesn't reshard and the backward reuses them, see #3800.
+        model = self.get_model(reshard_after_forward=reshard_after_forward)
+        X = self.get_input()
+        lora_params = self.get_lora_params(model)
+
+        output = model(X)
+        registered_params = dict(model.named_parameters())
+        with torch.no_grad(), model.disable_adapter():
+            model(X)
+        assert all(param is registered_params[name] for name, param in model.named_parameters())
+
+        output.sum().backward()
+        assert all(param.grad is not None for param in lora_params)
+
+        # The backward resharded the FSDP modules, so the next forward unshards them again and the new unsharded
+        # parameters take `requires_grad` from the shards. Clearing the gradients checks that this step trains the
+        # adapters too, i.e. that skipping the reshard on exit didn't leave the shards frozen.
+        for param in lora_params:
+            param.grad = None
+        model(X).sum().backward()
+        assert all(param.grad is not None for param in lora_params)
+
+    @pytest.mark.parametrize("adapter_name, requires_grad", [("default", False), ("other", True)])
+    def test_disable_adapter_after_forward_sets_requires_grad_on_shards(self, adapter_name, requires_grad):
+        # Exiting the context makes the active adapter trainable and the others frozen, as without FSDP. If that
+        # changes `requires_grad`, it has to reach the shards while the unsharded parameters are registered, see #3800.
+        model = self.get_model(adapter_names=("default", "other"))
+        X = self.get_input()
+        default_params = self.get_lora_params(model, "default")
+        other_params = self.get_lora_params(model, "other")
+
+        model.set_requires_grad(adapter_name, requires_grad=requires_grad)
+        with torch.no_grad():
+            model(X)
+        with torch.no_grad(), model.disable_adapter():
+            model(X)
+        assert all(param.requires_grad for param in default_params)
+        assert not any(param.requires_grad for param in other_params)
 
     def test_set_requires_grad_after_forward(self):
         model = self.get_model()
