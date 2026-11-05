@@ -28,6 +28,7 @@ from peft.utils import (
     ModulesToSaveWrapper,
     _freeze_adapter,
     _get_submodules,
+    _is_valid_match,
 )
 
 from .layer import Conv2d, Conv3d, IA3Layer, Linear
@@ -189,7 +190,8 @@ class IA3Model(BaseTuner):
         if isinstance(ia3_config.feedforward_modules, str):
             is_feedforward = bool(re.fullmatch(ia3_config.feedforward_modules, key))
         else:
-            is_feedforward = any(key.endswith(target_key) for target_key in ia3_config.feedforward_modules)
+            # Same rule as target_modules: exact name or a "."-separated suffix, so "fc" does not match "not_fc".
+            is_feedforward = any(_is_valid_match(key, target_key) for target_key in ia3_config.feedforward_modules)
         return is_feedforward
 
     @staticmethod
