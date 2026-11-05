@@ -187,12 +187,12 @@ class Linear(nn.Module, ShiraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.set_base_weight(orig_weight)
+                    self.set_base_weight(orig_weight, context="merge")
                 else:
                     orig_weight = self.get_base_weight()
                     delta_weight = self.get_delta_weight(active_adapter)
                     orig_weight += delta_weight
-                    self.set_base_weight(orig_weight)
+                    self.set_base_weight(orig_weight, context="merge")
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -205,7 +205,7 @@ class Linear(nn.Module, ShiraLayer):
             if active_adapter in self.shira_weight.keys():
                 orig_weight = self.get_base_weight()
                 orig_weight -= self.get_delta_weight(active_adapter)
-                self.set_base_weight(orig_weight)
+                self.set_base_weight(orig_weight, context="unmerge")
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
