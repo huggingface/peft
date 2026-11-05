@@ -173,24 +173,25 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     This function covers a broad range of layers, some of which the caller might not support. Therefore, just because
     this function returns a valid result does not imply that the layer type is supported.
     """
-    if isinstance(module, nn.Linear):
+    if isinstance(module, (nn.Linear, nn.Embedding)):
+        if isinstance(module, nn.Embedding):
+            in_features, out_features = module.num_embeddings, module.embedding_dim
+        else:
+            in_features, out_features = module.in_features, module.out_features
         if _torch_supports_distributed and isinstance(module.weight, torch.distributed.tensor.DTensor):
             # Transformers TP initializes full-shaped adapters and shards them with the TP hooks afterwards.
             # Without a Transformers TP plan, only registered TP mesh dimensions use the local shard shape.
-            # All other meshes use the full shape, as FSDP2 gathers the base weight before the projection.
+            # All other meshes use the full shape, as FSDP2 gathers the base weight before the forward.
             has_tp_dim = any(
                 TpMeshDimRegistry.is_registered(name) for name in module.weight.device_mesh.mesh_dim_names or ()
             )
             if has_tp_dim and getattr(module, "_hf_tp_plan", None) is None:
-                out_features, in_features = module.weight.to_local().shape
-            else:
-                in_features, out_features = module.in_features, module.out_features
-        else:
-            in_features, out_features = module.in_features, module.out_features
+                if isinstance(module, nn.Embedding):
+                    in_features, out_features = module.weight.to_local().shape
+                else:
+                    out_features, in_features = module.weight.to_local().shape
     elif isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
         in_features, out_features = module.in_channels, module.out_channels
-    elif isinstance(module, nn.Embedding):
-        in_features, out_features = module.num_embeddings, module.embedding_dim
     elif isinstance(module, Conv1D):
         in_features, out_features = (
             module.weight.ds_shape if hasattr(module.weight, "ds_shape") else module.weight.shape

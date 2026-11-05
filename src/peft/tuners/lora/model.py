@@ -389,7 +389,7 @@ class LoraModel(BaseTuner):
                     add_tensor_parallel_hooks_to_module,
                 )
 
-            _SUPPORTED_TP_PLANS = ("colwise", "rowwise", "embedding_rowwise")
+            _SUPPORTED_TP_PLANS = ("colwise", "rowwise", "embedding_rowwise", "embedding_colwise")
 
             if tp_plan == "colwise_gather_output" and is_transformers_dtensor_tp:
                 # The input and output of the base layer (e.g. lm_head) are replicated, so the LoRA layers are
@@ -429,7 +429,7 @@ class LoraModel(BaseTuner):
                             tp_layer_name,
                             device_mesh,
                         )
-                else:  # embedding_rowwise
+                elif tp_plan == "embedding_rowwise":
                     # TP hooks are  handled in the `_embed` method in lora/layer.py where they are explicitly called.
                     # Here we simply register the TP plans.
                     tp_plan_keys.append(f"{generic_key}.base_layer.weight")
