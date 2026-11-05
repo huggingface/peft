@@ -1041,34 +1041,15 @@ class PeftCommonTester:
         # method is, however, exact by nature, this limitation does not exist and checks need to be skipped.
         natively_exact_methods: list[str] = ["FROD", "HIRA", "PEANUT", "TRAINABLE_TOKENS"]
 
+        def get_base_state_dict(model):
+            sd = get_base_model_state_dict(model)
+            # need to clone, or else the values change after merge
+            return {k: v.detach().clone() for k, v in sd.items()}
+
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
             model = model.to(device=self.torch_device, dtype=dtype)
             model = get_peft_model(model, config_cls(**config_kwargs), autocast_adapter_dtype=autocast_adapter_dtype)
-            prefix = model.prefix
-
-            def get_base_state_dict(model):
-                # helper to filter for base weights and normalize keys
-                sd = model.state_dict()
-                to_return = {}
-                for k, v in sd.items():
-                    if f".{prefix}" in k:
-                        continue
-                    if ".modules_to_save" in k:
-                        continue
-                    if ".trainable_token" in k:
-                        continue
-                    k = k.removeprefix("base_model.model.")
-
-                    for infix in (".base_layer", ".original_module", ".token_adapter"):
-                        for param in (".weight", ".bias"):
-                            suffix = f"{infix}{param}"
-                            if k.endswith(suffix):
-                                k = k.removesuffix(suffix) + param
-
-                    to_return[k] = v.clone()
-                return to_return
-
             sd_before = get_base_state_dict(model)
             assert sd_before  # ensure it's not empty
             self.perturb_trainable_token_weights_if_used(model, config_kwargs)
@@ -1134,9 +1115,9 @@ class PeftCommonTester:
             # it's possible to merge multiple adapters exactly
             model = self.transformers_class.from_pretrained(model_id)
             model = model.to(device=self.torch_device, dtype=dtype)
+            model = get_peft_model(model, config_cls(**config_kwargs), autocast_adapter_dtype=autocast_adapter_dtype)
             sd_before = get_base_state_dict(model)
             assert sd_before  # ensure it's not empty
-            model = get_peft_model(model, config_cls(**config_kwargs), autocast_adapter_dtype=autocast_adapter_dtype)
             self.perturb_trainable_token_weights_if_used(model, config_kwargs)
 
             model.add_adapter("other", config_cls(**config_kwargs), autocast_adapter_dtype=autocast_adapter_dtype)
