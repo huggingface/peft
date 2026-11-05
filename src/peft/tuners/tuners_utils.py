@@ -761,6 +761,13 @@ class BaseTuner(nn.Module, ABC):
         if hasattr(self.model, "peft_config"):
             del self.model.peft_config
 
+        # The tuner also keeps its own copy of the configs. Leaving that copy behind makes the model advertise
+        # adapters whose layers no longer exist, which sends `load_adapter` down the "adapter already exists" path
+        # and makes it skip the injection step, so the weights end up nowhere and the model silently keeps
+        # returning the base model's output.
+        if hasattr(self, "peft_config"):
+            self.peft_config = {}
+
         # If embeddings have diverged (e.g. after vocab resize), fix config to match actual state.
         if merge:
             model_config = self.get_model_config(self.model)

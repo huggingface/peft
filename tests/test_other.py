@@ -1245,3 +1245,53 @@ class TestInferDevice:
 
         monkeypatch.setattr(_FakeAccelerator, "is_available", staticmethod(lambda: False))
         assert infer_device() == "cpu"
+
+
+class TestLoadAdapterAfterUnload:
+    """Loading an adapter into an unloaded model has to re-inject the adapter layers.
+
+    `unload()` removes the tuner layers and restores the original modules. The adapter bookkeeping on the tuner
+    wrapper has to be cleared alongside them: as long as it still listed an adapter, `load_adapter` took the "adapter
+    already exists" branch, skipped `add_adapter` (the only step that injects the layers), and loaded the weights into
+    a model that had no adapter parameters left. There is no error and no warning, and the model keeps returning the
+    base model's output.
+    """
+
+    @pytest.fixture
+    def mlp(self):
+        class MLP(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(8, 8)
+                self.lin1 = nn.Linear(8, 8)
+
+            def forward(self, x):
+                return self.lin1(self.lin0(x))
+
+        torch.manual_seed(0)
+        return MLP()
+
+    def test_load_adapter_after_unload(self, mlp, tmp_path):
+        base = copy.deepcopy(mlp)
+        x = torch.randn(4, 8)
+        out_base = base(x)
+
+        model = get_peft_model(mlp, LoraConfig(target_modules=["lin0"]), adapter_name="original")
+        with torch.no_grad():
+            for name, param in model.named_parameters():
+                if ".original." in name:
+                    param.normal_(0, 0.1)
+        out_adapter = model(x)
+        assert not torch.allclose(out_adapter, out_base, atol=1e-6)
+
+        model.save_pretrained(tmp_path)
+        adapter_dir = tmp_path / "original" if (tmp_path / "original").is_dir() else tmp_path
+
+        model.unload()
+        # all adapter layers are gone, so the model must not keep advertising adapters
+        assert model.peft_config == {}
+
+        # loading an adapter again has to actually restore it
+        model.load_adapter(adapter_dir, adapter_name="original")
+        model.set_adapter("original")
+        assert torch.allclose(model(x), out_adapter, atol=1e-6)
