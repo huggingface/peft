@@ -341,13 +341,13 @@ class Linear(LoHaLayer):
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
+        apply_rank_dropout = self.training and bool(self.rank_dropout[adapter_name])
         if self.use_khatri_rao[adapter_name]:
             # factored execution as a rank r² LoRA, the full delta weight is never materialized
-            A, B = self.get_effective_AB(adapter_name)
+            A, B = self.get_effective_AB(adapter_name, apply_rank_dropout=apply_rank_dropout)
             input = self._cast_input_dtype(input, A.dtype)
             result = self.scaling[adapter_name] * F.linear(F.linear(input, A), B)
         else:
-            apply_rank_dropout = self.training and bool(self.rank_dropout[adapter_name])
             delta_weight = self.get_delta_weight(adapter_name, apply_rank_dropout=apply_rank_dropout)
             input = self._cast_input_dtype(input, delta_weight.dtype)
             # don't add bias here, because the bias is already included in the output of the base_layer
@@ -383,8 +383,8 @@ class Conv2d(LoHaLayer):
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
-        apply_rank_dropout = self.training and bool(self.rank_dropout[adapter_name])
         base_layer = self.get_base_layer()
+        apply_rank_dropout = self.training and bool(self.rank_dropout[adapter_name])
         if self.use_khatri_rao[adapter_name]:
             # Factored execution: the flattened delta weight is B @ A, so the delta conv splits into a conv with the
             # rows of A as kernels, followed by a 1x1 conv with B. For grouped convs, A is tiled so that the inputs of
