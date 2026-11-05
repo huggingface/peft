@@ -2718,9 +2718,11 @@ class TestPeftCustomModel(PeftCommonTester):
         [{"dtype": torch.float64}, {"device": "meta"}],
         ids=["dtype", "device"],
     )
-    def test_merge_layers_conversion(self, test_name, model_id, config_cls, config_kwargs, conversion_kwargs):
+    def test_merge_layers_dtype_device_conversion(
+        self, test_name, model_id, config_cls, config_kwargs, conversion_kwargs
+    ):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
-        self._test_merge_layers_conversion(model_id, config_cls, config_kwargs, conversion_kwargs)
+        self._test_merge_layers_dtype_device_conversion(model_id, config_cls, config_kwargs, conversion_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_load_state_dict(self, test_name, model_id, config_cls, config_kwargs):

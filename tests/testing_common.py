@@ -896,7 +896,7 @@ class PeftCommonTester:
                 assert not torch.allclose(logits_merged_all, logits_adapter_2, atol=atol, rtol=rtol)
                 assert not torch.allclose(logits_merged_all, logits_adapter_1, atol=atol, rtol=rtol)
 
-    def _test_merge_layers_conversion(self, model_id, config_cls, config_kwargs, conversion_kwargs):
+    def _test_merge_layers_dtype_device_conversion(self, model_id, config_cls, config_kwargs, conversion_kwargs):
         # Checks that after a merge, all expected state dict items are present and have the correct dtype and
         # device. This could for instance be an issue when not correctly handled by LoRA's MHA layer.
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
