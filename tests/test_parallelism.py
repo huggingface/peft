@@ -51,7 +51,7 @@ class TestShardedBaseLayerShapes:
             2. There is no Transformers TP plan, in which case the adapters are initialized with the sharded shape.
     """
 
-    model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+    model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
 
     @pytest.fixture
     def cache_model(self, monkeypatch):
