@@ -100,6 +100,27 @@ class TestShardedBaseLayerShapes:
             torch.testing.assert_close(model(input_ids=input_ids).logits, reference(input_ids=input_ids).logits)
 
     @staticmethod
+    def fully_shard_lora_mha_preserves_parameter_identity():
+        # LoRA MHA's _restore_weights() recreated parameters even when they were already registered, meaning that
+        # separate module traversals could return different parameter objects. FSDP2 tracks those objects by identity,
+        # and replacing them could prevent it from matching its tracked parameters to the module tree.
+        from torch.distributed.fsdp import fully_shard
+
+        mesh = init_device_mesh("cpu", (2,))
+        model = nn.Sequential(nn.MultiheadAttention(8, 2))
+        model = get_peft_model(model, LoraConfig(target_modules=["0"]))
+
+        # FSDP2 matches parameters across traversals; restoring registered MHA weights must preserve their identities.
+        fully_shard(model, mesh=mesh)
+        sharded_params = dict(model.named_parameters())
+        assert all(isinstance(param, DTensor) for param in sharded_params.values())
+
+        model.state_dict()
+        params_after = dict(model.named_parameters())
+        assert params_after.keys() == sharded_params.keys()
+        assert all(param is sharded_params[name] for name, param in params_after.items())
+
+    @staticmethod
     def parallelize_module_lora_shapes(mesh_dim_name, register_mesh_dim, expected_features):
         if register_mesh_dim:
             # The spawned process only runs this check, so the change doesn't reach other tests
@@ -161,6 +182,9 @@ class TestShardedBaseLayerShapes:
     @pytest.mark.usefixtures("cache_model")
     def test_fully_shard_lora_shapes(self, tmp_path, mesh_shape, mesh_dim_names):
         self._spawn(tmp_path, self.fully_shard_lora_shapes, self.model_id, mesh_shape, mesh_dim_names)
+
+    def test_fully_shard_lora_mha_preserves_parameter_identity(self, tmp_path):
+        self._spawn(tmp_path, self.fully_shard_lora_mha_preserves_parameter_identity)
 
     # Registered TP dimensions use local shapes (10 features); other dimensions use full shapes (20).
     @pytest.mark.parametrize(
