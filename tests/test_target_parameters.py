@@ -163,13 +163,7 @@ class MyAutoModelForCausalLM(AutoModelForCausalLM):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(*args, **kwargs)
 
-        # check that we load the original model, not, say, a trained checkpoint
-        if args[0] == "peft-internal-testing/tiny-Llama4ForCausalLM":
-            # model contains weights with values ~1e36 or nan, so we need to reinitialize with sane values
-            with torch.no_grad():
-                for param in model.parameters():
-                    param.data = torch.randn(param.shape)
-        elif args[0] == "trl-internal-testing/tiny-GptOssForCausalLM":
+        if args[0] == "trl-internal-testing/tiny-GptOssForCausalLM":
             # model is bf16, which trips up some tests that require tight tolerances
             with torch.no_grad():
                 model.float()
