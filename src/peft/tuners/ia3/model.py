@@ -189,7 +189,9 @@ class IA3Model(BaseTuner):
         if isinstance(ia3_config.feedforward_modules, str):
             is_feedforward = bool(re.fullmatch(ia3_config.feedforward_modules, key))
         else:
-            is_feedforward = any(key.endswith(target_key) for target_key in ia3_config.feedforward_modules)
+            is_feedforward = any(
+    key == target_key or key.endswith(f".{target_key}") for target_key in ia3_config.feedforward_modules
+)
         return is_feedforward
 
     @staticmethod
