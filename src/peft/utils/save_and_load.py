@@ -240,11 +240,7 @@ def get_peft_model_state_dict(
 
         # If the keys in the state dict start with the prefix, we need to add the prefix to the keys in the tp plan as
         # well.
-        prefix = (
-            "base_model."
-            if isinstance(model, PeftModel) and model.active_peft_config.is_prompt_learning
-            else "base_model.model."
-        )
+        prefix = "base_model." if isinstance(model, PeftModel) and model.is_prompt_learning else "base_model.model."
         keys_starting_with_prefix = all(k.startswith(prefix) for k in state_dict)
         tp_plan = tp_info.tp_plan
         if keys_starting_with_prefix:
@@ -966,7 +962,7 @@ def get_base_model_state_dict(model) -> dict[str, torch.Tensor]:
     """
     # For prompt learning methods the base model structure is not modified, so the state
     # dict already uses the original keys and contains no adapter-injected parameters.
-    if model._is_prompt_learning:
+    if model.is_prompt_learning:
         return dict(model.base_model.state_dict())
 
     state_dict = model.base_model.model.state_dict()
@@ -1007,7 +1003,7 @@ def set_base_model_state_dict(
 
     # For prompt learning methods the base model structure is not modified, so the state
     # dict already uses the original keys and contains no adapter-injected parameters.
-    if model._is_prompt_learning:
+    if model.is_prompt_learning:
         return model.base_model.load_state_dict(state_dict, strict=strict)
 
     current_state_dict = model.base_model.model.state_dict()

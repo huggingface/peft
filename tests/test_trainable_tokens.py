@@ -674,6 +674,24 @@ class TestTrainableTokens:
         assert not torch.allclose(emb_image_orig[:, [0, 1]], emb_image_peft[:, [0, 1]])
         assert torch.allclose(emb_image_orig[:, [2]], emb_image_peft[:, [2]])
 
+    @pytest.mark.parametrize("other_indices, supported", [([1], False), ([2], True)])
+    def test_multiple_active_adapters_capability(self, other_indices, supported):
+        model = get_peft_model(ModelEmb(), TrainableTokensConfig(token_indices=[0, 1]))
+        model.add_adapter("other", TrainableTokensConfig(token_indices=other_indices))
+        assert model.base_model.supports_multiple_active_adapters(["default", "other"]) is supported
+        if supported:
+            model.set_adapter(["default", "other"])
+            assert torch.isfinite(model(torch.tensor([[0, 1, 2]]))).all()
+            model.merge_adapter()  # does not raise
+            model.unmerge_adapter()
+            model.merge_and_unload()  # merges active ones by default, does not raise
+        else:
+            with pytest.raises(ValueError, match="does not support"):
+                model.set_adapter(["default", "other"])
+            assert model.active_adapters == ["default"]
+            with pytest.raises(ValueError, match="Only disjunct token indices are currently supported"):
+                model.merge_adapter(["default", "other"])
+
     @pytest.fixture(params=[["default"], ["other"], ["default", "other"]])
     def disjoint_adapters(self, model_multi_embedding, request):
         active_adapters = request.param
@@ -683,7 +701,7 @@ class TestTrainableTokens:
         model.add_adapter("other", TrainableTokensConfig(target_modules=["emb_image"], token_indices=[0, 1]))
         self.simulate_training(model.model.emb_text)
         self.simulate_training(model.model.emb_image, "other")
-        model.base_model.set_adapter(active_adapters)
+        model.set_adapter(active_adapters)
 
         inputs = {"x_text": torch.tensor([[0, 1, 2]]), "x_image": torch.tensor([[0, 1, 2]])}
         return model, original_model, inputs
@@ -992,6 +1010,38 @@ class TestTrainableTokens:
 
         # make sure that deltas are applied to the embedding matrix
         assert torch.allclose(merged_model.model.embed_tokens.weight.data[token_indices], expected_changed_weights)
+
+    @pytest.mark.parametrize(
+        "active_adapter, adapter_names",
+        [
+            ("default", ["other"]),
+            ("default", []),
+            ("other", ["other", "default"]),
+        ],
+    )
+    def test_merge_and_unload_save_partial_selection(self, model, active_adapter, adapter_names):
+        # See #4085, which only treated modules_to_save
+        # Only "default" has trainable tokens. Unloading must follow adapter_names rather than the active adapter:
+        # ["other"] and [] restore the original embedding, while ["other", "default"] retains the trainable tokens..
+
+        original_emb = model.model.embed_tokens.weight.detach().clone()
+        peft_config = LoraConfig(trainable_token_indices={"embed_tokens": [0, 1, 3]})
+        model = get_peft_model(model, peft_config)
+        # perturb to get a difference to the base model
+        model.base_model.model.model.embed_tokens.token_adapter.trainable_tokens_delta.default.data.add_(10.0)
+        model.merge_adapter()
+        merged_emb = model.base_model.model.model.embed_tokens.weight.detach().clone()
+        # sanity check
+        atol, rtol = 1e-4, 1e-4
+        assert not torch.allclose(original_emb, merged_emb, atol=atol, rtol=rtol)
+
+        model.unmerge_adapter()
+        model.add_adapter("other", LoraConfig())
+
+        expected_emb = merged_emb if "default" in adapter_names else original_emb
+        model.set_adapter(active_adapter)
+        merged = model.merge_and_unload(adapter_names=adapter_names)
+        assert torch.allclose(merged.model.embed_tokens.weight, expected_emb, atol=atol, rtol=rtol)
 
     def test_original_module_not_in_state_dict(self, model):
         # Every AuxiliaryTrainingWrapper has an original_module attribute. Since the TrainableTokensWrapper is wrapping
