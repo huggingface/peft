@@ -42,6 +42,35 @@ In principle, LoRA can be applied to any subset of weight matrices in a neural n
 
 You can initialize the low-rank matrices with different use-cases in mind - task awareness (CorDA, EVA, Astra), faster convergence (PiSSA), mitigating quantizations (LoftQ) - just to name a few use-cases. Read about the different initializations [below](#initialization). The default initialization is for LoRA to be a no-op, to gradually learn new behavior without interfering much with the existing model.
 
+## Best use cases
+
+LoRA is a strong default choice for most parameter-efficient fine-tuning scenarios. It is particularly well-suited for:
+
+- **Instruction tuning and chat adaptation** — fine-tuning a base model to follow instructions or adopt a conversational style.
+- **Domain adaptation** — adapting a general-purpose model to a specific domain (medical, legal, code, etc.) without retraining from scratch.
+- **Multi-task serving** — training many lightweight task-specific adapters on top of a single frozen base model, then hot-swapping between them at inference time.
+- **Diffusion model fine-tuning** — LoRA is the most popular method for fine-tuning Stable Diffusion and other diffusion models due to its efficiency and quality.
+- **QLoRA-style quantized training** — combining LoRA with 4-bit quantization to fine-tune very large models on limited GPU memory.
+- **Continual learning** — adding new capabilities via new adapters without forgetting previously learned tasks.
+
+## Pros
+
+* **Parameter efficiency** — reduces trainable parameters by up to 10,000× compared to full fine-tuning, making it feasible to train on consumer hardware.
+* **No inference latency** — adapter weights can be merged into the base model, resulting in zero overhead at inference time.
+* **Portable adapters** — a single frozen base model can host many small task-specific adapters (often only a few MB each), simplifying deployment and sharing.
+* **Composability** — LoRA is orthogonal to many other PEFT methods and can be combined with them (e.g., DoRA, PiSSA, LoftQ).
+* **Strong performance** — matches or exceeds full fine-tuning quality on many benchmarks while using far fewer resources.
+* **Broad ecosystem** — the most widely adopted PEFT method with extensive community support, pre-trained adapters, and tooling integrations.
+* **Versatile** — works across model types including causal LMs, sequence classification, token classification, and diffusion models.
+
+## Cons
+
+* **Hyperparameter sensitivity** — performance depends on choosing appropriate `r`, `lora_alpha`, and `target_modules`, which may require experimentation.
+* **Capacity ceiling** — very low ranks may not capture complex task adaptations; increasing rank improves capacity but also increases memory and compute.
+* **MoE overhead** — applying LoRA to mixture-of-expert layers can introduce significant inference-time overhead due to per-expert materialization.
+* **Version dependencies** — some advanced features (e.g., Tensor Parallelism) require recent versions of `transformers` and `peft`.
+* **Not always optimal** — for some tasks, full fine-tuning or other PEFT methods (e.g., IA3 for minimal parameter count, AdaLoRA for adaptive budget allocation) may yield better results.
+
 ## Usage
 
 The size of the low-rank update matrices is determined by the *rank* or `r`. A higher rank means the model has more parameters to train, but it also means the model has more learning capacity. In the following example, you'll target the *query* and *value* matrices of the attention blocks. Other important parameters to set are `lora_alpha` (scaling factor), `bias` (whether `none`, `all` or only the LoRA bias parameters should be trained), and `modules_to_save` (the modules apart from the LoRA layers to be trained and saved). All of these parameters - and more - are found in the [`LoraConfig`].
