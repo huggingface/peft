@@ -14,7 +14,7 @@
 
 from .constants import ALLOWED_COMPUTE_DTYPES, UPCAST_DTYPES
 from .error import NoMatchingPeftModuleError, PeftError
-from .integrations import map_cache_to_layer_device_map
+from .integrations import activation_checkpointing_enable, is_activation_checkpointing, map_cache_to_layer_device_map
 from .loftq_utils import replace_lora_weights_loftq
 from .other import (
     CONFIG_NAME,
@@ -150,6 +150,7 @@ __all__ = [
     "_prepare_prompt_learning_config",
     "_set_adapter",
     "_set_trainable",
+    "activation_checkpointing_enable",
     "bloom_model_postprocess_past_key_value",
     "cast_mixed_precision_params",
     "get_base_model_state_dict",
@@ -159,6 +160,7 @@ __all__ = [
     "get_quantization_kwargs",
     "id_tensor_storage",
     "infer_device",
+    "is_activation_checkpointing",
     "load_peft_weights",
     "map_cache_to_layer_device_map",
     "prepare_model_for_kbit_training",
