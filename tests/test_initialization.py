@@ -7888,7 +7888,7 @@ class TestLohaInitialization:
         config = LoHaConfig(target_modules=["lin0", "lin1"], init_weights=False, use_khatri_rao=True)
         model = get_peft_model(self.get_mlp().to(self.torch_device), config).eval()
         for layer in [model.base_model.model.lin0, model.base_model.model.lin1]:
-            A, B = layer.get_effective_AB("default")
+            A, B = layer.get_effective_AB("default", apply_rank_dropout=False)
             delta_weight = layer.get_delta_weight("default")
             assert torch.allclose(layer.scaling["default"] * (B @ A), delta_weight, atol=1e-6, rtol=1e-6)
 
@@ -7918,15 +7918,15 @@ class TestLohaInitialization:
         layer = model.base_model.model.lin0
 
         layer.train()
-        _, B_1 = layer.get_effective_AB("default")
-        _, B_2 = layer.get_effective_AB("default")
+        _, B_1 = layer.get_effective_AB("default", apply_rank_dropout=True)
+        _, B_2 = layer.get_effective_AB("default", apply_rank_dropout=True)
         # rank dropout fully masks random rows of B, so two draws should differ
         assert (B_1 == 0).all(dim=1).any()
         assert not torch.allclose(B_1, B_2)
 
-        layer.eval()
-        _, B_1 = layer.get_effective_AB("default")
-        _, B_2 = layer.get_effective_AB("default")
+        # without rank dropout, the two draws should identical
+        _, B_1 = layer.get_effective_AB("default", apply_rank_dropout=False)
+        _, B_2 = layer.get_effective_AB("default", apply_rank_dropout=False)
         assert torch.allclose(B_1, B_2)
 
     def test_get_effective_AB_raises_for_tucker(self):
@@ -7936,7 +7936,7 @@ class TestLohaInitialization:
         layer = model.base_model.model.conv2d
         msg = "get_effective_AB does not support the Tucker decomposition"
         with pytest.raises(ValueError, match=msg):
-            layer.get_effective_AB("default")
+            layer.get_effective_AB("default", apply_rank_dropout=False)
 
     def test_use_khatri_rao_resolved_per_layer(self):
         # the conv2d layer uses the Tucker decomposition, so only lin0 uses the factored path

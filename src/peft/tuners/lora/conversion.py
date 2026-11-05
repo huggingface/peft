@@ -111,7 +111,7 @@ def _convert_loha_module_to_lora(module, adapter_name: str = "default") -> tuple
     Via the Khatri-Rao identity, the LoHa delta weight is exactly a rank r² LoRA, so the exact factors are returned
     directly without SVD and without materializing the delta weight. The effective rank is r².
     """
-    A, B = module.get_effective_AB(adapter_name)
+    A, B = module.get_effective_AB(adapter_name, apply_rank_dropout=False)
     lora_A = A.contiguous()
     lora_B = (module.scaling[adapter_name] * B).contiguous()
     return lora_A, lora_B, lora_A.shape[0]
