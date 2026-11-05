@@ -441,9 +441,9 @@ class TestEncoderDecoderModels(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
-    def test_load_adapter_no_warning(self, model_id, config_cls, config_kwargs):
+    def test_load_adapter_no_warning(self, model_id, config_cls, config_kwargs, recwarn, tmp_path):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
-        self._test_load_no_warning(model_id, config_cls, config_kwargs)
+        self._test_load_no_warning(model_id, config_cls, config_kwargs, recwarn, tmp_path)
 
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)

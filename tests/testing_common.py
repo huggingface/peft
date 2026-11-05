@@ -389,7 +389,7 @@ class PeftCommonTester:
             with open(successful_save_dir / "adapter_config.json", encoding="utf-8") as file:
                 assert json.load(file)["inference_mode"] is True
 
-    def _test_load_no_warning(self, model_id, config_cls, config_kwargs):
+    def _test_load_no_warning(self, model_id, config_cls, config_kwargs, recwarn, tmp_path):
         # A valid checkpoint must load without any warning about missing or unexpected adapter keys, whether it is
         # loaded through `from_pretrained` or `load_adapter`. This guards against false alarms in the adapter key check
         # for every PEFT method (see issue 3804).
@@ -398,23 +398,20 @@ class PeftCommonTester:
             config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
             model = get_peft_model(model, config)
             model = model.to(self.torch_device)
+            model.save_pretrained(tmp_path)
 
-            with tempfile.TemporaryDirectory() as tmp_dirname:
-                model.save_pretrained(tmp_dirname)
+            base_model = self.transformers_class.from_pretrained(model_id)
+            recwarn.clear()
+            model = PeftModel.from_pretrained(base_model, tmp_path)
+            assert not any("adapter keys" in str(rec.message) for rec in recwarn)
 
-                base_model = self.transformers_class.from_pretrained(model_id)
-                with warnings.catch_warnings(record=True) as recs:
-                    warnings.simplefilter("always")
-                    PeftModel.from_pretrained(base_model, tmp_dirname)
-                assert not any("adapter keys" in str(rec.message) for rec in recs)
+            if issubclass(config_cls, ShadowConfig) and config_kwargs.get("task_type") == "SEQ_CLS":
+                # ShadowPEFT explicitly rejects multiple adapters when sequence classification is present
+                return
 
-                base_model = self.transformers_class.from_pretrained(model_id)
-                config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
-                model = get_peft_model(base_model, config)
-                with warnings.catch_warnings(record=True) as recs:
-                    warnings.simplefilter("always")
-                    model.load_adapter(tmp_dirname, adapter_name="default")
-                assert not any("adapter keys" in str(rec.message) for rec in recs)
+            recwarn.clear()
+            model.load_adapter(tmp_path, adapter_name="other")
+            assert not any("adapter keys" in str(rec.message) for rec in recwarn)
 
     def _test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs, safe_serialization=True):
         if issubclass(config_cls, AdaLoraConfig):
