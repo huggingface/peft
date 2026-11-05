@@ -32,10 +32,15 @@ from safetensors.torch import load_file, save_file
 
 from peft import (
     AdaLoraConfig,
+    BeftConfig,
     BOFTConfig,
+    C3AConfig,
     CPTConfig,
+    DeloraConfig,
+    GloraConfig,
     GraloraConfig,
     HiraConfig,
+    HRAConfig,
     IA3Config,
     LilyConfig,
     LNTuningConfig,
@@ -43,15 +48,20 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     MissConfig,
+    OFTConfig,
     OSFConfig,
+    PacaConfig,
     PeftModel,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptLearningConfig,
     PromptTuningConfig,
+    PsoftConfig,
     PveraConfig,
     RoadConfig,
     ShadowConfig,
+    ShiraConfig,
+    SupertuningConfig,
     TrainableTokensConfig,
     UniLoraConfig,
     VBLoRAConfig,
@@ -75,10 +85,32 @@ from peft.utils import (
     ModulesToSaveWrapper,
     TrainableTokensWrapper,
     _get_submodules,
+    activation_checkpointing_enable,
     infer_device,
 )
 
 from .testing_utils import get_state_dict, hub_online_once
+
+
+# PEFT methods that don't support transformers' Conv1D layers (used by GPT2)
+CONV1D_UNSUPPORTED_CONFIGS = (
+    BeftConfig,
+    BOFTConfig,
+    C3AConfig,
+    DeloraConfig,
+    GloraConfig,
+    HRAConfig,
+    LoHaConfig,
+    LoKrConfig,
+    MissConfig,
+    OFTConfig,
+    OSFConfig,
+    PacaConfig,
+    PsoftConfig,
+    RoadConfig,
+    ShiraConfig,
+    SupertuningConfig,
+)
 
 
 def skip_non_prompt_learning(config_cls):
@@ -111,7 +143,7 @@ def _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs):
     if "gpt2" not in model_id.lower():
         return
 
-    if config_cls not in (IA3Config, LoHaConfig, LoKrConfig, LoraConfig):
+    if config_cls in CONV1D_UNSUPPORTED_CONFIGS:
         pytest.skip("This PEFT method does not support Conv1D layers, skipping this test.")
 
 
@@ -803,6 +835,11 @@ class PeftCommonTester:
 
             torch.manual_seed(1)
             model.add_adapter("adapter-2", config)
+            # Saved modules must differ so exporting an inactive adapter also checks which copy is retained.
+            for module in model.modules():
+                if isinstance(module, ModulesToSaveWrapper):
+                    for parameter in module.modules_to_save["adapter-2"].parameters():
+                        torch.nn.init.normal_(parameter, std=0.1)
             model.set_adapter("adapter-2")
             model.eval()
 
@@ -831,14 +868,6 @@ class PeftCommonTester:
 
             model_copy = copy.deepcopy(model)
             model_copy_2 = copy.deepcopy(model)
-            model_merged_all = model.merge_and_unload(adapter_names=["adapter-2", "default"])
-
-            with torch.inference_mode():
-                logits_merged_all = model_merged_all(**dummy_input)[0]
-
-            assert not torch.allclose(logits_merged_all, logits_adapter_2, atol=atol, rtol=rtol)
-            assert not torch.allclose(logits_merged_all, logits_adapter_1, atol=atol, rtol=rtol)
-
             model_merged_adapter_2 = model_copy.merge_and_unload(adapter_names=["adapter-2"])
 
             with torch.inference_mode():
@@ -852,6 +881,17 @@ class PeftCommonTester:
                 logits_merged_adapter_default = model_merged_adapter_default(**dummy_input)[0]
 
             assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=atol, rtol=rtol)
+
+            if any(isinstance(module, ModulesToSaveWrapper) for module in model.modules()):
+                with pytest.raises(ValueError, match="Only one adapter"):
+                    model.merge_and_unload(adapter_names=["adapter-2", "default"])
+            else:
+                model_merged_all = model.merge_and_unload(adapter_names=["adapter-2", "default"])
+                with torch.inference_mode():
+                    logits_merged_all = model_merged_all(**dummy_input)[0]
+
+                assert not torch.allclose(logits_merged_all, logits_adapter_2, atol=atol, rtol=rtol)
+                assert not torch.allclose(logits_merged_all, logits_adapter_1, atol=atol, rtol=rtol)
 
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
@@ -910,7 +950,7 @@ class PeftCommonTester:
             if self.torch_device in ["mlu"]:
                 atol, rtol = 1e-3, 1e-3  # MLU
 
-            conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
+            conv_ids = ["Conv2d", "Conv3d", "Conv3d1x1", "Conv2d2"]
             if (
                 issubclass(config_cls, (IA3Config, LoraConfig, HiraConfig)) and model_id in conv_ids
             ):  # more instability with Conv
@@ -1572,7 +1612,7 @@ class PeftCommonTester:
 
             # grads with gradient checkpointing
             model.prepare_model_for_gradient_checkpointing(model)
-            model.gradient_checkpointing_enable({"use_reentrant": use_reentrant})
+            activation_checkpointing_enable(model, {"use_reentrant": use_reentrant})
 
             grads_checkpointing = get_grads()
 

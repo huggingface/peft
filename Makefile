@@ -1,6 +1,8 @@
-.PHONY: quality style test docs
+.PHONY: quality style test test_macos docs
 
 check_dirs := src tests examples docs scripts docker
+SHARDS ?= 1
+SHARD ?= 1
 
 # Check that source code meets quality standards
 
@@ -20,6 +22,11 @@ style:
 test:
 	python -m pytest tests/test_custom_models.py -n3 $(if $(IS_GITHUB_CI),--report-log "ci_tests.log",)
 	python -m pytest tests/ -k "exact_merge" $(if $(IS_GITHUB_CI),--report-log "ci_tests.log",)
+
+# Run serially on macOS to limit memory usage.
+test_macos:
+	python -u -m pytest --no-cov -rs tests/ \
+		--splits $(SHARDS) --group $(SHARD) --splitting-algorithm least_duration
 
 tests_examples_multi_gpu:
 	python -m pytest -m multi_gpu_tests tests/test_gpu_examples.py $(if $(IS_GITHUB_CI),--report-log "multi_gpu_examples.log",)

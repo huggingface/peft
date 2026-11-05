@@ -28,15 +28,17 @@ from peft.utils.constants import DUMMY_MODEL_CONFIG
 from .config import PeftConfig
 from .peft_model import PeftModel
 from .tuners import MixedModel
-from .utils import _set_adapter, _set_trainable
+from .utils import _set_adapter, _set_trainable, is_activation_checkpointing
 
 
 def _prepare_model_for_gradient_checkpointing(model: nn.Module) -> None:
     r"""
     Prepares the model for gradient checkpointing if necessary
+
+    Note: In newer Transformers versions, this is called 'activation checkpointing'.
     """
     # Note: same as PeftModel._prepare_model_for_gradient_checkpointing
-    if not getattr(model, "is_gradient_checkpointing", True):
+    if not is_activation_checkpointing(model, default=True):
         return model
 
     if not (
