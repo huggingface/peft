@@ -1064,7 +1064,10 @@ class BaseTuner(nn.Module, ABC):
                 # None of the targeted modules matched
                 error_msg = (
                     f"Target modules {peft_config.target_modules} not found in the base model. "
-                    f"Please check the target modules and try again."
+                    f"Please check the target modules and try again. "
+                    f"Note that target module patterns are matched against the full module name "
+                    f"using `re.fullmatch`, so a pattern must match the entire name "
+                    f"(or use a regex that accounts for the full path)."
                 )
                 if getattr(peft_config, "layers_to_transform", None) is not None:
                     error_msg += f" Note: You specified 'layers_to_transform': {peft_config.layers_to_transform}."
@@ -1099,7 +1102,9 @@ class BaseTuner(nn.Module, ABC):
             # - they wanted to match a parameter but there was no match
             if peft_config.target_modules and not targeted_module_names:
                 warnings.warn(
-                    f"target_modules={peft_config.target_modules} were set but no module was matched.", RuntimeWarning
+                    f"target_modules={peft_config.target_modules} were set but no module was matched. "
+                    f"Note that target module patterns are matched with `re.fullmatch`.",
+                    RuntimeWarning,
                 )
             elif getattr(peft_config, "target_parameters", []) and not targeted_parameter_names:
                 warnings.warn(
