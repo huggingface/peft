@@ -511,6 +511,47 @@ class TestTargetedModuleNames:
         model = get_peft_model(model, IA3Config(target_modules=["lin0", "lin1"], feedforward_modules=["lin0", "lin1"]))
         assert model.targeted_module_names == ["lin0", "lin1"]
 
+    @pytest.mark.parametrize(
+        "feedforward_modules, expected",
+        [
+            # a bare name matches the module itself and nested modules with that exact name, but not modules that
+            # merely end with the same characters
+            (["fc"], {"fc": True, "block.fc": True, "not_fc": False, "block.not_fc": False, "q_proj": False}),
+            # a dotted name matches on full path components only
+            (["block.fc"], {"fc": False, "block.fc": True, "not_fc": False, "block.not_fc": False, "q_proj": False}),
+            (["not_fc"], {"fc": False, "block.fc": False, "not_fc": True, "block.not_fc": True, "q_proj": False}),
+        ],
+    )
+    def test_ia3_feedforward_modules_match_full_name_suffix(self, feedforward_modules, expected):
+        # Test fix to issue #4118
+        # `feedforward_modules` used a bare `str.endswith`, so "fc" also marked "not_fc" as feedforward, whereas
+        # `target_modules` and `exclude_modules` only match on a "." boundary.
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(8, 8, bias=False)
+                self.not_fc = nn.Linear(8, 8, bias=False)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.q_proj = nn.Linear(8, 8, bias=False)
+                self.fc = nn.Linear(8, 8, bias=False)
+                self.not_fc = nn.Linear(8, 8, bias=False)
+                self.block = Block()
+
+        # feedforward_modules must be a subset of target_modules
+        target_modules = ["q_proj", "fc", "not_fc", *feedforward_modules]
+        config = IA3Config(target_modules=target_modules, feedforward_modules=feedforward_modules)
+        model = get_peft_model(Model(), config)
+
+        actual = {
+            name.removeprefix("base_model.model."): module.is_feedforward
+            for name, module in model.named_modules()
+            if hasattr(module, "is_feedforward")
+        }
+        assert actual == expected
+
     def test_realistic_example(self):
         model_id = "peft-internal-testing/tiny-random-BloomForCausalLM"
         with hub_online_once(model_id):
