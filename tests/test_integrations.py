@@ -198,7 +198,20 @@ class TestTransformersV5:
     torch_device = infer_device()
 
     @pytest.fixture
-    def expected_logits(self):
+    def model_dtype(self):
+        # PyTorch has no fast CPU kernels for float16: the op lists that can autocast to float16 are defined for
+        # CUDA and XPU only, whereas the CPU lists contain bfloat16 and float32, see
+        # https://pytorch.org/docs/stable/amp.html#cpu-op-specific-behavior. A float16 forward pass on CPU is thus
+        # much slower than a float32 one, which is very noticeable when LoRA targets fused MoE expert parameters,
+        # as a low-rank product is folded into the full expert weights on every forward pass. These tests only
+        # check the logits produced by the converted weights, so the dtype of the forward pass is irrelevant and
+        # float32 is used on CPU. On hardware accelerators, the dtype of the checkpoint is kept.
+        if self.torch_device == "cpu":
+            return torch.float32
+        return torch.float16
+
+    @pytest.fixture
+    def expected_logits(self, model_dtype):
         # original logits were:
         # tensor([[[ 0.2676,  0.3870,  0.2956,  ...,  0.4624,  0.1966,  0.2539],
         #          [-0.6706, -0.0969, -0.6240,  ..., -0.0201,  0.7099, -0.3099],
@@ -214,10 +227,10 @@ class TestTransformersV5:
                 [-0.6706, -0.0969, -0.6240],
                 [0.0663, 0.1653, 0.7189],
             ]
-        ).to(device=self.torch_device, dtype=torch.float16)
+        ).to(device=self.torch_device, dtype=model_dtype)
         return expected_logits_0_to_3
 
-    def test_mixtral_v4_lora_weight_conversion_transformers_load_adapter(self, expected_logits):
+    def test_mixtral_v4_lora_weight_conversion_transformers_load_adapter(self, expected_logits, model_dtype):
         # Load a PEFT adapter trained with transformers v4 on Mixtral, which now has converted weights (MoE), using the
         # Transformers integration (model.load_adapter).
         inputs = torch.arange(10).view(1, -1).to(device=self.torch_device)
@@ -225,7 +238,7 @@ class TestTransformersV5:
         lora_id = "peft-internal-testing/mixtral-pre-v5-lora"
 
         with hub_online_once(model_id):
-            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model = AutoModelForCausalLM.from_pretrained(model_id, dtype=model_dtype)
 
         # test AutoModel.load_adapter
         model.load_adapter(lora_id)
@@ -237,7 +250,7 @@ class TestTransformersV5:
         atol, rtol = 1e-3, 1e-4
         assert torch.allclose(output[0, :3, :3], expected_logits, atol=atol, rtol=rtol)
 
-    def test_mixtral_v4_lora_weight_conversion_peft_model_from_pretrained(self, expected_logits):
+    def test_mixtral_v4_lora_weight_conversion_peft_model_from_pretrained(self, expected_logits, model_dtype):
         # Load a PEFT adapter trained with transformers v4 on Mixtral, which now has converted weights (MoE), using
         # PeftModel.from_pretrained
         inputs = torch.arange(10).view(1, -1).to(device=self.torch_device)
@@ -245,7 +258,7 @@ class TestTransformersV5:
         lora_id = "peft-internal-testing/mixtral-pre-v5-lora"
 
         with hub_online_once(model_id):
-            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+            model = AutoModelForCausalLM.from_pretrained(model_id, dtype=model_dtype).to(self.torch_device)
 
         # test PeftModel.from_pretrained
         model = PeftModel.from_pretrained(model, lora_id)
@@ -256,14 +269,14 @@ class TestTransformersV5:
         atol, rtol = 1e-3, 1e-4
         assert torch.allclose(output[0, :3, :3], expected_logits, atol=atol, rtol=rtol)
 
-    def test_mixtral_v4_lora_weight_conversion_peft_model_load_adapter(self, expected_logits):
+    def test_mixtral_v4_lora_weight_conversion_peft_model_load_adapter(self, expected_logits, model_dtype):
         # Same as the previous test, but using PeftModel.load_adapter
         inputs = torch.arange(10).view(1, -1).to(device=self.torch_device)
         model_id = "hf-internal-testing/Mixtral-tiny"
         lora_id = "peft-internal-testing/mixtral-pre-v5-lora"
 
         with hub_online_once(model_id):
-            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+            model = AutoModelForCausalLM.from_pretrained(model_id, dtype=model_dtype).to(self.torch_device)
 
         # create a PeftModel instance
         model = get_peft_model(model, LoraConfig(target_modules=["q_proj"]))
@@ -276,21 +289,21 @@ class TestTransformersV5:
         atol, rtol = 1e-3, 1e-4
         assert torch.allclose(output[0, :3, :3], expected_logits, atol=atol, rtol=rtol)
 
-    def test_mixtral_save_load_roundtrip(self, expected_logits, tmp_path):
+    def test_mixtral_save_load_roundtrip(self, expected_logits, model_dtype, tmp_path):
         # Load the v4 checkpoint with PEFT, save it (now v5 format) and load it again
         inputs = torch.arange(10).view(1, -1).to(device=self.torch_device)
         model_id = "hf-internal-testing/Mixtral-tiny"
         lora_id = "peft-internal-testing/mixtral-pre-v5-lora"
 
         with hub_online_once(model_id):
-            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+            model = AutoModelForCausalLM.from_pretrained(model_id, dtype=model_dtype).to(self.torch_device)
 
         model = PeftModel.from_pretrained(model, lora_id)
         model.save_pretrained(tmp_path)
         del model
 
         with hub_online_once(model_id):
-            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+            model = AutoModelForCausalLM.from_pretrained(model_id, dtype=model_dtype).to(self.torch_device)
         model = PeftModel.from_pretrained(model, tmp_path)
 
         with torch.inference_mode():
@@ -300,13 +313,13 @@ class TestTransformersV5:
         atol, rtol = 1e-3, 1e-4
         assert torch.allclose(output[0, :3, :3], expected_logits, atol=atol, rtol=rtol)
 
-    def test_add_lora_to_mixtral_v5_works(self):
+    def test_add_lora_to_mixtral_v5_works(self, model_dtype):
         # Ensure that using LoRA directly with a v5 model still works
         inputs = torch.arange(10).view(1, -1).to(device=self.torch_device)
         model_id = "hf-internal-testing/Mixtral-tiny"
 
         with hub_online_once(model_id):
-            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+            model = AutoModelForCausalLM.from_pretrained(model_id, dtype=model_dtype).to(self.torch_device)
         with torch.inference_mode():
             output_base = model(inputs).logits
 
