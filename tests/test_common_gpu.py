@@ -14,6 +14,7 @@
 import gc
 import tempfile
 import unittest
+from copy import deepcopy
 
 import pytest
 import torch
@@ -39,6 +40,7 @@ from peft import (
     AdaLoraConfig,
     AdaptionPromptConfig,
     BOFTConfig,
+    CortexConfig,
     HRAConfig,
     IA3Config,
     LNTuningConfig,
@@ -60,8 +62,12 @@ from peft.tuners.lora.config import LoraRuntimeConfig
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import infer_device
 
+from .test_cortex import CortexDeviceChecks, CortexPublicRoutingChecks
 from .testing_utils import (
     DEVICE_MAP_MAP,
+    CudaTestFixtures,
+    activate_branches,
+    assert_cortex_biases_follow_native_experts,
     device_count,
     hub_online_once,
     load_cat_image,
@@ -71,6 +77,7 @@ from .testing_utils import (
     require_non_cpu,
     require_torch_multi_accelerator,
 )
+from .testing_utils import create_tiny_causal_lm as tiny_model
 
 
 if is_bnb_available():
@@ -2308,3 +2315,39 @@ class TestPrepareModelForKbitTraining:
         assert mem_after == mem_after_extra_empty, (
             "Reserved memory changed after a second empty_cache(), meaning the first call was not made"
         )
+
+
+@pytest.mark.single_gpu_tests
+class TestCortexDevices(CudaTestFixtures, CortexDeviceChecks):
+    pass
+
+
+@pytest.mark.single_gpu_tests
+class TestCortexBiases(CudaTestFixtures):
+    @pytest.mark.parametrize("kind", ["gpt_oss", "qwen3_moe"])
+    @pytest.mark.parametrize("mode", ["shared", "routed", ["shared", "routed"]])
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+    def test_default_biases_follow_native_experts_in_every_branch(self, kind, mode, dtype, device):
+        assert_cortex_biases_follow_native_experts(kind, mode, dtype, device)
+
+
+@pytest.mark.single_gpu_tests
+class TestCortexPublicRouting(CudaTestFixtures, CortexPublicRoutingChecks):
+    pass
+
+
+@pytest.mark.single_gpu_tests
+class TestCortexDeviceTransfers(CudaTestFixtures):
+    def test_merged_state_follows_cpu_cuda_transfers(self):
+        model = get_peft_model(tiny_model("llama"), CortexConfig(k=3)).eval()
+        activate_branches(model)
+        reference = deepcopy(model)
+        model.merge_adapter()
+        model.cuda().double()
+        model.unmerge_adapter()
+        assert all(p.device.type == "cuda" and p.dtype == torch.float64 for p in model.parameters())
+        model.merge_adapter()
+        model.cpu().float()
+        model.unmerge_adapter()
+        for name, value in model.state_dict().items():
+            torch.testing.assert_close(value, reference.state_dict()[name], rtol=0, atol=0)
