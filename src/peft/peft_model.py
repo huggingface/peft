@@ -238,12 +238,31 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         return adapters
 
     @property
+    def _active_peft_config(self) -> Optional[PeftConfig]:
+        """The config of the active adapter, or `None` when the model has no adapter left.
+
+        `active_adapter` is a list when `delete_adapter` removed the last adapter, so it cannot be used as a dict key
+        directly.
+        """
+        active_adapter = self.active_adapter
+        if isinstance(active_adapter, (list, tuple)):
+            active_adapter = active_adapter[0] if active_adapter else None
+        if active_adapter is None:
+            return None
+        return self.peft_config.get(active_adapter)
+
+    @property
     def has_active_enabled_adapter(self) -> bool:
         """Reflects whether the adapters are purposefully disabled (via disable_adapter) or if there
         are no active adapters (enabled but inactive). They are two separate mechanisms but sometimes it is helpful to
         know whether the model has any active/enabled adapter at all.
         """
-        if self.peft_config[self.active_adapter].is_prompt_learning:
+        config = self._active_peft_config
+        if config is None:
+            # All adapters were deleted, there is nothing left to enable or disable.
+            return False
+
+        if config.is_prompt_learning:
             return not self._adapters_disabled
 
         return not self._adapters_disabled or not self.active_adapters
@@ -1058,7 +1077,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         ```
         """
         was_disabled = self._adapters_disabled
-        if self.peft_config[self.active_adapter].is_prompt_learning:
+        config = self._active_peft_config
+        if config is not None and config.is_prompt_learning:
             try:
                 # TODO: consider replacing this patching of methods with a more robust mechanism: setting a flag and
                 # letting the underlying methods deal with it, same as how LoRA does it.
@@ -1073,7 +1093,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.prepare_inputs_for_generation = old_prepare_inputs_for_generation
                 self._adapters_disabled = was_disabled
 
-        elif self.peft_config[self.active_adapter].is_adaption_prompt:
+        elif config is not None and config.is_adaption_prompt:
             try:
                 if not was_disabled:
                     self.base_model.disable_adapter_layers()
@@ -1108,7 +1128,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         Returns the base model.
         """
-        return self.base_model if self.active_peft_config.is_prompt_learning else self.base_model.model
+        config = self._active_peft_config
+        return self.base_model if config is not None and config.is_prompt_learning else self.base_model.model
 
     def add_adapter(
         self,
@@ -1231,6 +1252,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # don't introduce a backwards incompatibility by raising an error.
         if num_adapters == 1:
             self.active_adapter = new_active_adapters[0]
+        elif num_adapters == 0:
+            # The last adapter was deleted, so there is nothing left for `active_adapter` to point at. Keeping the
+            # deleted name around makes every later forward pass fail with a KeyError.
+            self.active_adapter = []
 
     @property
     def modules_to_save(self) -> Optional[set[str]]:

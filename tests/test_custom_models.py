@@ -4147,6 +4147,54 @@ class TestPeftCustomModel(PeftCommonTester):
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
 
+    def test_forward_after_deleting_the_last_adapter(self):
+        # Deleting the last adapter used to leave `active_adapter` pointing at the deleted name, so the next forward
+        # pass raised a bare `KeyError`. The model should instead fall back to the base model.
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0", "lin1"]), adapter_name="one")
+        # Give the adapter a non-zero delta so that its output is distinguishable from the base model's output.
+        with torch.no_grad():
+            for name, param in model.named_parameters():
+                if ".one." in name:
+                    param.normal_(0, 0.1)
+
+        model.eval()
+        x = torch.randn(4, 10)
+        with torch.no_grad():
+            with model.disable_adapter():
+                base_out = model(x).clone()
+            adapted_out = model(x).clone()
+        assert not torch.allclose(adapted_out, base_out)
+
+        model.delete_adapter("one")
+        assert not model.peft_config
+        assert model.active_adapters == []
+        assert model.active_adapter == []
+        assert not model.has_active_enabled_adapter
+
+        with torch.no_grad():
+            after_delete = model(x)
+        assert torch.allclose(after_delete, base_out, atol=1e-6)
+
+        # The model stays usable after all adapters are gone: a new adapter can be added and activated again.
+        model.add_adapter("two", LoraConfig(target_modules=["lin0", "lin1"]))
+        model.set_adapter("two")
+        assert model.has_active_enabled_adapter
+        with torch.no_grad():
+            assert model(x).shape == adapted_out.shape
+
+    def test_disable_adapter_after_deleting_the_last_adapter(self):
+        # `disable_adapter` also looked up `peft_config[active_adapter]` and therefore raised once the last adapter
+        # was deleted. It should be a no-op in that case.
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0", "lin1"]), adapter_name="one")
+        model.eval()
+        x = torch.randn(4, 10)
+        model.delete_adapter("one")
+
+        assert model.get_base_model() is model.base_model.model
+        with model.disable_adapter():
+            with torch.no_grad():
+                assert model(x).shape == (4, 2)
+
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_delete_merged_adapter_raises_without_mutation(self, test_name, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
