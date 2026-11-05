@@ -218,7 +218,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--gradient_checkpointing",
         action="store_true",
-        help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.",
+        help="Whether or not to use gradient/activation checkpointing to save memory at the expense of slower backward pass.",
     )
     parser.add_argument(
         "--learning_rate",

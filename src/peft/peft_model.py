@@ -42,7 +42,7 @@ from transformers.utils import PushToHubMixin
 
 from peft.tuners.lora.variants import get_alora_offsets_for_forward, get_alora_offsets_for_generate
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, _delete_auxiliary_adapter
-from peft.utils import AuxiliaryTrainingWrapper
+from peft.utils import AuxiliaryTrainingWrapper, is_activation_checkpointing
 from peft.utils.constants import DUMMY_MODEL_CONFIG
 from peft.utils.integrations import get_fsdp_modules, init_empty_weights
 from peft.utils.other import TrainableTokensWrapper, create_attention_mask, set_additional_trainable_modules
@@ -201,8 +201,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype
             )
 
-        if getattr(model, "is_gradient_checkpointing", True):
-            model = self.prepare_model_for_gradient_checkpointing(model)
+        if is_activation_checkpointing(model, default=True):
+            self.prepare_model_for_gradient_checkpointing(model)
 
         # the `pretraining_tp` is set for some models to simulate Tensor Parallelism during inference to avoid
         # numerical differences, https://github.com/pytorch/pytorch/issues/76232 - to avoid any unexpected
@@ -745,10 +745,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def prepare_model_for_gradient_checkpointing(self, model: PreTrainedModel):
         r"""
         Prepares the model for gradient checkpointing if necessary
+
+        Note: In newer Transformers versions, this is called 'activation checkpointing'.
         """
         self._prepare_model_for_gradient_checkpointing(model)
 
     def _prepare_model_for_gradient_checkpointing(self, model: PreTrainedModel):
+        # Note: In newer Transformers versions, this is called 'activation checkpointing'.
         if not (
             getattr(model, "is_loaded_in_8bit", False)
             or getattr(model, "is_loaded_in_4bit", False)

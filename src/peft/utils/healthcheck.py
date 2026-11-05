@@ -23,6 +23,7 @@ import transformers
 from .. import __version__
 from ..peft_model import CLASSIFIER_MODULE_NAMES, PeftModel, get_layer_status, get_model_status
 from ..tuners.tuners_utils import BaseTuner
+from . import is_activation_checkpointing
 from .other import ModulesToSaveWrapper
 
 
@@ -84,7 +85,7 @@ def _get_model_runtime(model) -> dict[str, Any]:
         "model_type": getattr(config, "model_type", None),
         "revision": getattr(config, "_commit_hash", None),
         "training": model.training,
-        "gradient_checkpointing": bool(getattr(base_model, "is_gradient_checkpointing", False)),
+        "activation_checkpointing": is_activation_checkpointing(base_model, default=False),
         "parameter_dtypes": dict(sorted(parameter_dtypes.items())),
         "parameter_devices": sorted(parameter_devices),
         "hf_device_map_devices": (
@@ -432,7 +433,7 @@ def format_healthcheck(healthcheck: dict[str, Any], sep=", ", indent="  ") -> st
                 f"Runtime:\n{indent}training: {model_runtime['training']}",
                 f"devices: {devices}",
                 f"dtypes: {dtypes}",
-                f"gradient checkpointing: {model_runtime['gradient_checkpointing']}",
+                f"activation checkpointing: {model_runtime['activation_checkpointing']}",
             )
         ),
         f"Parameters:\n{indent}" + sep.join(parameter_parts),

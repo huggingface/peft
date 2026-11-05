@@ -14,6 +14,7 @@
 
 import copy
 from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -45,6 +46,7 @@ from peft.utils.other import (
     ModulesToSaveWrapper,
     _get_module_names_tied_with_embedding,
     _get_no_split_modules,
+    infer_device,
     prepare_model_for_kbit_training,
 )
 
@@ -1216,3 +1218,30 @@ class TestTaskTypeModulesToSave:
 
         assert user_list == ["my_head"]
         assert model.peft_config["other"].modules_to_save == ["my_head"] + head_names
+
+
+class TestInferDevice:
+    """Verify `infer_device` checks `torch.accelerator` backends (such as `torch_tpu`) before CPU fallback."""
+
+    def test_infer_device_torch_accelerator_tpu(self, monkeypatch):
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        if hasattr(torch.backends, "mps"):
+            monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
+        monkeypatch.setattr("peft.utils.other.mlu_available", False)
+        monkeypatch.setattr("peft.utils.other.is_xpu_available", lambda: False)
+        monkeypatch.setattr("peft.utils.other.is_npu_available", lambda: False)
+
+        class _FakeAccelerator:
+            @staticmethod
+            def is_available():
+                return True
+
+            @staticmethod
+            def current_accelerator():
+                return SimpleNamespace(type="tpu")
+
+        monkeypatch.setattr(torch, "accelerator", _FakeAccelerator, raising=False)
+        assert infer_device() == "tpu"
+
+        monkeypatch.setattr(_FakeAccelerator, "is_available", staticmethod(lambda: False))
+        assert infer_device() == "cpu"
