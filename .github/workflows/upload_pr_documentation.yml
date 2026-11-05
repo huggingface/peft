@@ -12,7 +12,7 @@ jobs:
   build:
     # skip on forks, the secrets used below only exist in the main repo
     if: github.repository == 'huggingface/peft'
-    uses: huggingface/doc-builder/.github/workflows/upload_pr_documentation.yml@145b9d4f6ab65ad3af87c66773b2c43294e52446  # main
+    uses: huggingface/doc-builder/.github/workflows/upload_pr_documentation.yml@c468935d9248280c2f577c9082c85393c97cde1c  # main
     with:
       package_name: peft
     secrets:
