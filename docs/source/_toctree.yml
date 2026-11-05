@@ -59,6 +59,8 @@
         title: Prompt tuning
       title: Soft Prompting
     - sections:
+      - local: package_reference/activation_steering
+        title: Activation Steering
       - local: package_reference/beft
         title: BEFT
       - local: package_reference/layernorm_tuning

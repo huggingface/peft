@@ -1,0 +1,49 @@
+{
+  "base_model_name_or_path": "Qwen/Qwen3.5-4B",
+  "inference_mode": false,
+  "peft_type": "ACTIVATION_STEERING",
+  "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+  "steering_pattern": {
+    "layers.10": {
+      "indices": [
+        6295
+      ],
+      "init_val": 0.4,
+      "source_module": "mlp.down_proj",
+      "statistic": "median_l2"
+    },
+    "layers.12": {
+      "indices": [
+        2920
+      ],
+      "init_val": -0.5,
+      "source_module": "mlp.down_proj",
+      "statistic": "median_l2"
+    },
+    "layers.15": {
+      "indices": [
+        3920
+      ],
+      "init_val": 0.6,
+      "source_module": "mlp.down_proj",
+      "statistic": "median_l2"
+    },
+    "layers.16": {
+      "indices": [
+        8168
+      ],
+      "init_val": -0.3,
+      "source_module": "mlp.down_proj",
+      "statistic": "median_l2"
+    },
+    "layers.18": {
+      "indices": [
+        5796
+      ],
+      "init_val": 0.6,
+      "source_module": "mlp.down_proj",
+      "statistic": "median_l2"
+    }
+  },
+  "task_type": "CAUSAL_LM"
+}
