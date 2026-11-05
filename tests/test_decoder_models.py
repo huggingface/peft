@@ -52,6 +52,7 @@ from peft import (
     MultitaskPromptTuningConfig,
     OFTConfig,
     OSFConfig,
+    PacaConfig,
     PeftModel,
     PrefixTuningConfig,
     PromptEmbedding,
@@ -73,8 +74,14 @@ from peft import (
     WaveFTConfig,
     get_peft_model,
 )
+from peft.utils import activation_checkpointing_enable
 
-from .testing_common import PeftCommonTester, _skip_if_merging_not_supported, skip_non_prompt_learning
+from .testing_common import (
+    CONV1D_UNSUPPORTED_CONFIGS,
+    PeftCommonTester,
+    _skip_if_merging_not_supported,
+    skip_non_prompt_learning,
+)
 from .testing_utils import device_count, hub_online_once, load_dataset_english_quotes, set_init_weights_false
 
 
@@ -83,7 +90,7 @@ PEFT_DECODER_MODELS_TO_TEST = [
     "peft-internal-testing/tiny-random-OPTForCausalLM",
     "peft-internal-testing/tiny-random-GPT2LMHeadModel",
     "peft-internal-testing/tiny-random-GPTJForCausalLM",
-    "trl-internal-testing/tiny-random-LlamaForCausalLM",
+    "peft-internal-testing/tiny-random-LlamaForCausalLM",
     "peft-internal-testing/tiny-dummy-qwen2",
     "hf-internal-testing/tiny-random-Gemma3ForCausalLM",
 ]
@@ -93,7 +100,7 @@ SMALL_GRID_MODELS = [
     "peft-internal-testing/tiny-random-OPTForCausalLM",
     "hf-internal-testing/tiny-random-MistralForCausalLM",
     "peft-internal-testing/tiny-dummy-qwen2",
-    "trl-internal-testing/tiny-random-LlamaForCausalLM",
+    "peft-internal-testing/tiny-random-LlamaForCausalLM",
 ]
 
 
@@ -338,6 +345,14 @@ ALL_CONFIGS = [
         },
     ),
     (
+        PacaConfig,
+        {
+            "r": 2,
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+        },
+    ),
+    (
         ShiraConfig,
         {
             "r": 1,
@@ -454,24 +469,8 @@ ALL_CONFIGS = [
 
 
 def _skip_if_not_conv1d_supported(model_id, config_cls):
-    if "GPT2LMHeadModel" in model_id and config_cls in [
-        BeftConfig,
-        BOFTConfig,
-        GloraConfig,
-        HRAConfig,
-        OFTConfig,
-        OSFConfig,
-        RoadConfig,
-        ShiraConfig,
-        SupertuningConfig,
-        C3AConfig,
-        MissConfig,
-        DeloraConfig,
-        PsoftConfig,
-    ]:
-        pytest.skip(
-            "Skipping Beft/BOFT/GLoRA/HRA/OFT/Road/SHiRA/Supertuning/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel"
-        )
+    if "GPT2LMHeadModel" in model_id and config_cls in CONV1D_UNSUPPORTED_CONFIGS:
+        pytest.skip("This PEFT method does not support Conv1D layers, skipping this test.")
 
 
 def _skip_alora_no_activation(config_cls, config_kwargs):
@@ -487,9 +486,10 @@ def _skip_osf_disable_adapter_test(config_cls):
 
 
 def check_beft_config(config_cls, model_id, config_kwargs):
-    if isinstance(config_cls, BeftConfig):
+    if config_cls != BeftConfig:
         return
-    elif "gptj" in model_id.lower():
+
+    if "gptj" in model_id.lower():
         config_kwargs["target_modules"] = ["fc_out"]
     elif "llama" in model_id.lower():
         pytest.skip("Skip tests for Llama models because layers have no bias term")
@@ -987,7 +987,7 @@ class TestDecoderModels(PeftCommonTester):
         self._test_passing_input_embeds_works("", model_id, config_cls, config_kwargs.copy())
 
     def test_lora_layer_replication(self):
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         config_kwargs = {
             "target_modules": ["down_proj", "up_proj"],
             "task_type": "CAUSAL_LM",
@@ -1048,7 +1048,7 @@ class TestDecoderModels(PeftCommonTester):
 
     def test_prefix_tuning_offsets_position_ids_in_forward(self, monkeypatch):
         # Regression: RoPE models need position_ids offset for prefix tuning.
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             base = AutoModelForCausalLM.from_pretrained(model_id)
         peft_config = PrefixTuningConfig(num_virtual_tokens=4, task_type="CAUSAL_LM", prefix_projection=False)
@@ -1079,7 +1079,7 @@ class TestDecoderModels(PeftCommonTester):
     def test_prompt_learning_position_ids_warns_and_drops(self, monkeypatch):
         # Counterpart to test_prefix_tuning_offsets_position_ids_in_forward for prompt learning methods that extend
         # inputs_embeds instead of the KV cache: passing position_ids is not supported, PEFT warns and removes them.
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             base = AutoModelForCausalLM.from_pretrained(model_id)
         peft_config = PromptTuningConfig(num_virtual_tokens=4, task_type="CAUSAL_LM")
@@ -1422,7 +1422,7 @@ class TestDecoderModels(PeftCommonTester):
             pytest.skip("Skip on multi-GPU setups")
         peft_config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
         base_model = self.transformers_class.from_pretrained(model_id)
-        base_model.gradient_checkpointing_enable()
+        activation_checkpointing_enable(base_model)
 
         try:
             model = get_peft_model(base_model, peft_config)
@@ -1465,7 +1465,7 @@ class TestDecoderModels(PeftCommonTester):
         ],
     )
     def test_save_pretrained_targeting_lora_to_embedding_layer(self, save_embedding_layers, tmp_path, peft_config):
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
 
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
@@ -1593,7 +1593,7 @@ class TestDecoderModels(PeftCommonTester):
 
     def test_merge_and_unload_fixes_tie_word_embeddings_config(self):
         # See https://github.com/huggingface/transformers/issues/45127
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id, tie_word_embeddings=True)
             assert model.config.tie_word_embeddings

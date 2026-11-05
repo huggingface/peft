@@ -49,6 +49,7 @@ from peft import (
     MultitaskPromptTuningConfig,
     OFTConfig,
     OSFConfig,
+    PacaConfig,
     PeanutConfig,
     PeftConfig,
     PeftType,
@@ -123,6 +124,7 @@ ALL_CONFIG_CLASSES = (
     (PeanutConfig, {}),
     (RoadConfig, {}),
     (ShadowConfig, {}),
+    (PacaConfig, {}),
     (ShiraConfig, {}),
     (SupertuningConfig, {}),
     (TinyLoraConfig, {}),
@@ -738,6 +740,15 @@ class TestPeftConfig:
         for key in ("rank_pattern", "alpha_pattern"):
             config_dict[key] = dict(sorted(config_dict[key].items()))
         assert json.dumps(config_dict, indent=2) == json.dumps(config_dict, indent=2, sort_keys=True)
+
+    def test_save_pretrained_keeps_order_of_paca_indices_pattern(self, tmp_path):
+        # as for rank_pattern, the first key of paca_indices_pattern that matches a module wins
+        config = PacaConfig(paca_indices_pattern={"module.foo": [0, 1], "foo": [2]})
+        config.save_pretrained(tmp_path)
+        config_dict = json.loads((tmp_path / "adapter_config.json").read_text())
+
+        assert list(config_dict["paca_indices_pattern"]) == ["module.foo", "foo"]
+        assert list(PacaConfig.from_pretrained(tmp_path).paca_indices_pattern) == ["module.foo", "foo"]
 
 
 class TestLoraNestedConfigRoundTrip:

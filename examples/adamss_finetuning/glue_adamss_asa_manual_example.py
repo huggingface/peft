@@ -18,7 +18,7 @@ Example usage:
         --asa_target_subspaces 5 \
         --num_epochs 100 \
         --batch_size 32 \
-        --warmup_ratio 0.06 \
+        --warmup_steps 0.06 \
         --seed 0 \
         --output_dir ./output/cola_asa_manual
 
@@ -102,7 +102,7 @@ class AdaMSSArguments:
     # Training configuration
     num_epochs: int = field(default=100, metadata={"help": "Number of training epochs."})
     batch_size: int = field(default=32, metadata={"help": "Batch size per device."})
-    warmup_ratio: float = field(default=0.06, metadata={"help": "Warmup ratio."})
+    warmup_steps: float = field(default=0.06, metadata={"help": "Warmup steps or ratio."})
     seed: int = field(default=0, metadata={"help": "Random seed."})
     output_dir: str = field(default="./output", metadata={"help": "Output directory."})
 
@@ -254,7 +254,7 @@ def main():
         per_device_eval_batch_size=adamss_args.batch_size,
         learning_rate=hp["lr"],
         weight_decay=hp["wd"],
-        warmup_ratio=adamss_args.warmup_ratio,
+        warmup_steps=adamss_args.warmup_steps,
         eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,

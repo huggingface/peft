@@ -864,7 +864,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_bitsandbytes
     def test_adaption_prompt_8bit(self):
         model = LlamaForCausalLM.from_pretrained(
-            "trl-internal-testing/tiny-random-LlamaForCausalLM",
+            "peft-internal-testing/tiny-random-LlamaForCausalLM",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             dtype=torch.float16,
             device_map="auto",
@@ -887,7 +887,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_bitsandbytes
     def test_adaption_prompt_4bit(self):
         model = LlamaForCausalLM.from_pretrained(
-            "trl-internal-testing/tiny-random-LlamaForCausalLM",
+            "peft-internal-testing/tiny-random-LlamaForCausalLM",
             quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             dtype=torch.float16,
             device_map="auto",
@@ -1448,7 +1448,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            "trl-internal-testing/tiny-random-LlamaForCausalLM",
+            "peft-internal-testing/tiny-random-LlamaForCausalLM",
             quantization_config=bnb_config,
             dtype=torch.float32,
         ).eval()
@@ -1679,7 +1679,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            "trl-internal-testing/tiny-random-LlamaForCausalLM",
+            "peft-internal-testing/tiny-random-LlamaForCausalLM",
             quantization_config=bnb_config,
             dtype=torch.float32,
         ).eval()
