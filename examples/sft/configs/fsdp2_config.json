@@ -1,0 +1,24 @@
+{
+  "model_name_or_path": "Qwen/Qwen3-0.6B",
+  "dataset_name": "smangrul/ultrachat-10k-chatml",
+  "chat_template_format": "chatml",
+  "dataset_text_field": "content",
+  "use_peft_lora": true,
+  "lora_target_modules": "all-linear",
+  "max_length": 512,
+  "per_device_train_batch_size": 1,
+  "num_train_epochs": 1,
+  "learning_rate": 1e-4,
+  "bf16": true,
+  "gradient_checkpointing": false,
+  "fsdp": true,
+  "fsdp_config": {
+    "version": 2,
+    "reshard_after_forward": true,
+    "auto_wrap_policy": "TRANSFORMER_BASED_WRAP",
+    "cpu_ram_efficient_loading": true,
+    "state_dict_type": "SHARDED_STATE_DICT",
+    "activation_checkpointing": false
+  },
+  "output_dir": "qwen-sft-lora-fsdp2"
+}

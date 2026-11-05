@@ -27,7 +27,13 @@ When you have access to multiple GPUs, it would be better to use normal LoRA wit
 
 
 ## Multi-GPU SFT with LoRA and FSDP
-When you have access to multiple GPUs, it would be better to use normal LoRA with DeepSpeed/FSDP. To use LoRA with FSDP, refer to the docs at [PEFT with FSDP](https://huggingface.co/docs/peft/accelerate/fsdp).
+To train with FSDP2, install PyTorch 2.6 or newer and current versions of Transformers, Accelerate, TRL, and PEFT. Edit the model, dataset, and training options in [configs/fsdp2_config.json](configs/fsdp2_config.json), then launch one process per GPU from `examples/sft`:
+
+```bash
+torchrun --standalone --nproc_per_node=2 train.py configs/fsdp2_config.json
+```
+
+On GPUs without BF16 support, set `"bf16": false` and `"fp16": true` in the JSON file. For saving, resuming, and FSDP1/QLoRA examples, see [PEFT with FSDP](https://huggingface.co/docs/peft/accelerate/fsdp).
 
 Note: FSDP is currently not compatible with 8bit bitsandbytes quantization.
 
