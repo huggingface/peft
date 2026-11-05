@@ -818,6 +818,18 @@ class TestDecoderModels(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    # note: not testing float32 to save time, if fp32 manages to unmerge exactly, it doesn't mean much
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    @pytest.mark.parametrize("autocast_adapter_dtype", [True, False])
+    def test_exact_merge_layers(self, model_id, config_cls, config_kwargs, dtype, autocast_adapter_dtype):
+        _skip_if_not_conv1d_supported(model_id, config_cls)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_exact_merge_layers(
+            model_id, config_cls, config_kwargs, dtype=dtype, autocast_adapter_dtype=autocast_adapter_dtype
+        )
+
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_generate_half_prec(self, model_id, config_cls, config_kwargs):
         self._test_generate_half_prec(model_id, config_cls, config_kwargs.copy())
 

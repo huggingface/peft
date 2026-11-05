@@ -824,7 +824,7 @@ class ShadowModel(BaseTuner):
         # `super()` only retargets the wrapped blocks; the tuner-level shadow modules need the same switch.
         self._sync_shadow_module_trainability(inference_mode=inference_mode)
 
-    def _check_merge_allowed(self):
+    def _check_merge_allowed(self, adapter_names: Optional[list[str]], exact: bool = False):
         raise NotImplementedError(
             "ShadowPEFT cannot be merged into the base model: the adaptation is an input-dependent, layer-space "
             "trajectory, not a static weight-space delta. Use `unload()` to recover the plain base model, or "
