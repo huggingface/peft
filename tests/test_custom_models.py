@@ -38,6 +38,7 @@ from transformers.pytorch_utils import Conv1D
 from peft import (
     AdaLoraConfig,
     AdamssConfig,
+    BayesianLoraConfig,
     BeftConfig,
     BOFTConfig,
     C3AConfig,
@@ -286,6 +287,40 @@ TEST_CASES = [
         {
             "target_modules": ["lin0"],
             "monteclora_config": MontecloraConfig(num_samples=2),
+        },
+    ),
+    #################
+    # Bayesian-LoRA #
+    #################
+    (
+        "Vanilla MLP 1 LoRA with Bayesian-LoRA",
+        "MLP",
+        LoraConfig,
+        {"target_modules": ["lin0"], "bayesian_lora_config": BayesianLoraConfig()},
+    ),
+    (
+        "Vanilla MLP 2 LoRA with Bayesian-LoRA",
+        "MLP",
+        LoraConfig,
+        {"target_modules": ["lin0", "lin1"], "bayesian_lora_config": BayesianLoraConfig()},
+    ),
+    (
+        "Vanilla MLP 3 LoRA with Bayesian-LoRA",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0"],
+            "lora_dropout": 0.1,
+            "bayesian_lora_config": BayesianLoraConfig(use_flow=False, inducing_rows=3, inducing_cols=4),
+        },
+    ),
+    (
+        "Vanilla MLP 4 LoRA with Bayesian-LoRA",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0"],
+            "bayesian_lora_config": BayesianLoraConfig(use_spectral_norm=False, learn_lambda=False, max_lambda=None),
         },
     ),
     #######
@@ -3285,6 +3320,7 @@ class TestPeftCustomModel(PeftCommonTester):
         model_before = copy.deepcopy(model)
 
         is_monteclora = config_kwargs.get("monteclora_config", None) is not None
+        is_bayesian_lora = config_kwargs.get("bayesian_lora_config", None) is not None
 
         model.train()
         lr = 0.5
@@ -3305,7 +3341,12 @@ class TestPeftCustomModel(PeftCommonTester):
             lr = 50.0
         elif is_monteclora:
             lr = 1e-3
-        optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+        if is_bayesian_lora:
+            # The gradients of the Bayesian-LoRA parameters differ by orders of magnitude (some are scaled by a small
+            # prior standard deviation), so no single SGD learning rate moves all of them without diverging.
+            optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
+        else:
+            optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
@@ -3316,6 +3357,9 @@ class TestPeftCustomModel(PeftCommonTester):
             loss = y_pred.sum()
             if is_monteclora:
                 loss = loss + model._get_monteclora_loss()
+            if is_bayesian_lora:
+                # some variational parameters, e.g. lambda, are mainly driven by the KL term of the objective
+                loss = loss + model._get_bayesian_lora_loss()
             loss.backward()
             optimizer.step()
 
@@ -3412,6 +3456,8 @@ class TestPeftCustomModel(PeftCommonTester):
             lr = 1e-6
         elif is_monteclora:
             lr = 1e-3
+        elif config_kwargs.get("bayesian_lora_config", None) is not None:
+            lr = 0.01  # otherwise we get nan
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -9138,3 +9184,12 @@ class TestFsdp2UnshardedParams:
         for name, base_weight in base_weights.items():
             weight = state_dict[f"base_model.model.{name}.base_layer.weight"].full_tensor()
             assert torch.allclose(weight, base_weight, atol=1e-6)
+
+
+class TestBayesianLoraRestrictions:
+    def test_add_weighted_adapter_raises(self):
+        # The factors of Bayesian-LoRA live in lora_bayesian_A / lora_bayesian_B; combining the unused lora_A / lora_B
+        # would silently drop the adapter, so add_weighted_adapter must refuse.
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0"], bayesian_lora_config=BayesianLoraConfig()))
+        with pytest.raises(ValueError, match="add_weighted_adapter does not support Bayesian-LoRA"):
+            model.add_weighted_adapter(["default"], [1.0], adapter_name="weighted", combination_type="linear")

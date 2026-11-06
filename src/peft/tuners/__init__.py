@@ -35,6 +35,7 @@ from .loha import LoHaConfig, LoHaModel
 from .lokr import LoKrConfig, LoKrModel
 from .lora import (
     ArrowConfig,
+    BayesianLoraConfig,
     BdLoraConfig,
     EvaConfig,
     KasaConfig,
@@ -89,6 +90,7 @@ __all__ = [
     "ArrowConfig",
     "BOFTConfig",
     "BOFTModel",
+    "BayesianLoraConfig",
     "BdLoraConfig",
     "BeftConfig",
     "BeftModel",

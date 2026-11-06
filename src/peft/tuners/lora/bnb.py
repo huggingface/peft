@@ -58,6 +58,14 @@ if is_bnb_available():
         def resolve_lora_variant(self, *, config, **kwargs) -> Optional[LoraVariant]:
             if config.velora_config is not None:
                 raise ValueError(f"{self.__class__.__name__} does not support VeLoRA.")
+            if config.bayesian_lora_config is not None:
+                if config.use_dora or config.arrow_config is not None or config.alora_invocation_tokens is not None:
+                    raise ValueError(
+                        f"{self.__class__.__name__} does not support Bayesian-LoRA together with DoRA, Arrow or aLoRA."
+                    )
+                from .variants import BayesianLoraLinearVariant
+
+                return BayesianLoraLinearVariant()
             if config.arrow_config is not None:
                 from .variants import ArrowLinearVariant
 
@@ -346,6 +354,14 @@ if is_bnb_4bit_available():
         def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
             if config.velora_config is not None:
                 raise ValueError(f"{self.__class__.__name__} does not support VeLoRA.")
+            if config.bayesian_lora_config is not None:
+                if config.use_dora or config.arrow_config is not None or config.alora_invocation_tokens is not None:
+                    raise ValueError(
+                        f"{self.__class__.__name__} does not support Bayesian-LoRA together with DoRA, Arrow or aLoRA."
+                    )
+                from .variants import BayesianLoraLinearVariant
+
+                return BayesianLoraLinearVariant()
             if config.arrow_config is not None:
                 from .variants import ArrowLinearVariant
 

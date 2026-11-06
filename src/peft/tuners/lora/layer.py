@@ -1060,6 +1060,7 @@ class Linear(nn.Module, LoraLayer):
             ("monteclora_config",): variants.MontecloraLinearVariant,
             ("mica",): variants.MiCALinearVariant,
             ("kasa_config",): variants.KasaLinearVariant,
+            ("bayesian_lora_config",): variants.BayesianLoraLinearVariant,
         }
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
