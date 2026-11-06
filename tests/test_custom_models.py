@@ -29,10 +29,18 @@ import torch
 import torch.distributed as dist
 from safetensors.torch import load_file as safe_load_file
 from torch import nn
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import apply_activation_checkpointing
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from torch.distributed.tensor import DTensor
-from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
+from transformers import (
+    AutoModelForCausalLM,
+    AutoModelForSequenceClassification,
+    LlamaConfig,
+    LlamaForCausalLM,
+    LlamaModel,
+)
 from transformers.pytorch_utils import Conv1D
 
 from peft import (
@@ -78,9 +86,11 @@ from peft import (
     VeloraConfig,
     VeraConfig,
     WaveFTConfig,
+    get_base_model_state_dict,
     get_peft_model,
     get_peft_model_state_dict,
     inject_adapter_in_model,
+    set_base_model_state_dict,
     set_peft_model_state_dict,
 )
 from peft.tuners import lora
@@ -8824,6 +8834,18 @@ class TestDefaultTargetModules:
         assert model.peft_config["default"].target_modules == {"lin0", "lin1"}
 
 
+def get_tiny_llama():
+    config = LlamaConfig(
+        vocab_size=16,
+        hidden_size=8,
+        intermediate_size=16,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+    )
+    return LlamaForCausalLM(config)
+
+
 @pytest.fixture(scope="class")
 def fsdp_process_group():
     # robust and minimal FSDP setup
@@ -8858,6 +8880,87 @@ class TestPeftFsdpStateDict:
     def prepare_inputs_for_testing(self):
         X = torch.arange(90).view(9, 10).to(self.torch_device)
         return {"X": X}
+
+    @pytest.mark.parametrize("bias", ["none", "all", "lora_only"])
+    @pytest.mark.parametrize("adapter_name", ["default", "other"])
+    @pytest.mark.parametrize("pass_state_dict", [False, True])
+    def test_save_load_roundtrip_fsdp_auto_wrapped(self, bias, adapter_name, pass_state_dict):
+        # Nested FSDP wrappers disappear from state dict keys, including trainable bias keys, see #3876.
+        config = LoraConfig(target_modules=["lin0", "lin1"], bias=bias, init_lora_weights=False)
+        model = self.transformers_class.from_pretrained("MLP").to(self.torch_device)
+        model = get_peft_model(model, config, adapter_name=adapter_name).eval()
+        expected_state = {
+            key: value.detach().clone()
+            for key, value in get_peft_model_state_dict(model, adapter_name=adapter_name).items()
+        }
+        model = FSDP(
+            model,
+            use_orig_params=True,
+            device_id=self.torch_device,
+            auto_wrap_policy=partial(transformer_auto_wrap_policy, transformer_layer_cls={MLP}),
+        )
+        inputs = self.prepare_inputs_for_testing()
+        with torch.no_grad():
+            output_before = model(**inputs)
+        if pass_state_dict:
+            state_dict = get_peft_model_state_dict(
+                model.module, state_dict=model.state_dict(), adapter_name=adapter_name
+            )
+        else:
+            state_dict = get_peft_model_state_dict(model, adapter_name=adapter_name)
+        assert state_dict.keys() == expected_state.keys()
+        for key in expected_state:
+            torch.testing.assert_close(state_dict[key], expected_state[key])
+        del model
+
+        # from_pretrained sets the seed, so with init_lora_weights=False this model would start from the same weights
+        config = LoraConfig(target_modules=["lin0", "lin1"], bias=bias)
+        model = self.transformers_class.from_pretrained("MLP").to(self.torch_device)
+        model = get_peft_model(model, config, adapter_name=adapter_name).eval()
+        with torch.no_grad():
+            assert not torch.allclose(model(**inputs), output_before)
+        set_peft_model_state_dict(model, state_dict, adapter_name=adapter_name)
+        with torch.no_grad():
+            torch.testing.assert_close(model(**inputs), output_before)
+
+    @pytest.mark.parametrize(
+        "auto_wrap_policy", [None, partial(transformer_auto_wrap_policy, transformer_layer_cls={LlamaModel})]
+    )
+    @pytest.mark.parametrize("save_embedding_layers", ["auto", True])
+    def test_save_embedding_layers(self, auto_wrap_policy, save_embedding_layers):
+        model = get_tiny_llama().to(self.torch_device)
+        model = get_peft_model(model, LoraConfig(r=2, target_modules=r".*self_attn\.q_proj|model\.embed_tokens"))
+        expected_keys = get_peft_model_state_dict(model, save_embedding_layers=True).keys()
+        assert "base_model.model.model.embed_tokens.base_layer.weight" in expected_keys  # sanity check
+
+        model = FSDP(model, use_orig_params=True, device_id=self.torch_device, auto_wrap_policy=auto_wrap_policy)
+        state_dict = get_peft_model_state_dict(model, save_embedding_layers=save_embedding_layers)
+        assert state_dict.keys() == expected_keys
+
+    def test_base_model_state_dict_fsdp_auto_wrapped(self):
+        # nested FSDP wrappers are not part of the state dict keys, so the adapter keys must still be filtered out
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(8, 8)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        model = get_peft_model(nn.Sequential(Block(), nn.Linear(8, 4)), LoraConfig(r=2, target_modules=["lin"]))
+        expected_keys = sorted(get_base_model_state_dict(model))
+        assert expected_keys == ["0.lin.bias", "0.lin.weight", "1.bias", "1.weight"]
+
+        model = FSDP(
+            model,
+            use_orig_params=True,
+            device_id=self.torch_device,
+            auto_wrap_policy=partial(transformer_auto_wrap_policy, transformer_layer_cls={Block}),
+        )
+        assert any("_fsdp_wrapped_module" in name for name, _ in model.module.named_modules())  # sanity check
+        state_dict = get_base_model_state_dict(model.module)
+        assert sorted(state_dict) == expected_keys
+        set_base_model_state_dict(model.module, state_dict, strict=True)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_save_load_roundtrip_fsdp_wrapped(self, test_name, model_id, config_cls, config_kwargs):
@@ -8953,6 +9056,93 @@ class TestPeftFsdpStateDict:
         with torch.no_grad():
             output_after = model(**X)
         assert torch.allclose(output_after, output_before)
+
+
+class TestPeftCheckpointWrapperStateDict:
+    """
+    Tests with models wrapped by torch's checkpoint_wrapper. Like FSDP, it adds a level to the module names but removes
+    it from the state dict keys, see #3876.
+    """
+
+    transformers_class = MockTransformerWrapper
+    torch_device = infer_device()
+
+    def wrap_base_model(self, model):
+        base_model_cls = type(model.get_base_model())
+        apply_activation_checkpointing(model, check_fn=lambda module: isinstance(module, base_model_cls))
+        assert any("_checkpoint_wrapped_module" in name for name, _ in model.named_modules())  # sanity check
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_save_load_roundtrip(self, test_name, model_id, config_cls, config_kwargs):
+        config = config_cls(**set_init_weights_false(config_cls, config_kwargs))
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config).eval()
+        expected_state = get_peft_model_state_dict(model, save_embedding_layers=False)
+        self.wrap_base_model(model)
+
+        X = torch.arange(90).view(9, 10).to(self.torch_device)
+        with torch.no_grad():
+            output_before = model(X=X)
+
+        state_dict = get_peft_model_state_dict(model, save_embedding_layers=False)
+        assert state_dict.keys() == expected_state.keys()
+        for key in expected_state:
+            torch.testing.assert_close(state_dict[key], expected_state[key])
+
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config_cls(**config_kwargs)).eval()
+        self.wrap_base_model(model)
+        load_result = set_peft_model_state_dict(model, state_dict)
+        assert not load_result.unexpected_keys
+        with torch.no_grad():
+            torch.testing.assert_close(model(X=X), output_before)
+
+    def test_save_pretrained_and_load_adapter(self, tmp_path):
+        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+        model = get_peft_model(MLP().to(self.torch_device), config).eval()
+        self.wrap_base_model(model)
+
+        X = torch.arange(90).view(9, 10).to(self.torch_device)
+        with torch.no_grad():
+            output_before = model(X=X)
+
+        model.save_pretrained(tmp_path)
+        assert sorted(safe_load_file(tmp_path / "adapter_model.safetensors")) == [
+            "base_model.model.lin0.lora_A.weight",
+            "base_model.model.lin0.lora_B.weight",
+        ]
+
+        load_result = model.load_adapter(tmp_path, adapter_name="other")
+        assert not load_result.unexpected_keys
+        model.set_adapter("other")
+        with torch.no_grad():
+            torch.testing.assert_close(model(X=X), output_before)
+
+    @pytest.mark.parametrize("save_embedding_layers", ["auto", True])
+    def test_save_embedding_layers(self, save_embedding_layers):
+        model = get_tiny_llama().to(self.torch_device)
+        model = get_peft_model(model, LoraConfig(r=2, target_modules=r".*self_attn\.q_proj|model\.embed_tokens"))
+        expected_keys = get_peft_model_state_dict(model, save_embedding_layers=True).keys()
+        assert "base_model.model.model.embed_tokens.base_layer.weight" in expected_keys  # sanity check
+
+        apply_activation_checkpointing(model, check_fn=lambda module: isinstance(module, LlamaModel))
+        state_dict = get_peft_model_state_dict(model, save_embedding_layers=save_embedding_layers)
+        assert state_dict.keys() == expected_keys
+
+    def test_get_peft_model_on_wrapped_model(self):
+        # The adapter layers are marked as trainable by matching parameter names, which contain the wrapper name, with
+        # prefixes made for the state dict keys, which don't.
+        base_model = nn.Sequential(MLP())
+        apply_activation_checkpointing(base_model, check_fn=lambda module: isinstance(module, MLP))
+        model = get_peft_model(base_model, LoraConfig(target_modules=["lin0"]))
+        assert sorted(name for name, param in model.named_parameters() if param.requires_grad) == [
+            "base_model.model.0._checkpoint_wrapped_module.lin0.lora_A.default.weight",
+            "base_model.model.0._checkpoint_wrapped_module.lin0.lora_B.default.weight",
+        ]
+        assert sorted(get_peft_model_state_dict(model)) == [
+            "base_model.model.0.lin0.lora_A.weight",
+            "base_model.model.0.lin0.lora_B.weight",
+        ]
 
 
 @pytest.mark.skipif(platform.system() != "Linux", reason="Run FSDP tests only on Linux")
