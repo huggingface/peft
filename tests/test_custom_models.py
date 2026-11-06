@@ -84,6 +84,7 @@ from peft import (
     inject_adapter_in_model,
     set_peft_model_state_dict,
 )
+from peft.helpers import enable_probabilistic_sampling
 from peft.tuners import lora
 from peft.tuners.lora.config import BdLoraConfig
 from peft.tuners.lora.monteclora import MontecloraSampler
@@ -9193,3 +9194,59 @@ class TestBayesianLoraRestrictions:
         model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0"], bayesian_lora_config=BayesianLoraConfig()))
         with pytest.raises(ValueError, match="add_weighted_adapter does not support Bayesian-LoRA"):
             model.add_weighted_adapter(["default"], [1.0], adapter_name="weighted", combination_type="linear")
+
+
+class TestEnableProbabilisticSampling:
+    def get_model(self):
+        torch.manual_seed(0)
+        config = LoraConfig(
+            target_modules=["lin0", "lin1"], init_lora_weights=False, bayesian_lora_config=BayesianLoraConfig()
+        )
+        return get_peft_model(MLP(), config).eval()
+
+    def test_sampling_only_inside_context(self):
+        model = self.get_model()
+        X = torch.randn(4, 10)
+        with torch.no_grad():
+            out_before = model(X)
+            assert torch.allclose(model(X), out_before)  # point estimate in eval mode
+            with enable_probabilistic_sampling(model):
+                out_sample1 = model(X)
+                out_sample2 = model(X)
+            out_after = model(X)
+        assert not torch.allclose(out_sample1, out_sample2)
+        assert not torch.allclose(out_sample1, out_before)
+        assert torch.allclose(out_after, out_before)
+
+    def test_tuner_model_accepted(self):
+        model = self.get_model()
+        X = torch.randn(4, 10)
+        with torch.no_grad(), enable_probabilistic_sampling(model.base_model):
+            assert not torch.allclose(model(X), model(X))
+
+    def test_state_restored_after_exception(self):
+        model = self.get_model()
+        with pytest.raises(RuntimeError, match="boom"):
+            with enable_probabilistic_sampling(model):
+                raise RuntimeError("boom")
+        layers = [m for m in model.modules() if hasattr(m, "bayesian_lora_sample_in_eval")]
+        assert layers and not any(layer.bayesian_lora_sample_in_eval for layer in layers)
+
+    def test_merged_adapter_warns(self):
+        model = self.get_model()
+        model.merge_adapter()
+        with pytest.warns(UserWarning, match="merged"):
+            with enable_probabilistic_sampling(model):
+                pass
+
+    def test_plain_lora_raises(self):
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0"]))
+        with pytest.raises(ValueError, match="only Bayesian-LoRA"):
+            with enable_probabilistic_sampling(model):
+                pass
+
+    def test_non_lora_raises(self):
+        model = get_peft_model(MLP(), IA3Config(target_modules=["lin0"], feedforward_modules=[]))
+        with pytest.raises(TypeError, match="not supported for IA3Model"):
+            with enable_probabilistic_sampling(model):
+                pass

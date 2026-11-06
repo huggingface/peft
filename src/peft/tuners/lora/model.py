@@ -1322,22 +1322,17 @@ class LoraModel(BaseTuner):
         return kl
 
     @contextmanager
-    def bayesian_lora_sampling(self):
+    def _enable_probabilistic_sampling(self):
         """
-        Context manager that samples the Bayesian-LoRA weights from the posterior in every forward pass, also in eval
-        mode. Use it to obtain Monte Carlo predictions by averaging the outputs of several forward passes:
-
-        ```py
-        model.eval()
-        with torch.no_grad(), model.bayesian_lora_sampling():
-            probs = torch.stack([model(**batch).logits.softmax(-1) for _ in range(num_samples)]).mean(0)
-        ```
-
-        Merged adapters are deterministic, so sampling requires unmerged adapters.
+        Sample the weights of the probabilistic LoRA variants (currently Bayesian-LoRA) in every forward pass, also in
+        eval mode. Use it through [`peft.helpers.enable_probabilistic_sampling`].
         """
         layers = [module for module in self.modules() if hasattr(module, "bayesian_lora_sample_in_eval")]
         if not layers:
-            raise ValueError("No Bayesian-LoRA layers found.")
+            raise ValueError(
+                "No layers supporting probabilistic sampling found. Currently, only Bayesian-LoRA "
+                "(`LoraConfig(bayesian_lora_config=...)`) is supported."
+            )
         if any(layer.merged for layer in layers):
             warnings.warn("Some Bayesian-LoRA layers are merged; their output stays deterministic.")
         for layer in layers:

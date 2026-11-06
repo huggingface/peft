@@ -223,6 +223,48 @@ def rescale_adapter_scale(model: nn.Module, multiplier: Union[float, int]) -> It
 
 
 @contextmanager
+def enable_probabilistic_sampling(model: nn.Module) -> Iterator[None]:
+    """
+    Context manager that samples the weights of a probabilistic PEFT adapter in every forward pass, also in eval mode.
+
+    Probabilistic adapters, such as [Bayesian-LoRA](https://huggingface.co/papers/2601.21003), sample their weights
+    during training but use a deterministic point estimate in eval mode, so that they behave like a regular adapter
+    and can be merged. Inside this context manager, the weights are sampled from the learned posterior in every forward
+    pass instead, which allows to obtain Monte Carlo predictions by averaging the outputs of several forward passes.
+    The deterministic behavior is restored when the context manager exits.
+
+    Currently, this is supported for LoRA with Bayesian-LoRA (`LoraConfig(bayesian_lora_config=...)`). Merged adapters
+    are deterministic, so sampling requires unmerged adapters.
+
+    Args:
+        model (`nn.Module`):
+            The [`PeftModel`] (or the underlying tuner model) containing the probabilistic adapter.
+
+    Raises:
+        TypeError: If the PEFT method of the model does not support probabilistic sampling.
+        ValueError: If the model does not contain any adapter that supports probabilistic sampling.
+
+    Example:
+
+    ```python
+    >>> from peft.helpers import enable_probabilistic_sampling
+
+    >>> model.eval()
+    >>> with torch.no_grad(), enable_probabilistic_sampling(model):
+    ...     probs = torch.stack([model(**inputs).logits.softmax(-1) for _ in range(10)]).mean(0)
+    ```
+    """
+    tuner = model.base_model if isinstance(model, PeftModel) else model
+    if not isinstance(tuner, LoraModel):
+        raise TypeError(
+            f"Probabilistic sampling is not supported for {type(tuner).__name__}. Currently, only LoRA with "
+            "Bayesian-LoRA (`LoraConfig(bayesian_lora_config=...)`) is supported."
+        )
+    with tuner._enable_probabilistic_sampling():
+        yield
+
+
+@contextmanager
 def disable_input_dtype_casting(model: nn.Module, active: bool = True):
     """
     Context manager disables input dtype casting to the dtype of the weight.

@@ -1601,7 +1601,7 @@ class BayesianLoraLinearVariant(LoraVariant):
 
     Both LoRA factors are random variables, parametrized by `InducingWeight` modules in `lora_bayesian_A` and
     `lora_bayesian_B`. The factors are sampled in training mode; in eval mode, a deterministic point estimate is used,
-    unless sampling was enabled with `LoraModel.bayesian_lora_sampling`. Merging uses the point estimate.
+    unless sampling was enabled with `peft.helpers.enable_probabilistic_sampling`. Merging uses the point estimate.
 
     The regular `lora_A` / `lora_B` weights are not used by this variant and are frozen.
     """

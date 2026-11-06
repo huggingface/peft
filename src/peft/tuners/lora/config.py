@@ -527,8 +527,8 @@ class BayesianLoraConfig:
           of training batches).
         - In eval mode, a deterministic point estimate of the factors is used, so the adapter behaves like a regular
           LoRA adapter and can be merged.
-        - To obtain Monte Carlo predictions, sample in eval mode with `with model.bayesian_lora_sampling(): ...` and
-          average the outputs of several forward passes.
+        - To obtain Monte Carlo predictions, sample in eval mode with `with
+          peft.helpers.enable_probabilistic_sampling(model): ...` and average the outputs of several forward passes.
 
     The initialization is controlled by `LoraConfig.init_lora_weights`: if `True` (default), the point estimate of B is
     zero, so that the adapter does not change the output at initialization; if `False`, the inducing weights of both
