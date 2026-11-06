@@ -37,6 +37,18 @@ class LoHaConfig(LycorisConfig):
         use_effective_conv2d (`bool`):
             Use parameter effective decomposition for Conv2d (and Conv1d) with ksize > 1 ("Proposition 3" from FedPara
             paper).
+        use_khatri_rao (`bool`):
+            Execute the unmerged forward pass in factored form via the Khatri-Rao identity (as used by ABBA,
+            https://huggingface.co/papers/2505.14238): the Hadamard product of two low-rank products is itself the
+            product of two factor-sized matrices, making LoHa an exact rank r² LoRA. This reduces both runtime and
+            memory, without changing the results (up to numerical precision). Layers that use the Tucker decomposition
+            (convolution layers with `use_effective_conv2d=True`) are not changed; if no targeted layer supports the
+            factored path at all, an error is raised. Additionally, when `init_weights=True`, a LoRA-anchored
+            initialization is used: the second factor pair starts as the all-ones matrix, so that training starts out
+            exactly like a plain LoRA and higher-rank directions are only learned gradually. Note that this
+            initialization interacts with weight decay: decaying the anchor entries of `hada_w2_a`/`hada_w2_b` pulls
+            the delta weight toward zero, so consider excluding these parameters from weight decay. Since the effective
+            rank of the delta weight is r², consider choosing `alpha` relative to r² rather than r.
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
@@ -83,6 +95,24 @@ class LoHaConfig(LycorisConfig):
             "help": (
                 "Use parameter effective decomposition for Conv2d (and Conv1d) with ksize > 1 "
                 '("Proposition 3" from FedPara paper)'
+            )
+        },
+    )
+    use_khatri_rao: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Execute the unmerged forward pass in factored form via the Khatri-Rao identity (as used by ABBA, "
+                "https://huggingface.co/papers/2505.14238): the Hadamard product of two low-rank products is itself the "
+                "product of two factor-sized matrices, making LoHa an exact rank r² LoRA. This reduces both runtime and "
+                "memory, without changing the results (up to numerical precision). Layers that use the Tucker decomposition "
+                "(convolution layers with `use_effective_conv2d=True`) are not changed; if no targeted layer supports the "
+                "factored path at all, an error is raised. Additionally, when `init_weights=True`, a LoRA-anchored "
+                "initialization is used: the second factor pair starts as the all-ones matrix, so that training starts out "
+                "exactly like a plain LoRA and higher-rank directions are only learned gradually. Note that this "
+                "initialization interacts with weight decay: decaying the anchor entries of `hada_w2_a`/`hada_w2_b` pulls "
+                "the delta weight toward zero, so consider excluding these parameters from weight decay. Since the effective "
+                "rank of the delta weight is r², consider choosing `alpha` relative to r² rather than r."
             )
         },
     )
