@@ -86,9 +86,11 @@ from peft import (
     VeloraConfig,
     VeraConfig,
     WaveFTConfig,
+    get_base_model_state_dict,
     get_peft_model,
     get_peft_model_state_dict,
     inject_adapter_in_model,
+    set_base_model_state_dict,
     set_peft_model_state_dict,
 )
 from peft.tuners import lora
@@ -8919,6 +8921,31 @@ class TestPeftFsdpStateDict:
         model = FSDP(model, use_orig_params=True, device_id=self.torch_device, auto_wrap_policy=auto_wrap_policy)
         state_dict = get_peft_model_state_dict(model, save_embedding_layers=save_embedding_layers)
         assert state_dict.keys() == expected_keys
+
+    def test_base_model_state_dict_fsdp_auto_wrapped(self):
+        # nested FSDP wrappers are not part of the state dict keys, so the adapter keys must still be filtered out
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(8, 8)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        model = get_peft_model(nn.Sequential(Block(), nn.Linear(8, 4)), LoraConfig(r=2, target_modules=["lin"]))
+        expected_keys = sorted(get_base_model_state_dict(model))
+        assert expected_keys == ["0.lin.bias", "0.lin.weight", "1.bias", "1.weight"]
+
+        model = FSDP(
+            model,
+            use_orig_params=True,
+            device_id=self.torch_device,
+            auto_wrap_policy=partial(transformer_auto_wrap_policy, transformer_layer_cls={Block}),
+        )
+        assert any("_fsdp_wrapped_module" in name for name, _ in model.module.named_modules())  # sanity check
+        state_dict = get_base_model_state_dict(model.module)
+        assert sorted(state_dict) == expected_keys
+        set_base_model_state_dict(model.module, state_dict, strict=True)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_save_load_roundtrip_fsdp_wrapped(self, test_name, model_id, config_cls, config_kwargs):

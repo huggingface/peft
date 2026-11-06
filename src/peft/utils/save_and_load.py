@@ -861,6 +861,7 @@ def _get_adapter_state_dict_key_prefixes(model) -> set[str]:
 
     adapter_key_prefixes: set[str] = set()
     for module_name, module in model.base_model.model.named_modules():
+        module_name = remove_torch_wrapper_names(module_name)
         if isinstance(module, AuxiliaryTrainingWrapper):
             # Use adapter_state_dict_load_map to get the actual state dict keys owned by
             # each adapter
