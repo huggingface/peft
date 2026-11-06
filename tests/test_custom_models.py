@@ -8963,14 +8963,22 @@ class TestPeftFsdpStateDict:
 @pytest.mark.usefixtures("fsdp_process_group")
 class TestFsdp2UnshardedParams:
     """
-    Changes to `requires_grad` must reach the FSDP2 shards while a forward left unsharded parameters, see #3800.
+    Changes to `requires_grad` and merges must reach the FSDP2 shards while a forward left unsharded parameters, see
+    #3800.
     """
 
-    def get_model(self, adapter_names=("default",), reshard_after_forward=False, fsdp_module_names=("lin0",)):
+    def get_model(
+        self,
+        adapter_names=("default",),
+        reshard_after_forward=False,
+        fsdp_module_names=("lin0",),
+    ):
         # imported here, as FSDP2 is public from torch 2.6 on
         from torch.distributed.fsdp import fully_shard
 
         torch.manual_seed(0)
+        # init_lora_weights=False gives lora_B a random (non-zero) initialization, so the delta of an adapter is
+        # non-zero and a merge changes the weights.
         config = LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False)
         model = get_peft_model(MLP(), config, adapter_name=adapter_names[0])
         for adapter_name in adapter_names[1:]:
@@ -9138,3 +9146,252 @@ class TestFsdp2UnshardedParams:
         for name, base_weight in base_weights.items():
             weight = state_dict[f"base_model.model.{name}.base_layer.weight"].full_tensor()
             assert torch.allclose(weight, base_weight, atol=1e-6)
+
+    def test_merge_after_forward_reaches_shards(self):
+        # A merge after a forward goes into the unsharded parameters, which the next reshard drops without writing
+        # them back, so the merged weights never reach the shards that FSDP2 keeps, see #3800.
+        model = self.get_model()
+        names = ("lin0", "lin1")
+        base_weights = {
+            name: model.base_model.model.get_submodule(name).base_layer.weight.full_tensor().clone() for name in names
+        }
+        deltas = {
+            name: model.base_model.model.get_submodule(name).get_delta_weight("default").full_tensor().clone()
+            for name in names
+        }
+        assert any(delta.abs().sum() > 0 for delta in deltas.values())
+
+        with torch.no_grad():
+            model(self.get_input())
+        model.merge_adapter()
+
+        # the state dict is gathered from the shards, so it only contains the merged weights if the merge reached them
+        state_dict = model.state_dict()
+        for name in names:
+            weight = state_dict[f"base_model.model.{name}.base_layer.weight"].full_tensor()
+            assert torch.allclose(weight, base_weights[name] + deltas[name], atol=1e-6)
+
+    def test_unmerge_after_forward_reaches_shards(self):
+        # The unmerge has to subtract the delta from the shards as well, otherwise the next reshard brings the merged
+        # weights back, see #3800.
+        model = self.get_model()
+        names = ("lin0", "lin1")
+        base_weights = {
+            name: model.base_model.model.get_submodule(name).base_layer.weight.full_tensor().clone() for name in names
+        }
+
+        model.merge_adapter()
+        with torch.no_grad():
+            model(self.get_input())  # the forward leaves the unsharded parameters registered
+        model.unmerge_adapter()
+
+        state_dict = model.state_dict()  # reshards, so this returns the sharded weights
+        for name in names:
+            weight = state_dict[f"base_model.model.{name}.base_layer.weight"].full_tensor()
+            assert torch.allclose(weight, base_weights[name], atol=1e-6)
+
+    def get_tuner_model(self, config, reshard_after_forward=False, fsdp_module_names=("lin0",)):
+        # like `get_model`, but for an arbitrary tuner config instead of plain LoRA
+        # imported here, as FSDP2 is public from torch 2.6 on
+        from torch.distributed.fsdp import fully_shard
+
+        torch.manual_seed(0)
+        model = get_peft_model(MLP(), config)
+        mesh = init_device_mesh("cpu", (1,))
+        # by default, lin0 gets its own FSDP module and lin1 belongs to the root FSDP module, which is the PeftModel
+        for name in fsdp_module_names:
+            module = model.base_model.model.get_submodule(name)
+            fully_shard(module, mesh=mesh, reshard_after_forward=reshard_after_forward)
+        fully_shard(model, mesh=mesh, reshard_after_forward=reshard_after_forward)
+        return model
+
+    @pytest.mark.parametrize("reshard_after_forward", [False, None])
+    @pytest.mark.parametrize(
+        "get_config, safe_merge",
+        [
+            pytest.param(
+                lambda: LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False), False, id="lora"
+            ),
+            pytest.param(
+                lambda: LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False),
+                True,
+                id="lora-safe-merge",
+            ),
+            pytest.param(
+                lambda: LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False, use_dora=True),
+                False,
+                id="dora",
+            ),
+            pytest.param(
+                lambda: LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False, use_dora=True),
+                True,
+                id="dora-safe-merge",
+            ),
+            pytest.param(
+                lambda: IA3Config(
+                    target_modules=["lin0", "lin1"], feedforward_modules=["lin1"], init_ia3_weights=False
+                ),
+                False,
+                id="ia3",
+            ),
+            pytest.param(
+                lambda: IA3Config(
+                    target_modules=["lin0", "lin1"], feedforward_modules=["lin1"], init_ia3_weights=False
+                ),
+                True,
+                id="ia3-safe-merge",
+            ),
+        ],
+    )
+    def test_merge_and_unmerge_reach_shards(self, get_config, safe_merge, reshard_after_forward):
+        # Merging under FSDP2 has to change the sharded base weights, not just report `merged=True`, and the unmerge
+        # has to restore the base weights without subtracting a delta that was never added, see #3800 and #3839.
+        X = self.get_input()
+
+        torch.manual_seed(0)
+        plain = get_peft_model(MLP(), get_config()).eval()
+        with torch.no_grad():
+            out_base = plain(X)
+            plain.merge_adapter(safe_merge=safe_merge)
+            out_merged = plain(X)
+        plain_state_dict = plain.state_dict()
+
+        model = self.get_tuner_model(get_config(), reshard_after_forward=reshard_after_forward).eval()
+        base_weights = {
+            name: param.full_tensor().clone()
+            for name, param in model.state_dict().items()
+            if name.endswith(".base_layer.weight")
+        }
+        with torch.no_grad():
+            model(X)  # leaves the unsharded parameters registered
+            model.merge_adapter(safe_merge=safe_merge)
+            out = model(X)
+            assert model.base_model.model.lin0.merged
+            assert model.base_model.model.lin1.merged
+
+        # the state dict is gathered from the shards, so it only contains the merged weights if the merge reached them
+        state_dict = model.state_dict()
+        for name in base_weights:
+            assert torch.allclose(state_dict[name].full_tensor(), plain_state_dict[name], atol=1e-5), name
+        assert torch.allclose(out, out_merged, atol=1e-4)
+
+        with torch.no_grad():
+            model.unmerge_adapter()
+            assert not model.base_model.model.lin0.merged
+            out = model(X)
+
+        state_dict = model.state_dict()
+        for name, base_weight in base_weights.items():
+            assert torch.allclose(state_dict[name].full_tensor(), base_weight, atol=1e-5), name
+        assert torch.allclose(out, out_base, atol=1e-4)
+
+    @pytest.mark.parametrize("reshard_after_forward", [False, None])
+    @pytest.mark.parametrize(
+        "get_config",
+        [
+            pytest.param(lambda: LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False), id="lora"),
+            pytest.param(
+                lambda: LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False, use_dora=True), id="dora"
+            ),
+            pytest.param(
+                lambda: IA3Config(
+                    target_modules=["lin0", "lin1"], feedforward_modules=["lin1"], init_ia3_weights=False
+                ),
+                id="ia3",
+            ),
+        ],
+    )
+    def test_disable_adapter_unmerges_merged_layers(self, get_config, reshard_after_forward):
+        # With the merged weights in the FSDP2 shards, entering `disable_adapter()` unmerges first, so that the
+        # context forwards the true base weights and the unmerge reaches the sharded parameters.
+        X = self.get_input()
+
+        torch.manual_seed(0)
+        plain = get_peft_model(MLP(), get_config()).eval()
+        with torch.no_grad(), plain.disable_adapter():
+            out_base = plain(X)
+        with torch.no_grad():
+            out_adapter = plain(X)
+
+        model = self.get_tuner_model(get_config(), reshard_after_forward=reshard_after_forward).eval()
+        base_weights = {
+            name: param.full_tensor().clone()
+            for name, param in model.state_dict().items()
+            if name.endswith(".base_layer.weight")
+        }
+        with torch.no_grad():
+            model(X)
+            model.merge_adapter()
+            with model.disable_adapter():
+                out = model(X)
+            assert torch.allclose(out, out_base, atol=1e-4)
+            assert not model.base_model.model.lin0.merged
+            out = model(X)
+
+        # the unmerge of the merged layers reached the shards, i.e. the base weights are back in the state dict
+        state_dict = model.state_dict()
+        for name, base_weight in base_weights.items():
+            assert torch.allclose(state_dict[name].full_tensor(), base_weight, atol=1e-5), name
+        assert torch.allclose(out, out_adapter, atol=1e-4)
+
+    @pytest.mark.parametrize(
+        "model_factory, wrap_name, get_config, get_x",
+        [
+            pytest.param(
+                ModelEmbConv1D,
+                "emb",
+                lambda: LoraConfig(target_modules=["emb", "conv1d", "lin0"], init_lora_weights=False),
+                lambda: torch.arange(90).view(9, 10),
+                id="lora-embedding-conv1d",
+            ),
+            pytest.param(
+                ModelConv2D,
+                "conv2d",
+                lambda: LoraConfig(target_modules=["conv2d"], init_lora_weights=False),
+                lambda: torch.rand(2, 45),
+                id="lora-conv2d",
+            ),
+        ],
+    )
+    def test_merge_reaches_shards_embedding_and_conv(self, model_factory, wrap_name, get_config, get_x):
+        # The merge writes in place into the base weights (`copy_`), so it also reaches FSDP2's sharded parameters for
+        # `Embedding` and convolutional layers, not only `Linear`. DoRA and (IA)^3 are not parametrized here, as their
+        # conv merge needs DTensor ops on sharded dims that torch does not support yet, so they raise instead of
+        # silently leaving the weights unchanged as before.
+        # imported here, as FSDP2 is public from torch 2.6 on
+        from torch.distributed.fsdp import fully_shard
+
+        X = get_x()
+
+        torch.manual_seed(0)
+        plain = get_peft_model(model_factory(), get_config()).eval()
+        with torch.no_grad():
+            plain.merge_adapter()
+            out_merged = plain(X)
+        plain_state_dict = plain.state_dict()
+
+        torch.manual_seed(0)
+        model = get_peft_model(model_factory(), get_config()).eval()
+        mesh = init_device_mesh("cpu", (1,))
+        fully_shard(model.base_model.model.get_submodule(wrap_name), mesh=mesh, reshard_after_forward=False)
+        fully_shard(model, mesh=mesh, reshard_after_forward=False)
+        base_weights = {
+            name: param.full_tensor().clone()
+            for name, param in model.state_dict().items()
+            if name.endswith(".base_layer.weight")
+        }
+        with torch.no_grad():
+            model(X)  # leaves the unsharded parameters registered
+            model.merge_adapter()
+            out = model(X)
+
+        state_dict = model.state_dict()
+        for name in base_weights:
+            assert torch.allclose(state_dict[name].full_tensor(), plain_state_dict[name], atol=1e-5), name
+        assert torch.allclose(out, out_merged, atol=1e-4)
+
+        with torch.no_grad():
+            model.unmerge_adapter()
+        state_dict = model.state_dict()
+        for name, base_weight in base_weights.items():
+            assert torch.allclose(state_dict[name].full_tensor(), base_weight, atol=1e-5), name

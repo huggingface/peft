@@ -1085,6 +1085,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self._adapters_disabled = was_disabled
 
         else:  # LoRA, LoHa, etc.
+            if get_fsdp_modules(self) and any(isinstance(m, BaseTunerLayer) and m.merged for m in self.modules()):
+                # Under FSDP2, the merged weights live in the sharded parameters. Disabling the adapter layers while
+                # the weights are still merged would forward the merged weights as if they were the base weights, so
+                # unmerge first, which also brings the merge into the shards.
+                self.unmerge_adapter()
             model_status = self.get_model_status()
             if model_status.enabled == "irregular":
                 warnings.warn(
@@ -1742,7 +1747,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             # unmerges a merged layer before setting it active, but only after the reshard attempt already ran,
             # and by unmerging here first, that call never sees a merged layer to warn about, so warn here instead.
             warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
-            self.base_model.unmerge_adapter()
+            self.unmerge_adapter()
         self._reshard_fsdp_modules()
         self.active_adapter = adapter_name
         if not is_prompt_learning:
@@ -1773,11 +1778,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self._reshard_fsdp_modules()
         self.base_model.set_requires_grad(adapter_names=adapter_names, requires_grad=requires_grad)
 
-    def _reshard_fsdp_modules(self) -> None:
+    def _reshard_fsdp_modules(self, include_merged: bool = False) -> None:
         """
         Reshard the FSDP2 modules in this model, including itself, so that changes to `requires_grad` land on the
         sharded parameters. Must be called on all ranks, since a resharded module is all-gathered again in its next
         forward.
+
+        Args:
+            include_merged (`bool`, *optional*):
+                Whether to also reshard the FSDP2 modules that shard the parameters of a merged layer. This is only
+                safe if the merge is in the sharded parameters, which is what
+                [`~PeftModel.merge_adapter`] ensures.
         """
         fsdp_modules = set(get_fsdp_modules(self))
         if not fsdp_modules:
@@ -1792,7 +1803,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             for submodule in tuner_layer.modules()
         }
         for fsdp_module in fsdp_modules:
-            if merged_modules:
+            if merged_modules and not include_merged:
                 # an FSDP module shards the parameters of its submodules, except those inside nested FSDP modules
                 sharded_modules, stack = set(), [fsdp_module]
                 while stack:
@@ -1830,6 +1841,44 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             ):
                 self._reshard_fsdp_modules()
                 self.base_model.enable_adapter_layers()
+
+    def merge_adapter(
+        self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False, **kwargs: Any
+    ) -> None:
+        """
+        Merge the active adapters into the base model.
+
+        Args:
+            adapter_names (`list[str]`, *optional*):
+                The list of adapter names that should be merged. If `None`, all active adapters will be merged.
+                Defaults to `None`.
+            safe_merge (`bool`, *optional*):
+                If `True`, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+            kwargs: (`optional`):
+                Additional keyword arguments passed to the base model's `merge_adapter` method.
+        """
+        # The merge has to end up in the weights that FSDP2 keeps, i.e. the shards. A forward with
+        # `reshard_after_forward=False` leaves the unsharded parameters registered, and a merge into those is dropped
+        # by the next reshard, see #3800. Resharding is safe even if a layer is already merged, because the merge is
+        # written in place into the sharded parameters.
+        self._reshard_fsdp_modules(include_merged=True)
+        self.base_model.merge_adapter(adapter_names=adapter_names, safe_merge=safe_merge, **kwargs)
+
+    def unmerge_adapter(self, **kwargs: Any) -> None:
+        """
+        Unmerge the adapters from the base model.
+
+        Args:
+            kwargs: (`optional`):
+                Additional keyword arguments passed to the base model's `unmerge_adapter` method.
+        """
+        # The unmerge has to end up in the shards as well, see merge_adapter. Resharding a merged layer is safe here
+        # because the merge is in the sharded parameters.
+        if any(isinstance(module, BaseTunerLayer) and module.merged for module in self.modules()):
+            self._reshard_fsdp_modules(include_merged=True)
+        self.base_model.unmerge_adapter(**kwargs)
 
     @property
     def base_model_torch_dtype(self):

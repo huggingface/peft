@@ -1111,9 +1111,11 @@ class Linear(nn.Module, LoraLayer):
                                 f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
 
-                    base_layer.weight.data = orig_weight
+                    # In-place update so that the change reaches FSDP2's sharded parameters; assigning `.data` would
+                    # just rebind the attribute and be lost.
+                    base_layer.weight.data.copy_(orig_weight)
                     if new_bias is not None:
-                        base_layer.bias.data = new_bias.to(orig_dtype)
+                        base_layer.bias.data.copy_(new_bias.to(orig_dtype))
 
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
@@ -1149,7 +1151,7 @@ class Linear(nn.Module, LoraLayer):
                     weight.data -= delta_weight.to(orig_dtype)
                 else:
                     unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
-                    weight.data = unmerged
+                    weight.data.copy_(unmerged)
 
                 if self.lora_bias[active_adapter]:
                     self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias * self.scaling[active_adapter]
@@ -1477,7 +1479,9 @@ class Embedding(nn.Module, LoraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weight
+                    # In-place update so that the change reaches FSDP2's sharded parameters; assigning `.data` would
+                    # just rebind the attribute and be lost.
+                    base_layer.weight.data.copy_(orig_weight)
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
                         base_layer.weight.data += self.get_delta_weight(active_adapter).to(orig_dtype)
@@ -1501,7 +1505,7 @@ class Embedding(nn.Module, LoraLayer):
                     weight.data -= self.get_delta_weight(active_adapter).to(orig_dtype)
                 else:
                     unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
-                    weight.data = unmerged
+                    weight.data.copy_(unmerged)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -1832,9 +1836,11 @@ class _ConvNd(nn.Module, LoraLayer):
                                 f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
 
-                    base_layer.weight.data = orig_weight
+                    # In-place update so that the change reaches FSDP2's sharded parameters; assigning `.data` would
+                    # just rebind the attribute and be lost.
+                    base_layer.weight.data.copy_(orig_weight)
                     if new_bias is not None:
-                        base_layer.bias.data = new_bias.to(orig_dtype)
+                        base_layer.bias.data.copy_(new_bias.to(orig_dtype))
 
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
@@ -1869,7 +1875,7 @@ class _ConvNd(nn.Module, LoraLayer):
                     weight.data -= delta_weight.to(orig_dtype)
                 else:
                     unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
-                    weight.data = unmerged
+                    weight.data.copy_(unmerged)
 
                 if self.lora_bias[active_adapter]:
                     self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias * self.scaling[active_adapter]
