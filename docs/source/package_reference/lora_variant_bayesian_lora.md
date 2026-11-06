@@ -66,7 +66,7 @@ Outside of the context manager, the model is deterministic again. Merged adapter
 
 Bayesian-LoRA supports `nn.Linear` layers, including bitsandbytes 4-bit and 8-bit quantized layers. `add_weighted_adapter` is not supported.
 
-A benchmark on ARC-Easy and ARC-Challenge with Llama-2-7B, comparing Bayesian-LoRA with MonteCLoRA, is available [here](https://github.com/moulelin/Bayesian-LoRA/tree/main/peft_experiments).
+A complete working example is available at [`examples/bayesian_lora_finetuning`](https://github.com/huggingface/peft/tree/main/examples/bayesian_lora_finetuning). A benchmark on ARC-Easy and ARC-Challenge with Llama-2-7B, comparing Bayesian-LoRA with MonteCLoRA, is available [here](https://github.com/moulelin/Bayesian-LoRA/tree/main/peft_experiments).
 
 # API
 
