@@ -31,23 +31,23 @@ config = LoraConfig(
 )
 ```
 
-During training you must add the variational regularization loss to the task loss. The simplest way is to call [`LoraModel._get_monteclora_loss`] on the underlying `LoraModel`:
+During training you must add the variational regularization loss to the task loss using [`PeftModel.get_peft_loss`]:
 
 ```py
 task_loss = ...  # standard loss returned by your model
-monteclora_loss = model._get_monteclora_loss()  # 0.0 if MonteCLoRA is not used
+monteclora_loss = model.get_peft_loss()  # 0.0 if no additional PEFT loss is required
 total_loss = task_loss + monteclora_loss
 total_loss.backward()
 ```
 
-If you train with the HF `Trainer`, you can simply mix in [`peft.helpers.MontecloraTrainerMixin`] which does this for you in `compute_loss`:
+If you train with the HF `Trainer`, mix in [`helpers.PeftTrainerMixin`] to add this loss automatically:
 
 ```py
 from transformers import Trainer
-from peft.helpers import MontecloraTrainerMixin
+from peft.helpers import PeftTrainerMixin
 
 
-class MontecloraTrainer(MontecloraTrainerMixin, Trainer):
+class MontecloraTrainer(PeftTrainerMixin, Trainer):
     pass
 ```
 

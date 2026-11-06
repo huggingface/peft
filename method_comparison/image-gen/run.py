@@ -97,6 +97,10 @@ class DummyGradScaler:
     def update(self):
         pass
 
+    def get_scale(self):
+        # A constant scale indicates that optimizer updates are never skipped.
+        return 1.0
+
 
 def precompute_prompt_caches(
     pipeline, train_prompts: list[str], eval_prompts: list[str], device_type: str, train_config: TrainConfig
@@ -281,8 +285,6 @@ def train(
     pipeline,
     train_config: TrainConfig,
     accelerator_memory_init: int,
-    is_adalora: bool,
-    is_adamss: bool,
     print_verbose: Callable[..., None],
     device_type: str,
 ) -> tuple[TrainResult, dict[str, torch.Tensor]]:
@@ -440,16 +442,21 @@ def train(
                 )
                 loss = loss.mean()
 
+            if hasattr(transformer, "peft_config"):
+                loss = loss + transformer.get_peft_loss()
             grad_scaler.scale(loss).backward()
             if train_config.grad_norm_clip:
                 grad_scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(transformer.parameters(), train_config.grad_norm_clip)
+            loss_scale_before_step = grad_scaler.get_scale()
             grad_scaler.step(optimizer)
             grad_scaler.update()
-            lr_scheduler.step()
-
-            if is_adalora or is_adamss:
-                transformer.base_model.update_and_allocate(step)
+            # A decreased scale signals overflow and a skipped optimizer update. Skip scheduler and PEFT updates too.
+            optimizer_step_was_skipped = grad_scaler.get_scale() < loss_scale_before_step
+            if not optimizer_step_was_skipped:
+                lr_scheduler.step()
+                if hasattr(transformer, "peft_config"):
+                    transformer.on_peft_optimizer_step(step)
 
             loss = loss.detach()
             losses.append(loss)
@@ -666,8 +673,6 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool, bucket_name
         pipeline=pipeline,
         train_config=train_config,
         accelerator_memory_init=accelerator_memory_init,
-        is_adalora=peft_config is not None and peft_config.peft_type == "ADALORA",
-        is_adamss=peft_config is not None and peft_config.peft_type == "ADAMSS",
         print_verbose=print_verbose,
         device_type=device_type,
     )
