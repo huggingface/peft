@@ -27,11 +27,11 @@ from huggingface_hub.errors import EntryNotFoundError, LocalEntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
 from transformers.utils import http_user_agent
 
-from peft.import_utils import is_transformers_ge_v5
+from peft.import_utils import is_transformers_dtensor_tp, is_transformers_ge_v5
 from peft.mapping import PEFT_TYPE_TO_TUNER_MAPPING
 
 from .constants import INCLUDE_LINEAR_LAYERS_SHORTHAND
-from .integrations import TpInfo
+from .integrations import TpInfo, dtensor_from_local_like
 from .other import (
     EMBEDDING_LAYER_NAMES,
     SAFETENSORS_WEIGHTS_NAME,
@@ -42,6 +42,56 @@ from .other import (
     match_target_against_key,
 )
 from .peft_types import PeftType
+from .warning import PeftWarning
+
+
+def _validate_lora_adapter_state_dict(
+    state_dict: dict[str, torch.Tensor],
+    adapter_name: str = "default",
+) -> None:
+    """Refuse to save a LoRA adapter state dict whose ``lora_A`` / ``lora_B`` tensors look unsharded.
+
+    A correctly-saved LoRA adapter has ``lora_A`` of shape ``(rank, in_dim)`` and ``lora_B`` of shape ``(out_dim,
+    rank)`` - both 2-D and non-empty. If any such tensor is 1-D or has a zero-sized dimension, it typically indicates a
+    partitioned-parameter export under DeepSpeed ZeRO-3 / FSDP that did not gather model shards before
+    ``save_pretrained``. The artifact looks structurally valid (filenames + ``adapter_config.json`` present), but
+    downstream loaders fail due to the tensor being incomplete.
+
+    Raise a warning so the failure surfaces at write time, with an actionable hint, instead of corrupting the artifact
+    and deferring the crash to whatever later loads it. Only the ``lora_A`` / ``lora_B`` keys are inspected;
+    legitimately 1-D parameters such as DoRA's ``lora_magnitude_vector`` and AdaLoRA's ``lora_E`` are not affected.
+
+    Args:
+        state_dict: LoRA-only state dict that will be written to disk.
+        adapter_name: Adapter name being saved, used in the error message only.
+
+    Warns:
+        PeftWarning: When at least one ``lora_A`` / ``lora_B`` tensor is empty or has fewer than 2 dimensions.
+    """
+    bad: list[tuple[str, tuple[int, ...]]] = []
+    for name, tensor in state_dict.items():
+        if not isinstance(tensor, torch.Tensor):
+            continue
+        if ".lora_A" not in name and ".lora_B" not in name:
+            continue
+        shape = tuple(tensor.shape)
+        if len(shape) < 2 or any(d == 0 for d in shape):
+            bad.append((name, shape))
+
+    if not bad:
+        return
+
+    preview = ", ".join(f"{n}:{s}" for n, s in bad[:3])
+    suffix = f" (+{len(bad) - 3} more)" if len(bad) > 3 else ""
+    warnings.warn(
+        f"Adapter {adapter_name!r}: {len(bad)} LoRA tensor(s) have invalid shape: "
+        f"{preview}{suffix}. A 1-D or zero-sized lora_A / lora_B tensor indicates that DeepSpeed ZeRO-3 / FSDP shards "
+        "were not gathered before save_pretrained() and are therefore incomplete. "
+        "Wrap the save in deepspeed.zero.GatheredParameters([...], modifier_rank=None) for "
+        "ZeRO-3, or torch.distributed.fsdp.FullyShardedDataParallel.summon_full_params(model) for FSDP, before "
+        "calling save_pretrained().",
+        PeftWarning,
+    )
 
 
 def has_valid_embedding_base_layer(layer):
@@ -58,7 +108,12 @@ def get_embedding_layer_name(model, layer, is_embedding_in_target_modules) -> st
 
 
 def _get_tp_info(model) -> TpInfo | None:
-    """Collect TP info from lora modules that have _tp_info set."""
+    """
+    Collect TP info from lora modules that have _tp_info set.
+
+    DEPRECATED: This is only used for the legacy, pre-DTensor TP integration. It returns `None` under the DTensor TP
+    integration.
+    """
     tp_plan, device_mesh, tp_size = {}, None, None
     # We check if there is a TP plan, otherwise it is not worth looping over the modules for nothing.
     if getattr(model, "_tp_plan", None) is None:
@@ -74,20 +129,47 @@ def _get_tp_info(model) -> TpInfo | None:
 
 
 def _filter_state_dict_for_adapter_name(
-    state_dict: dict[str, torch.Tensor], unwanted_adapter_names: list[str]
+    state_dict: dict[str, torch.Tensor],
+    unwanted_adapter_names: list[str],
+    model: torch.nn.Module,
 ) -> dict[str, torch.Tensor]:
-    """Filter the state dict to remove keys that correspond to the unwanted adapter
+    """Filter the state dict to remove keys that correspond to the unwanted adapter.
 
-    Use a negative filter to avoid removing keys that correspond to keys that contain no adapter name at all, e.g. when
-    using modules_to_save.
+    A key is dropped if it ends with an unwanted adapter name, or if the segment immediately after a tuner prefix (e.g.
+    `lora_A`, `lora_B`, `ia3_l`) is an unwanted adapter name. Both checks are needed: the suffix check covers
+    adapter-keyed entries whose container is not a parameter or buffer, thus not part of the structural prefixes (the
+    SHiRA indices live in a plain dict on the layer), while the positional check avoids dropping the selected adapter's
+    tensors when an unwanted adapter's *name* happens to equal a base-model module path segment (e.g. an adapter called
+    "mlp"). Keys outside any tuner prefix are kept unless they end with an unwanted adapter name; auxiliary modules
+    such as `modules_to_save` are resolved per adapter downstream.
     """
-    return {
-        k: v
-        for k, v in state_dict.items()
-        if not any(
-            f".{adapter_name}." in k or k.endswith(f".{adapter_name}") for adapter_name in unwanted_adapter_names
-        )
-    }
+    # avoid circular import
+    from peft.tuners.tuners_utils import _get_tuner_state_dict_key_prefixes
+
+    prefixes = _get_tuner_state_dict_key_prefixes(model)
+    unwanted = set(unwanted_adapter_names)
+
+    filtered_state_dict = {}
+    for key, value in state_dict.items():
+        if any(key.endswith(f".{adapter_name}") for adapter_name in unwanted):
+            continue
+
+        keep = True
+        for prefix in prefixes:
+            prefix = prefix + "."
+            if not key.startswith(prefix):
+                continue
+
+            suffix = key[len(prefix) :]
+            adapter_name = suffix.partition(".")[0]
+            if adapter_name in unwanted:
+                keep = False
+                break
+
+        if keep:
+            filtered_state_dict[key] = value
+
+    return filtered_state_dict
 
 
 def get_peft_model_state_dict(
@@ -127,6 +209,9 @@ def get_peft_model_state_dict(
         model = getattr(model, "_orig_mod", model)
 
     config = model.peft_config[adapter_name]
+    # Only validate shapes for state dicts we infer ourselves. When the caller passes an explicit `state_dict` we have
+    # no guarantee about its provenance (e.g. a manually post-processed export), so we must not second-guess it.
+    state_dict_was_inferred = state_dict is None
     if state_dict is None:
         state_dict = model.state_dict()
 
@@ -135,7 +220,9 @@ def get_peft_model_state_dict(
     if not config.is_prompt_learning:
         # Prompt learning methods don't support multiple adapters and hence don't have the adapter name in the Parameter
         # name.
-        state_dict_filtered_for_adapter_name = _filter_state_dict_for_adapter_name(state_dict, unwanted_adapter_names)
+        state_dict_filtered_for_adapter_name = _filter_state_dict_for_adapter_name(
+            state_dict, unwanted_adapter_names, model
+        )
         if len(state_dict_filtered_for_adapter_name) > 0:
             # If, after filtering the state dict for the adapter name, we end up with an empty state dict, it means that
             # the adapter weights are not stored with the adapter name as suffix. This can happen e.g. for adaption
@@ -145,6 +232,8 @@ def get_peft_model_state_dict(
     # If model was sharded with TP, gather full tensors for saving
     tp_info = _get_tp_info(model)
     if tp_info is not None:
+        # Legacy, pre-DTensor TP integration: `gather_state_dict_for_save` needs the tp_plan/device_mesh/tp_size
+        # collected from the `_tp_info` markers to know how each adapter weight was sharded.
         from transformers.integrations.tensor_parallel import gather_state_dict_for_save
 
         from peft.peft_model import PeftModel
@@ -277,10 +366,21 @@ def get_peft_model_state_dict(
     elif save_embedding_layers:
         warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
 
+    if tp_info is None and is_transformers_dtensor_tp and getattr(model, "_tp_size", None):
+        # Only the selected entries are gathered, gathering the whole state dict would materialize the full base model
+        # on every rank.
+        from transformers.integrations.tensor_parallel import gather_state_dict_for_save
+
+        to_return = gather_state_dict_for_save(to_return, {}, None, None)
+
     # REMOVE ADAPTER NAME
     # Key formats can be method-specific, so the removal is delegated to the tuner class, see
     # BaseTuner._remove_adapter_name_from_key for the default implementation.
     to_return = {tuner_cls._remove_adapter_name_from_key(k, adapter_name): v for k, v in to_return.items()}
+
+    if state_dict_was_inferred and config.peft_type in (PeftType.LORA, PeftType.ADALORA):
+        _validate_lora_adapter_state_dict(to_return, adapter_name=adapter_name)
+
     return to_return
 
 
@@ -297,7 +397,11 @@ def _find_mismatched_keys(
             continue
 
         # see https://github.com/huggingface/transformers/blob/09f9f566de83eef1f13ee83b5a1bbeebde5c80c1/src/transformers/modeling_utils.py#L3858-L3864
-        if (state_dict[key].shape[-1] == 1) and (state_dict[key].numel() * 2 == tensor.numel()):
+        if (
+            state_dict[key].ndim > 0
+            and (state_dict[key].shape[-1] == 1)
+            and (state_dict[key].numel() * 2 == tensor.numel())
+        ):
             # This skips size mismatches for 4-bit weights. Two 4-bit values share an 8-bit container, causing size
             # differences. Without matching with module type or parameter type it seems like a practical way to detect
             # valid 4bit weights.
@@ -310,6 +414,26 @@ def _find_mismatched_keys(
         del peft_model_state_dict[key]
 
     return peft_model_state_dict, mismatched
+
+
+def _reshard_dtensor_values_for_load(
+    model: torch.nn.Module, state_dict: dict[str, torch.Tensor]
+) -> dict[str, torch.Tensor]:
+    from transformers.distributed.sharding_utils import DtensorShardOperation
+    from transformers.distributed.utils import is_dtensor
+
+    named_params = dict(model.named_parameters())
+    for key, tensor in state_dict.items():
+        ref = named_params.get(key)
+        if ref is None or not is_dtensor(ref) or is_dtensor(tensor):
+            continue
+        if tensor.shape == ref.shape:
+            tensor = DtensorShardOperation(ref).shard_tensor(tensor)
+        elif tensor.shape != ref._local_tensor.shape:
+            # Neither the global nor the local shape matches: leave it as-is for the normal mismatch handling.
+            continue
+        state_dict[key] = dtensor_from_local_like(tensor, ref)
+    return state_dict
 
 
 def _insert_adapter_name_into_state_dict(
@@ -335,7 +459,7 @@ def _insert_adapter_name_into_state_dict(
 
 def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
     """
-    Shard LoRA adapter weights in-place in `state_dict` according to the tensor-parallel plan of the model.
+    Shard LoRA adapter weights in-place in `state_dict` for the pre-DTensor tensor-parallel integration.
 
     Args:
         model (`nn.Module`): The TP base model (with `_hf_tp_plan` and `_hf_device_mesh` set on its layers).
@@ -476,7 +600,7 @@ def set_peft_model_state_dict(
         adapter_name (`str`, *optional*, defaults to `"default"`):
             The name of the adapter whose state dict should be set.
         ignore_mismatched_sizes (`bool`, *optional*, defaults to `False`):
-            Whether to ignore mismatched in the state dict.
+            Whether to ignore mismatched sizes in the state dict.
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             This argument must be `True` if the `model` was loaded with adapter weights on the meta device, e.g. after
             calling `inject_adapter_in_model` with `low_cpu_mem_usage=True`. Otherwise, leave it as `False`.
@@ -543,8 +667,30 @@ def set_peft_model_state_dict(
     peft_model_state_dict, mismatched_keys = _find_mismatched_keys(
         model, peft_model_state_dict, ignore_mismatched_sizes=ignore_mismatched_sizes
     )
+    if is_transformers_dtensor_tp:
+        peft_model_state_dict = _reshard_dtensor_values_for_load(model, peft_model_state_dict)
     if low_cpu_mem_usage:
+        # assign=True swaps the checkpoint tensor object into the module, so anything it
+        # loads takes the checkpoint's dtype and device instead of the model's. That is
+        # what makes the fast path fast for freshly injected adapter weights, which live
+        # on meta until they are replaced. It is wrong for every other key the checkpoint
+        # can carry: modules_to_save weights, and the base weights that
+        # save_embedding_layers writes in when the adapter targets an embedding. Those
+        # already exist as real tensors on the model, so record what they were and put it
+        # back for exactly the entries that changed.
+        expected_dtype_device = {}
+        for name, tensor in list(model.named_parameters()) + list(model.named_buffers()):
+            if name in peft_model_state_dict and tensor.device.type != "meta":
+                expected_dtype_device[name] = (tensor.dtype, tensor.device)
+
         load_result = model.load_state_dict(peft_model_state_dict, strict=False, assign=True)
+
+        for name, (dtype, device) in expected_dtype_device.items():
+            module_name, _, attr = name.rpartition(".")
+            tensor = getattr(model.get_submodule(module_name), attr)
+            if tensor.dtype != dtype or tensor.device != device:
+                tensor.data = tensor.data.to(device=device, dtype=dtype)
+
         # ensure that the correct device is set
         for module in model.modules():
             if hasattr(module, "_move_adapter_to_device_of_base_layer"):

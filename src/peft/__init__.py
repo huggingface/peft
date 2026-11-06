@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.20.1.dev0"
+__version__ = "0.21.3.dev0"
 
 from .auto import (
     MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
@@ -109,6 +109,8 @@ from .tuners import (
     OFTModel,
     OSFConfig,
     OSFModel,
+    PacaConfig,
+    PacaModel,
     PeanutConfig,
     PeanutModel,
     PolyConfig,
@@ -259,6 +261,8 @@ __all__ = [
     "OFTModel",
     "OSFConfig",
     "OSFModel",
+    "PacaConfig",
+    "PacaModel",
     "PeanutConfig",
     "PeanutModel",
     "PeftConfig",

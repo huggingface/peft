@@ -1,6 +1,8 @@
-.PHONY: quality style test docs
+.PHONY: quality style test test_macos docs
 
 check_dirs := src tests examples docs scripts docker
+SHARDS ?= 1
+SHARD ?= 1
 
 # Check that source code meets quality standards
 
@@ -19,6 +21,11 @@ style:
 
 test:
 	python -m pytest -n 3 tests/ $(if $(IS_GITHUB_CI),--report-log "ci_tests.log",)
+
+# Run serially on macOS to limit memory usage.
+test_macos:
+	python -u -m pytest --no-cov -rs tests/ \
+		--splits $(SHARDS) --group $(SHARD) --splitting-algorithm least_duration
 
 tests_examples_multi_gpu:
 	python -m pytest -m multi_gpu_tests tests/test_gpu_examples.py $(if $(IS_GITHUB_CI),--report-log "multi_gpu_examples.log",)
@@ -74,3 +81,4 @@ tests_training:
 	accelerate launch --config_file tests/training/fsdp2_config.yaml tests/training/training.py --quant 4bit --target_modules q_proj --target_parameters v_proj.weight
 	accelerate launch --config_file tests/training/fsdp_config.yaml tests/training/adapters.py
 	accelerate launch --config_file tests/training/tp_config.yaml tests/training/lora_tp.py
+	accelerate launch --config_file tests/training/fsdp2_config.yaml tests/training/adapters_fsdp2_reshard_false.py

@@ -64,7 +64,7 @@ from peft import ShadowConfig, get_peft_model
 model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B")
 config = ShadowConfig(r=8, shadow_num_hidden_layers=1, task_type="CAUSAL_LM")
 model = get_peft_model(model, config)
-model.print_trainable_parameters()
+model.print_healthcheck()
 
 out = model.generate(input_ids, max_new_tokens=32)
 ```

@@ -121,6 +121,8 @@
         title: OFT
       - local: package_reference/osf
         title: OSF
+      - local: package_reference/paca
+        title: PaCA
       - local: package_reference/peanut
         title: PEANuT
       - local: package_reference/poly
@@ -224,6 +226,8 @@
       title: OFT
     - local: package_reference/osf
       title: OSF
+    - local: package_reference/paca
+      title: PaCA
     - local: package_reference/p_tuning
       title: P-tuning
     - local: package_reference/peanut

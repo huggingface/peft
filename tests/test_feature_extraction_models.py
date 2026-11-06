@@ -35,10 +35,10 @@ from peft import (
     LoraConfig,
     MissConfig,
     OFTConfig,
+    PacaConfig,
     PeanutConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
-    PromptLearningConfig,
     PromptTuningConfig,
     PsoftConfig,
     RandLoraConfig,
@@ -51,7 +51,7 @@ from peft import (
     WaveFTConfig,
 )
 
-from .testing_common import PeftCommonTester
+from .testing_common import PeftCommonTester, skip_non_prompt_learning
 from .testing_utils import set_init_weights_false
 
 
@@ -264,6 +264,14 @@ ALL_CONFIGS = [
         },
     ),
     (
+        PacaConfig,
+        {
+            "r": 2,
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+        },
+    ),
+    (
         ShiraConfig,
         {
             "r": 1,
@@ -345,11 +353,6 @@ ALL_CONFIGS = [
         },
     ),
 ]
-
-
-def skip_non_prompt_learning(config_cls):
-    if not issubclass(config_cls, PromptLearningConfig):
-        pytest.skip("Skip tests that are not prompt learning")
 
 
 def skip_deberta_lora_tests(config_cls, model_id):

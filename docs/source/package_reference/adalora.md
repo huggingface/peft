@@ -60,8 +60,7 @@ config = AdaLoraConfig(
     modules_to_save=["classifier"],
 )
 model = get_peft_model(model, config)
-model.print_trainable_parameters()
-"trainable params: 520,325 || all params: 87,614,722 || trainable%: 0.5938785036606062"
+model.print_healthcheck()
 
 [... training code ...]
 

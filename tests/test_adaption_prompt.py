@@ -31,7 +31,7 @@ from .testing_utils import hub_online_once
 
 MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-gpt2",
-    "trl-internal-testing/tiny-random-LlamaForCausalLM",
+    "peft-internal-testing/tiny-random-LlamaForCausalLM",
     "hf-internal-testing/tiny-random-MistralForCausalLM",
 ]
 
@@ -69,6 +69,75 @@ class TestAdaptionPrompt:
             dummy_output = model.get_input_embeddings()(dummy_input)
 
             assert not dummy_output.requires_grad
+
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("adapter_name", ["default", "experiment"])
+    def test_adaption_prompt_inference_mode(self, model_id, adapter_name):
+        with hub_online_once(model_id):
+            config = AdaptionPromptConfig(adapter_layers=1, adapter_len=4, task_type="CAUSAL_LM")
+            model = get_peft_model(self.transformers_class.from_pretrained(model_id), config)
+            frozen_config = AdaptionPromptConfig(
+                adapter_layers=1, adapter_len=4, task_type="CAUSAL_LM", inference_mode=True
+            )
+            frozen = get_peft_model(
+                self.transformers_class.from_pretrained(model_id), frozen_config, adapter_name=adapter_name
+            )
+            assert not any(param.requires_grad for param in frozen.parameters())
+            model.add_adapter("frozen", frozen_config)
+
+            assert model.active_adapter == "default"
+            inputs = {"input_ids": torch.tensor([[1, 2, 3]])}
+            model.eval()
+            output = model(**inputs)
+            output.logits.sum().backward()
+            assert any(param.grad is not None for param in model.parameters())
+            assert not frozen(**inputs).logits.requires_grad
+
+            model.set_adapter("frozen")
+            assert not any(param.requires_grad for param in model.parameters())
+            model.set_adapter("default")
+            assert any(param.requires_grad for param in model.parameters())
+
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    @pytest.mark.parametrize("adapter_name", ["default", "experiment"])
+    def test_adaption_prompt_inference_mode_from_pretrained(self, model_id, adapter_name, tmp_path):
+        with hub_online_once(model_id):
+            config = AdaptionPromptConfig(adapter_layers=1, adapter_len=4, task_type="CAUSAL_LM")
+            model = get_peft_model(self.transformers_class.from_pretrained(model_id), config)
+            # A nonzero gate makes the output comparison sensitive to the loaded prompt.
+            with torch.no_grad():
+                for name, param in model.named_parameters():
+                    if name.endswith("adaption_gate"):
+                        param.fill_(0.5)
+            model.save_pretrained(tmp_path)
+            # This is a separate inference-only model, not the trainable "default" adapter in model.
+            frozen_model = PeftModel.from_pretrained(
+                self.transformers_class.from_pretrained(model_id), tmp_path, adapter_name=adapter_name
+            )
+            assert not any(param.requires_grad for param in frozen_model.parameters())
+            trainable = PeftModel.from_pretrained(
+                self.transformers_class.from_pretrained(model_id),
+                tmp_path,
+                adapter_name=adapter_name,
+                is_trainable=True,
+            )
+            assert any(param.requires_grad for param in trainable.parameters())
+            model.load_adapter(tmp_path, adapter_name="frozen")
+
+            assert model.active_adapter == "default"
+            inputs = {"input_ids": torch.tensor([[1, 2, 3]])}
+            model.eval()
+            output = model(**inputs)
+            output.logits.sum().backward()
+            assert any(param.grad is not None for param in model.parameters())
+            assert not frozen_model(**inputs).logits.requires_grad
+            assert_close(frozen_model(**inputs).logits, output.logits)
+
+            model.set_adapter("frozen")
+            assert not any(param.requires_grad for param in model.parameters())
+            # The original default adapter was created trainable; switching back restores that adapter.
+            model.set_adapter("default")
+            assert any(param.requires_grad for param in model.parameters())
 
     @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
     def test_prepare_for_int8_training(self, model_id):
@@ -288,10 +357,11 @@ class TestAdaptionPrompt:
                 default_disabled = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
                 assert_close(original_before.logits, default_disabled.logits, rtol=0, atol=0)
 
-            # Add new adapter 1.
+            # Add new adapter 1. Adding an adapter does not activate it, so it has to be set explicitly.
             adapted.add_adapter(
                 "adapter 1", AdaptionPromptConfig(adapter_layers=2, adapter_len=8, task_type="CAUSAL_LM")
             )
+            adapted.set_adapter("adapter 1")
             # Test zero-init
             adapter_1_before = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
             assert_close(original_before.logits, adapter_1_before.logits, rtol=0, atol=0)
@@ -323,6 +393,150 @@ class TestAdaptionPrompt:
             assert not torch.allclose(adapter_1_after.logits, default_after_set.logits)
 
     @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    def test_save_pretrained_multiple_adapters_keeps_weights_apart(self, model_id, tmp_path):
+        # The modules of the inactive adapters are swapped out of the model, so they used to be missing from the
+        # state dict and every adapter was saved with the weights of the adapter that happened to be active.
+        with hub_online_once(model_id):
+            input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+            attention_mask = torch.LongTensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
+
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            config = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+            model = get_peft_model(model, config)
+            model.add_adapter("other", AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM"))
+
+            # give both adapters distinct, non-zero weights
+            for adapter_name, scale in [("default", 0.5), ("other", 1.5)]:
+                model.set_adapter(adapter_name)
+                with torch.no_grad():
+                    for _, param in model.named_parameters():
+                        if param.requires_grad:
+                            param.add_(scale * torch.randn_like(param))
+
+            model.eval()
+            outputs = {}
+            for adapter_name in ["default", "other"]:
+                model.set_adapter(adapter_name)
+                with torch.no_grad():
+                    outputs[adapter_name] = model(input_ids=input_ids, attention_mask=attention_mask).logits.clone()
+            # sanity check: the two adapters produce different outputs
+            assert not torch.allclose(outputs["default"], outputs["other"])
+
+            model.save_pretrained(tmp_path)
+
+            for adapter_name in ["default", "other"]:
+                # save_pretrained stores the "default" adapter at the root and the others in subfolders
+                path = tmp_path if adapter_name == "default" else tmp_path / adapter_name
+                base = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+                loaded = PeftModel.from_pretrained(base, path).eval()
+                with torch.no_grad():
+                    logits = loaded(input_ids=input_ids, attention_mask=attention_mask).logits
+                assert_close(logits, outputs[adapter_name], rtol=1e-5, atol=1e-5)
+
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    def test_delete_adapter(self, model_id):
+        with hub_online_once(model_id):
+            input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+            attention_mask = torch.LongTensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
+
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            config = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+            model = get_peft_model(model, config)
+            model.add_adapter("other", AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM"))
+            model.set_adapter("default")
+            model.eval()
+            with torch.no_grad():
+                expected = model(input_ids=input_ids, attention_mask=attention_mask).logits.clone()
+
+            # deleting an inactive adapter leaves the active one untouched
+            model.delete_adapter("other")
+            assert "other" not in model.peft_config
+            assert model.active_adapters == ["default"]
+            with torch.no_grad():
+                logits = model(input_ids=input_ids, attention_mask=attention_mask).logits
+            assert_close(logits, expected, rtol=0, atol=0)
+
+            with pytest.raises(ValueError, match="Adapter other does not exist"):
+                model.delete_adapter("other")
+
+            # deleting the last, active adapter also works
+            model.delete_adapter("default")
+            assert model.peft_config == {}
+            assert model.active_adapters == []
+
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    def test_add_adapter_does_not_change_active_adapter(self, model_id):
+        # Adding an adapter swapped it into the model, so the model silently computed with the new adapter while
+        # PeftModel.active_adapter still reported the old one.
+        with hub_online_once(model_id):
+            input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+            attention_mask = torch.LongTensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
+
+            config = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+            model = get_peft_model(self.transformers_class.from_pretrained(model_id).to(self.torch_device), config)
+            # move the default adapter away from its zero-init, or else both adapters produce the same output
+            with torch.no_grad():
+                for _, param in model.named_parameters():
+                    if param.requires_grad:
+                        param.add_(torch.randn_like(param))
+            model.eval()
+            with torch.no_grad():
+                expected = model(input_ids=input_ids, attention_mask=attention_mask).logits.clone()
+
+            model.add_adapter("other", AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM"))
+
+            assert model.active_adapters == ["default"]
+            assert model.base_model._active_adapter == "default"
+            with torch.no_grad():
+                logits = model(input_ids=input_ids, attention_mask=attention_mask).logits
+            assert_close(logits, expected, rtol=0, atol=0)
+
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    def test_load_adapter_does_not_change_active_adapter(self, model_id, tmp_path):
+        # Same as above for load_adapter, which goes through add_adapter. The weights must still end up in the
+        # adapter that is being loaded, even though it is not the active one.
+        with hub_online_once(model_id):
+            input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+            attention_mask = torch.LongTensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
+
+            def perturb(model, seed):
+                torch.manual_seed(seed)
+                with torch.no_grad():
+                    for _, param in model.named_parameters():
+                        if param.requires_grad:
+                            param.add_(torch.randn_like(param))
+
+            config = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+            donor = get_peft_model(self.transformers_class.from_pretrained(model_id).to(self.torch_device), config)
+            perturb(donor, 0)
+            donor.eval()
+            with torch.no_grad():
+                donor_logits = donor(input_ids=input_ids, attention_mask=attention_mask).logits.clone()
+
+            model = get_peft_model(self.transformers_class.from_pretrained(model_id).to(self.torch_device), config)
+            perturb(model, 1)
+            model.eval()
+            with torch.no_grad():
+                expected = model(input_ids=input_ids, attention_mask=attention_mask).logits.clone()
+            # sanity check: the donor adapter produces a different output
+            assert not torch.allclose(donor_logits, expected)
+
+            donor.save_pretrained(tmp_path)
+            model.load_adapter(tmp_path, adapter_name="other")
+
+            assert model.active_adapters == ["default"]
+            assert model.base_model._active_adapter == "default"
+            with torch.no_grad():
+                logits = model(input_ids=input_ids, attention_mask=attention_mask).logits
+            assert_close(logits, expected, rtol=0, atol=0)
+
+            # the weights were loaded into "other" and not into the active adapter
+            model.set_adapter("other")
+            with torch.no_grad():
+                logits = model(input_ids=input_ids, attention_mask=attention_mask).logits
+            assert_close(logits, donor_logits, rtol=0, atol=0)
+
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
     def test_add_and_set_while_disabled(self, model_id):
         """Test that adding and setting adapters while disabled works as intended."""
         # Test input data.
@@ -345,6 +559,8 @@ class TestAdaptionPrompt:
                 adapted.add_adapter(
                     "adapter 1", AdaptionPromptConfig(adapter_layers=2, adapter_len=8, task_type="CAUSAL_LM")
                 )
+                # adding an adapter does not activate it, so it has to be set explicitly
+                adapted.set_adapter("adapter 1")
 
             # Test that the output is the same as the original output.
             adapter_1_before = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)

@@ -38,6 +38,7 @@ from peft.tuners.lora.variants import (
     get_alora_offsets_for_forward,
     get_alora_offsets_for_generate,
 )
+from peft.utils import activation_checkpointing_enable
 
 from .testing_common import hub_online_once
 
@@ -419,7 +420,7 @@ class TestActivatedLora:
         assert "Beam search not yet supported for aLoRA." in str(e.value)
 
     def test_gradient_checkpointing_double_forward_raises(self):
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
 
         with hub_online_once(model_id):
             base_model = AutoModelForCausalLM.from_pretrained(model_id)
@@ -428,7 +429,7 @@ class TestActivatedLora:
             lora_model.train()
 
             lora_model.prepare_model_for_gradient_checkpointing(lora_model)
-            lora_model.gradient_checkpointing_enable()
+            activation_checkpointing_enable(lora_model)
 
             inputs = {"input_ids": torch.tensor([[0, 1, 2, 3]])}
 
@@ -438,7 +439,7 @@ class TestActivatedLora:
                 lora_model.forward(**inputs)
 
     def test_gradient_checkpointing_dpo_doesnt_raise(self):
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
 
         with hub_online_once(model_id):
             base_model = AutoModelForCausalLM.from_pretrained(model_id)
@@ -447,7 +448,7 @@ class TestActivatedLora:
             lora_model.train()
 
             lora_model.prepare_model_for_gradient_checkpointing(lora_model)
-            lora_model.gradient_checkpointing_enable()
+            activation_checkpointing_enable(lora_model)
 
             inputs = {"input_ids": torch.tensor([[0, 1, 2, 3]])}
 

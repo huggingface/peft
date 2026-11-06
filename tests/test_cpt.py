@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 from typing import Any, Union
 
 import pytest
@@ -303,3 +304,160 @@ def test_model_batch_training_text(sst_data, global_tokenizer, collator, config_
     assert torch.all(norm_delta <= epsilon)
     # Ensure that label tokens remain unchanged
     assert torch.all((norm_delta == 0) == (~non_label_idx))
+
+
+@pytest.mark.parametrize("adapter_name", ["default", "experiment"])
+@pytest.mark.parametrize("loss_type", ["none", "decay"])
+def test_cpt_forward_loss_matches_reference(adapter_name, loss_type):
+    """
+    Ensure that the loss calculated by CPT returns the expected value, as none of the general tests would cover
+    accidental changes in the loss calculation.
+
+    In particular, take care of this: the virtual tokens are prefixed to the labels (using the configured
+    cpt_token_ids), then every position whose token type is not a positive multiple of 4 is ignored, and the loss is
+    the shifted cross entropy over the remaining positions, optionally weighted by label-group decay.
+    """
+    config = CPTConfig(
+        cpt_token_ids=[0, 1, 2, 3, 4, 5, 6, 7],
+        cpt_mask=[1, 1, 1, 1, 1, 1, 1, 1],
+        cpt_tokens_type_mask=[1, 2, 2, 2, 3, 3, 4, 4],
+        opt_weighted_loss_type=loss_type,
+        opt_loss_decay_factor=0.25,
+        tokenizer_name_or_path=MODEL_NAME,
+        task_type=TaskType.CAUSAL_LM,
+    )
+    base_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
+    model = get_peft_model(base_model, config, adapter_name=adapter_name)
+    model.eval()
+
+    torch.manual_seed(0)
+    input_ids = torch.randint(0, base_model.config.vocab_size, (2, 6))
+    attention_mask = torch.ones_like(input_ids)
+    labels = input_ids.clone()
+    input_type_mask = torch.full_like(input_ids, 4)
+
+    with torch.no_grad():
+        output = model(
+            input_ids=input_ids, attention_mask=attention_mask, labels=labels, input_type_mask=input_type_mask
+        )
+        # when input_type_mask is not passed, it defaults to all 4s, i.e. all input tokens are treated as labels
+        output_default_mask = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+        # without labels, no loss is computed
+        output_no_labels = model(input_ids=input_ids, attention_mask=attention_mask)
+
+    assert output_no_labels.loss is None
+    assert torch.isfinite(output.loss)
+    assert torch.allclose(output.loss, output_default_mask.loss, atol=1e-6, rtol=1e-6)
+
+    # reference computation
+    prefix_labels = torch.tensor(config.cpt_token_ids).view(1, -1).repeat(2, 1)
+    cpt_labels = torch.cat([prefix_labels, labels], dim=1)
+    prefix_type_mask = torch.tensor(config.cpt_tokens_type_mask).view(1, -1).repeat(2, 1)
+    # the input token types are shifted to avoid clashing with the prefix token types
+    shifted_input_type_mask = input_type_mask + prefix_type_mask.max()
+    cpt_type_mask = torch.cat([prefix_type_mask, shifted_input_type_mask], dim=1)
+    keep = (cpt_type_mask > 0) & (cpt_type_mask % 4 == 0)
+    cpt_labels[~keep] = -100
+
+    vocab_size = output.logits.shape[-1]
+    # Keep one loss per shifted label so decay weights can be applied before averaging. Restore the label tensor's
+    # shape after flattening for cross_entropy, so the token-type mask selects the corresponding positions.
+    token_losses = torch.nn.functional.cross_entropy(
+        output.logits[:, :-1].reshape(-1, vocab_size).float(),
+        cpt_labels[:, 1:].reshape(-1),
+        ignore_index=-100,
+        reduction="none",
+    ).view_as(cpt_labels[:, 1:])
+    weights = torch.ones_like(token_losses)
+    if loss_type == "decay":
+        # Prefix labels (type 4) precede the input label group (type 8), so only the prefix loss is decayed.
+        weights[cpt_type_mask[:, 1:] == 4] = config.opt_loss_decay_factor
+    expected_loss = (token_losses * weights)[keep[:, 1:]].mean()
+    assert torch.allclose(output.loss, expected_loss, atol=1e-4, rtol=1e-4)
+
+
+@pytest.mark.parametrize("decay_factor", [0.25, 0.5])
+def test_cpt_forward_loss_uses_switched_adapter_config(decay_factor):
+    # Each CPT adapter has its own prompt encoder and loss configuration. Compare switching from the unweighted
+    # "default" adapter to the exponential-decay "decay" adapter with a reference model using only decay loss.
+    # Switching back must restore the default loss; matching logits isolates the loss configuration regression (#3879).
+    unweighted_config = CPTConfig(
+        cpt_token_ids=[0, 1, 2, 3, 4, 5, 6, 7],
+        cpt_mask=[1] * 8,
+        cpt_tokens_type_mask=[1, 2, 2, 2, 3, 3, 4, 4],
+        opt_weighted_loss_type="none",
+        tokenizer_name_or_path=MODEL_NAME,
+        task_type=TaskType.CAUSAL_LM,
+    )
+    decay_config = copy.deepcopy(unweighted_config)
+    decay_config.opt_weighted_loss_type = "decay"
+    decay_config.opt_loss_decay_factor = decay_factor
+    base_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
+    reference_model = get_peft_model(copy.deepcopy(base_model), copy.deepcopy(decay_config)).eval()
+    model_under_test = get_peft_model(base_model, unweighted_config)
+    model_under_test.add_adapter("decay", decay_config)
+    model_under_test.eval()
+
+    torch.manual_seed(0)
+    input_ids = torch.randint(0, base_model.config.vocab_size, (2, 6))
+    inputs = {"input_ids": input_ids, "attention_mask": torch.ones_like(input_ids), "labels": input_ids}
+
+    with torch.no_grad():
+        default_output = model_under_test(**inputs)
+        model_under_test.set_adapter("decay")
+        switched_output = model_under_test(**inputs)
+        decay_reference_output = reference_model(**inputs)
+        model_under_test.set_adapter("default")
+        restored_output = model_under_test(**inputs)
+
+    torch.testing.assert_close(switched_output.logits, decay_reference_output.logits)
+    torch.testing.assert_close(switched_output.loss, decay_reference_output.loss)
+    assert not torch.allclose(default_output.loss, decay_reference_output.loss)
+    torch.testing.assert_close(restored_output.loss, default_output.loss)
+
+    model_under_test.set_adapter("decay")
+    model_under_test(**inputs).loss.backward()
+    gradient = model_under_test.prompt_encoder["decay"].delta_embedding.weight.grad
+    assert gradient is not None and torch.isfinite(gradient).all() and gradient.abs().sum() > 0
+
+
+def test_cpt_forward_does_not_mutate_input_type_mask():
+    """A forward pass must leave the caller-provided input_type_mask unchanged.
+
+    The CPT forward used to shift the mask in place, so every call rewrote the tensor held by the caller (e.g. a batch
+    stored in a dataset and reused across epochs) and the drift compounded on each forward.
+    """
+    config = CPTConfig(
+        cpt_token_ids=[0, 1, 2, 3],
+        cpt_mask=[1, 1, 1, 1],
+        cpt_tokens_type_mask=[1, 2, 3, 4],
+        opt_weighted_loss_type="none",
+        tokenizer_name_or_path=MODEL_NAME,
+        task_type=TaskType.CAUSAL_LM,
+    )
+    base_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
+    model = get_peft_model(base_model, config)
+    model.eval()
+
+    torch.manual_seed(0)
+    input_ids = torch.randint(0, base_model.config.vocab_size, (2, 6))
+    attention_mask = torch.ones_like(input_ids)
+    input_type_mask = torch.full_like(input_ids, 4)
+    input_type_mask_before = input_type_mask.clone()
+
+    with torch.no_grad():
+        model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=input_ids.clone(),
+            input_type_mask=input_type_mask,
+        )
+        # a second forward catches the drift compounding across calls
+        model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=input_ids.clone(),
+            input_type_mask=input_type_mask,
+        )
+
+    assert torch.equal(input_type_mask, input_type_mask_before)

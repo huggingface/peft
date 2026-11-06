@@ -19,13 +19,12 @@ from typing import Any, Optional
 
 import torch
 import torch.nn.functional as F
-from accelerate.utils.imports import is_xpu_available
 from torch import nn
 
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.lora.config import BdLoraConfig, MontecloraConfig
 from peft.utils.integrations import dequantize_module_weight, gather_params_ctx
-from peft.utils.other import transpose
+from peft.utils.other import infer_device, transpose
 
 from .arrow import ArrowLoraLinearLayer
 from .config import LoraConfig, PeftConfig
@@ -147,14 +146,13 @@ class DoraLinearVariant(LoraVariant):
         lora_B = module.lora_B[adapter_name].weight
         place_on_cpu = module.ephemeral_gpu_offload and (lora_A.device.type == "cpu" or lora_B.device.type == "cpu")
         if module.ephemeral_gpu_offload:
-            if lora_A.device.type in ["cuda", "xpu"]:
+            if lora_A.device.type in ["cuda", "xpu", "npu"]:
                 lora_B = lora_B.to(lora_A.device)
             else:
-                if lora_B.device.type not in ["cuda", "xpu"]:
-                    if is_xpu_available():
-                        lora_B = lora_B.to("xpu")
-                    else:
-                        lora_B = lora_B.to("cuda")
+                if lora_B.device.type not in ["cuda", "xpu", "npu"]:
+                    # Move offloaded LoRA weights to the active accelerator device
+                    # (device-agnostic: handles CUDA, XPU, NPU, MPS, etc.)
+                    lora_B = lora_B.to(infer_device())
                 lora_A = lora_A.to(lora_B.device)
         scaling = module.scaling[adapter_name]
         dora_layer.update_layer(
@@ -997,7 +995,7 @@ class BdLoraLinearVariant(LoraVariant):
             r = module.lora_A[adapter_name].out_features
             base_layer = module.get_base_layer()
             layer = BlockDiagonalLinear(
-                base_layer.in_features,
+                module.in_features,
                 r,
                 nblocks=nblocks,
                 init_zero=False,
@@ -1010,7 +1008,7 @@ class BdLoraLinearVariant(LoraVariant):
             base_layer = module.get_base_layer()
             layer = BlockDiagonalLinear(
                 r,
-                base_layer.out_features,
+                module.out_features,
                 nblocks=nblocks,
                 init_zero=True,
                 dtype=base_layer.weight.dtype,

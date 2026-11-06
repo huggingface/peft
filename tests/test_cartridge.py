@@ -30,6 +30,7 @@ from peft import (
     prompt_embeddings_from_past_key_values,
 )
 from peft.tuners import PrefixTuningConfig
+from peft.utils import activation_checkpointing_enable
 
 from .testing_utils import hub_online_once
 
@@ -64,6 +65,8 @@ def test_cartridge_offsets_position_ids_in_forward(monkeypatch, base_model):
         logits = torch.zeros((batch, seq_len, base.config.vocab_size), device=input_ids.device)
         return CausalLMOutputWithPast(logits=logits)
 
+    # patching the instance attribute base_model.forward works because for prompt learning, base_model is the unmodified
+    # transformers model that receives the transformed kwargs
     monkeypatch.setattr(model.base_model, "forward", fake_forward)
 
     input_ids = torch.randint(0, base.config.vocab_size, (1, 3))
@@ -95,6 +98,10 @@ def test_cartridge_prefill_4d_mask_uses_cache_position(monkeypatch, base_model):
         captured["cache_position"] = cache_position
         return attention_mask
 
+    # NOTE: this replaces create_attention_mask at its import location inside peft.peft_model; if the 4d mask handling
+    # in prepare_inputs_for_generation moves elsewhere, the patch target needs to be updated. The unmocked function is
+    # covered by
+    # test_decoder_models.py::TestDecoderModels::test_prompt_tuning_prepare_inputs_for_generation_4d_attention_mask.
     monkeypatch.setattr("peft.peft_model.create_attention_mask", fake_create_attention_mask)
 
     input_ids = torch.randint(0, base.config.vocab_size, (1, 2))
@@ -246,7 +253,7 @@ def test_cartridge_inference_mode_disables_grads_and_forward_works(num_frozen_to
 
 def test_cartridge_gradient_checkpointing_raises(base_model):
     base = base_model
-    base.gradient_checkpointing_enable()
+    activation_checkpointing_enable(base)
     peft_config = CartridgeConfig(num_virtual_tokens=4, num_frozen_tokens=0, task_type="CAUSAL_LM")
 
     with pytest.raises(ValueError, match="does not work with gradient checkpointing"):

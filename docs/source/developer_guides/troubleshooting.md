@@ -129,7 +129,7 @@ from peft import LoraConfig, get_peft_model
 
 config = LoraConfig(target_modules=["q_proj", "v_proj", "gate_proj"])
 model = get_peft_model(base_model, config)
-model.print_trainable_parameters()
+model.print_healthcheck()
 ```
 
 If the reported number is much lower than expected, inspect the adapter layers in the model:
@@ -171,6 +171,38 @@ config = PeftConfig.from_pretrained(peft_model_id)
 peft_model = PeftModel.from_pretrained(base_model, peft_model_id)
 ```
 
+### Optimized execution paths bypassing adapters
+
+Some optimized execution paths read module weights directly instead of calling their `forward` methods. This can skip changes made by unmerged adapters without warning, even if the adapter is active. The problem can affect different modules and PEFT methods.
+
+For example, PyTorch's native `torch.nn.TransformerEncoder` can use a fused path during evaluation with `torch.no_grad()` or `torch.inference_mode()`. This path can skip adapters in `TransformerEncoderLayer` submodules, such as LoRA adapters on `linear1` and `linear2`. Training may work correctly while evaluation ignores the adapter changes. See [issue #3976](https://github.com/huggingface/peft/issues/3976) for a reproduction.
+
+If you suspect this problem, first check that the adapter is enabled and active with [`~PeftModel.get_layer_status`]. Compare outputs on the same inputs in evaluation mode with and without the adapter, and then with the optimization disabled. Use a trained adapter that changes the outputs, since newly initialized LoRA adapters usually have no effect. Small numerical differences are normal.
+
+For an unmerged adapter on a native encoder in eager mode, compare the outputs for the same tensor input `x`:
+
+```python
+import torch
+
+model.eval()
+previous = torch.backends.mha.get_fastpath_enabled()
+try:
+    with torch.inference_mode():
+        torch.backends.mha.set_fastpath_enabled(True)
+        fast_output = model(x)
+
+        torch.backends.mha.set_fastpath_enabled(False)
+        reference_output = model(x)
+finally:
+    torch.backends.mha.set_fastpath_enabled(previous)
+
+print((fast_output - reference_output).abs().max().item())
+```
+
+An enabled backend flag alone does not mean that the fused path runs; its use also depends on the model, inputs, and runtime conditions. Inspect the enclosing module's `forward` implementation for direct weight access or fused operator calls. Be careful when debugging with forward hooks: registering a hook can itself disable an optimization and change the behavior you are investigating.
+
+For native encoders in eager mode, `torch.backends.mha.set_fastpath_enabled(False)` is a workaround that keeps adapters unmerged. This setting is process-wide, can affect other models and performance, and should not be toggled independently by concurrent requests. For other optimized paths, disable the affected optimization or use an implementation that calls the adapted modules. If the PEFT method and quantization setup allow it, you can also merge the adapters with [`~LoraModel.merge_and_unload`] and use the returned model for inference. The adapter changes are then included in the base weights. Merging removes the adapter wrappers, so keep your original checkpoints if you need to switch adapters or resume training.
+
 ### Randomly initialized layers
 
 For some tasks, it is important to correctly configure `modules_to_save` in the config to account for randomly initialized layers.
@@ -187,6 +219,8 @@ You should probably TRAIN this model on a down-stream task to be able to use it 
 ```
 
 The mentioned layers should be added to `modules_to_save` in the config to avoid the described problem.
+
+[`~peft.PeftModel.healthcheck`] reports a `TASK_HEAD_NOT_SAVED` warning for the most common form of this mistake: a sequence classification, token classification or question answering head that was newly initialized when loading the base model but is not in `modules_to_save`, e.g. because `task_type` was not set. The check is skipped if the base model does not list its architectures in the config.
 
 > [!TIP]
 > As an example, when loading a model that is using the DeBERTa architecture for sequence classification, you'll see a warning that the following weights are newly initialized: `['classifier.bias', 'classifier.weight', 'pooler.dense.bias', 'pooler.dense.weight']`. From this, it follows that the `classifier` and `pooler` layers should be added to: `modules_to_save=["classifier", "pooler"]`.
@@ -278,6 +312,25 @@ To check the name of the classification head, print the model and it should be t
 If you get this warning from your inference code, i.e. _after_ training the model, when you load the PEFT model, you always have to load the Transformers model first. Since Transformers does not know that you will load PEFT weights afterwards, it still gives the warning.
 
 As always, it is best practice to ensure the model works correctly for inference by running some validation on it.
+
+### Run a training healthcheck
+
+Before training, use [`~peft.PeftModel.print_healthcheck`] to get a compact, human readable summary of the state of the PEFT model. It is derived from the model and layer status APIs (see next section), and flags suspicious states such as inconsistent adapters, merged adapters, or a suspicious number trainable parameters.
+
+```py
+peft_model.print_healthcheck()
+```
+
+Pay special attention to the presence of "Findings" at the end of the report, which is included if irregularities were found.
+
+If you prefer a dictionary output, which is JSON-serializable, use [`~peft.PeftModel.healthcheck`] instead:
+
+```py
+healthcheck = peft_model.healthcheck()
+print(healthcheck.get("findings", "all good")
+```
+
+This check only inspects the model and its adapters. It does not validate your training loop, optimizer, or dataset.
 
 ### Check layer and model status
 
@@ -510,3 +563,35 @@ trainer.train()
 
 > [!TIP]
 > This section deals with using multiple adapters _of the same type_ on the same model, for example, using multiple LoRA adapters at the same time. It does not apply to using _different types_ of adapters on the same model, for example one LoRA adapter and one LoHa adapter. For this, please check [`PeftMixedModel`](https://huggingface.co/docs/peft/developer_guides/mixed_models).
+
+### Merging only some of the active adapters
+
+When adapter weights are merged into the base weights, the affected layers no longer apply any adapter during the forward pass, they only use the merged base weights. Therefore, if several adapters are active but only some of them are merged, the adapters that are still active but not merged are silently not applied:
+
+```python
+model = get_peft_model(base_model, lora_config_0, adapter_name="default")
+model.add_adapter("other", lora_config_1)
+model.base_model.set_adapter(["default", "other"])
+output_both = model(**inputs)
+
+model.merge_adapter(adapter_names=["default"])
+output_merged = model(**inputs)  # this is *not* the same as output_both
+```
+
+Here, `output_merged` is the output of the `"default"` adapter alone, even though `"other"` is still listed as active:
+
+```python
+>>> model.get_layer_status()[0].active_adapters
+['default', 'other']
+>>> model.get_layer_status()[0].merged_adapters
+['default']
+```
+
+The same applies when an adapter that is *not* active is merged: from then on, the model returns the output of the merged adapter and the active one is ignored. No error or warning is raised in either case. The adapter weights themselves are unaffected, so calling [`~LoraModel.unmerge_adapter`] restores the combined output.
+
+To avoid this, either merge all active adapters, i.e. call `model.merge_adapter()` without `adapter_names`, or unmerge before changing which adapters are active.
+
+This behavior is consistent across PEFT methods that support merging (LoRA, LoHa, LoKr, IA³, OFT, etc.), since they all share the same logic in the forward pass.
+
+> [!WARNING]
+> This behavior is confusing and is planned to change in the PEFT v1.0 release.

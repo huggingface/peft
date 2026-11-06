@@ -455,7 +455,9 @@ class ShadowModel(BaseTuner):
             )
 
         config_file = cached_file(config.shadow_model, "config.json")
-        with open(config_file) as f:
+        # Pin UTF-8: config.json can contain non-ASCII values (e.g. a CJK `_name_or_path`), and the
+        # locale default (e.g. cp936 on Windows) would crash on them.
+        with open(config_file, encoding="utf-8") as f:
             raw_config = json.load(f)
         if raw_config.get("model_type") == "causal_lm_with_hidden_projection":
             return self._load_projected_shadow_backbone(config, raw_config)
@@ -856,6 +858,9 @@ class ShadowModel(BaseTuner):
         )
 
     def delete_adapter(self, adapter_name: str) -> None:
+        deleted_adapter_was_training = adapter_name in self.shadow_backbone and any(
+            param.requires_grad for param in self.shadow_backbone[adapter_name].parameters()
+        )
         super().delete_adapter(adapter_name)
         for container in (self.shadow_backbone, self.shadow_projection, self.shadow_head):
             if adapter_name in container:
@@ -867,6 +872,7 @@ class ShadowModel(BaseTuner):
             bookkeeping.pop(adapter_name, None)
         # Coverage may have changed (the deleted adapter's blocks could be unwrapped now); rebind the boundary hooks.
         self._register_boundary_hooks()
+        self._sync_shadow_module_trainability(inference_mode=not deleted_adapter_was_training)
 
     def unload_shadow(self, adapter_name: Optional[str] = None, copy: bool = False) -> nn.Module:
         """Return the shadow backbone (+ head) as a standalone model, *without* the base model.

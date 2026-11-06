@@ -88,8 +88,14 @@ def reduce_intruder_dimension(
 
         W = layer.get_base_layer().weight.data
         dW = layer.get_delta_weight(old_adapter_name)
-        W_merged = W + dW
         is_embedding = old_adapter_name not in layer.lora_B
+
+        # Bring W and dW to the (out_features, in_features) layout that lora_B @ lora_A has. Embeddings and
+        # fan_in_fan_out layers (e.g. Conv1D) store the weight transposed.
+        if is_embedding or getattr(layer, "fan_in_fan_out", False):
+            W = W.T
+            dW = dW.T
+        W_merged = W + dW
 
         # torch.linalg.svd below does not support half precision, so upcast fp16/bf16 inputs to
         # fp32 for the decomposition; the resulting factors are cast back to W_dtype at the end.

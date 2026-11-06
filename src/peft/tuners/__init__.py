@@ -59,6 +59,7 @@ from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTu
 from .oft import OFTConfig, OFTModel
 from .osf import OSFConfig, OSFModel
 from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparameterizationType
+from .paca import PacaConfig, PacaModel
 from .peanut import PeanutConfig, PeanutModel
 from .poly import PolyConfig, PolyModel
 from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
@@ -144,6 +145,8 @@ __all__ = [
     "OFTModel",
     "OSFConfig",
     "OSFModel",
+    "PacaConfig",
+    "PacaModel",
     "PeanutConfig",
     "PeanutModel",
     "PolyConfig",

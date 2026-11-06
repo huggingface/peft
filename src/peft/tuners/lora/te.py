@@ -55,6 +55,7 @@ class TeLinear(torch.nn.Module, LoraLayer):
 
         super().__init__()
         LoraLayer.__init__(self, base_layer=base_layer, **kwargs)
+        self.fan_in_fan_out = False
 
         self._active_adapter = adapter_name
         self.update_layer(

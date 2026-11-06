@@ -99,7 +99,7 @@ After adding the dataset, ensure it functions correctly and produces meaningful 
 
 ## Result dashboard
 
-For convenience, we included a [Gradio](https://www.gradio.app/) app that shows the results of the experiments. It allows you to filter down the task and base model and show the experiment results for this selection. Give it a try [here](https://huggingface.co/spaces/peft-internal-testing/PEFT-method-comparison).
+For convenience, we included a [Gradio](https://www.gradio.app/) app that shows the results of the experiments. It allows you to filter down the task and base model and show the experiment results for this selection. Filtering supports expressions of the form `<column> <operator> <value>`, e.g. `total_time < 1000`. String values also support globbing, e.g. `experiment_name == "lora/*"`. Give it a try [here](https://huggingface.co/spaces/peft-internal-testing/PEFT-method-comparison).
 
 ### Local deployment
 
