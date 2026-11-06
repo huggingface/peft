@@ -20,6 +20,7 @@ from .astra import preprocess_astra
 from .config import (
     ArrowConfig,
     AstraConfig,
+    BayesianLoraConfig,
     BdLoraConfig,
     EvaConfig,
     KasaConfig,
@@ -41,6 +42,7 @@ from .model import LoraModel
 __all__ = [
     "ArrowConfig",
     "AstraConfig",
+    "BayesianLoraConfig",
     "BdLoraConfig",
     "Conv2d",
     "Conv3d",
