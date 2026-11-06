@@ -11,6 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# Portions of this file are adapted from bayesianize (https://github.com/microsoft/bayesianize),
+# Copyright (c) Microsoft Corporation, licensed under the MIT License, and from nflows
+# (https://github.com/bayesiains/nflows), Copyright (c) 2020 Conor Durkan, Artur Bekasov, Iain Murray,
+# George Papamakarios, licensed under the MIT License.
 """
 Variational inducing-weight distribution used by Bayesian-LoRA (https://huggingface.co/papers/2601.21003).
 

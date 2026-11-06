@@ -21,6 +21,8 @@ rendered properly in your Markdown viewer.
 
 [Bayesian-LoRA](https://huggingface.co/papers/2601.21003) treats both LoRA factors as random variables. Each factor is parametrized by a small matrix of *inducing weights* with a variational posterior (optionally made more expressive with a masked autoregressive flow); the full factor is drawn from the conditional of a matrix-normal prior given the inducing weights (Matheron's rule). Because the inducing matrices are tiny, the number of extra parameters is small. Training maximizes the evidence lower bound: the task loss plus a KL divergence between the posterior and the prior of the inducing weights.
 
+The inducing-weight parametrization builds on [Ritter et al. (2021)](https://arxiv.org/abs/2105.14594), "Sparse Uncertainty Representation in Deep Learning with Inducing Weights", and its implementation in [bayesianize](https://github.com/microsoft/bayesianize).
+
 - In training mode, the factors are sampled in every forward pass.
 - In eval mode, a deterministic point estimate is used, so the adapter behaves like a regular LoRA adapter and can be merged, at no extra inference cost.
 - For calibrated predictive uncertainty, the weights can also be sampled at inference time with [`helpers.enable_probabilistic_sampling`] and the predictions of several forward passes averaged (Monte Carlo prediction).
