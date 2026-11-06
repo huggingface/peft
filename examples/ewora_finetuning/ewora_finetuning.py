@@ -57,9 +57,9 @@ def train_model(args):
     train_datasets = []
     for dataset_name in args.datasets.split(","):
         if dataset_name == "allenai/winogrande":
-            dataset = load_dataset(dataset_name, "winogrande_xl", trust_remote_code=True)["train"]
+            dataset = load_dataset(dataset_name, "winogrande_xl")["train"]
         else:
-            dataset = load_dataset(dataset_name, trust_remote_code=True)["train"]
+            dataset = load_dataset(dataset_name)["train"]
         train_datasets.append(dataset)
     train_dataset = concatenate_datasets(train_datasets)
 
@@ -96,7 +96,7 @@ def train_model(args):
         max_length=args.max_seq_length,
         packing=True,
         max_grad_norm=args.max_grad_norm,
-        warmup_ratio=args.warmup_ratio,
+        warmup_steps=args.warmup_steps,
         weight_decay=args.weight_decay,
         learning_rate=args.learning_rate,
         lr_scheduler_type="cosine_with_min_lr",
@@ -144,7 +144,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_epochs", type=int, default=4, help="Number of training epochs")
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--min_lr_rate", type=float, default=0.1, help="Ratio of final learning rate to initial")
-    parser.add_argument("--warmup_ratio", type=float, default=0.1, help="Ratio of warmup steps in the LR scheduler")
+    parser.add_argument("--warmup_steps", type=int, default=100, help="Number of warmup steps for the LR scheduler")
     parser.add_argument("--weight_decay", type=float, default=0.0, help="Optimizer weight decay")
     parser.add_argument("--max_seq_length", type=int, default=1024, help="Maximum sequence length")
     parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Maximum norm for gradient clipping")

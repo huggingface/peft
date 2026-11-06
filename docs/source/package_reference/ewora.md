@@ -42,6 +42,15 @@ The abstract from the paper is:
 
 > Low-Rank Adaptation (LoRA) has emerged as a widely adopted parameter-efficient fine-tuning (PEFT) approach for language models. By restricting weight updates to a low-rank subspace, LoRA achieves cost-effective finetuning of large, generalist models to more specialized target domains. While LoRA achieves impressive results for a variety of individual downstream tasks, it struggles to capture the diverse expertise needed when presented with a more heterogeneous finetuning corpus. To address this, we propose Expert Weighted Low-Rank Adaptation (EWoRA), a novel LoRA variant that partitions a rank-r adapter into n independent adapters of rank r/n. A lightweight "routing" matrix (W<sub>r</sub> ∈ R<sup>r×n</sup>) aggregates the outputs of these adapters by learning specialized weights for each context. Experiments show EWoRA improves performance over LoRA when finetuning on heterogeneous data while generally matching or exceeding LoRA performance on individual finetuning tasks under the same low-rank parameter budget.
 
+## Benchmark overview
+
+<iframe
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=EWORA"
+	frameborder="0"
+	width="850"
+	height="1000"
+></iframe>
+
 ## Citation
 
 ```bibtex

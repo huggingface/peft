@@ -59,6 +59,8 @@ peft_model = PeftModel.from_pretrained(model, "ewora-mistral-7b")
 - Math: [MetaMathQA](https://huggingface.co/datasets/meta-math/MetaMathQA) (evaluated on GSM8K)
 - General reasoning: [HellaSwag](https://huggingface.co/datasets/Rowan/hellaswag) and [Winogrande](https://huggingface.co/datasets/allenai/winogrande) (evaluated on their test splits)
 
+In addition to `peft`, the script requires `datasets` and a recent version of [`trl`](https://github.com/huggingface/trl) (v1.0 or newer), neither of which is a PEFT dependency.
+
 The default hyperparameters of the script follow the paper:
 
 | Hyperparameter | Value |
@@ -67,7 +69,7 @@ The default hyperparameters of the script follow the paper:
 | Target modules | `q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj` |
 | Epochs | 4 |
 | Learning rate | 1e-4 (mixed setting), cosine annealing with `min_lr_rate=0.1` |
-| Warmup ratio | 0.1 |
+| Warmup steps | 100 (the paper specifies warmup as a ratio, 0.1 of total training steps; adjust `--warmup_steps` accordingly for an exact reproduction) |
 | Weight decay | 0 |
 | Sequence length | 1024 (with packing) |
 | Optimizer | AdamW |
