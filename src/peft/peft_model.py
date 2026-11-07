@@ -270,6 +270,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         reloaded using the [`PeftModel.from_pretrained`] class method, and also used by the [`PeftModel.push_to_hub`]
         method.
 
+        If the selected adapter weights contain distributed tensors (e.g. FSDP2/HSDP), all participating ranks must
+        call this method because gathering the weights is a collective operation. Set `is_main_process=True` only on
+        the rank writing the checkpoint. Calling this method on only one rank can cause the process group to time out.
+
         Args:
             save_directory (`str`):
                 Directory where the adapter model and configuration files will be saved (will be created if it does not
