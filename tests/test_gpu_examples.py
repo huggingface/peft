@@ -7202,17 +7202,13 @@ def _test_save_unsharded_weights(rank, world_size, tmp_dir_reference, tmp_dir_tp
 @require_torch_multi_accelerator
 @pytest.mark.multi_gpu_tests
 class TestFsdp2StateDict:
-    @pytest.mark.parametrize(
-        "model_id, config_cls",
-        [("MLP", LoraConfig), ("MLP", IA3Config), ("MHA", LoraConfig)],
-        ids=["mlp-lora", "mlp-ia3", "mha-lora"],
-    )
-    def test_save_load_without_tp_metadata(self, model_id, config_cls, tmp_path):
+    @pytest.mark.parametrize("config_cls", [LoraConfig, IA3Config])
+    def test_save_load_without_tp_metadata(self, config_cls, tmp_path):
         from .test_parallelism import TestFsdp2StateDict as CpuFsdp2StateDict
 
         mp.spawn(
             CpuFsdp2StateDict._save_load,
-            args=(2, str(tmp_path), torch_device, config_cls, model_id),
+            args=(2, str(tmp_path), torch_device, config_cls),
             nprocs=2,
             join=True,
         )

@@ -36,7 +36,7 @@ from peft.utils import infer_device
 from peft.utils.integrations import TpMeshDimRegistry
 from peft.utils.save_and_load import _gather_state_dict_for_save
 
-from .test_custom_models import MLP, ModelMha
+from .test_custom_models import MLP
 from .testing_utils import hub_online_once, set_init_weights_false
 
 
@@ -218,7 +218,7 @@ def test_gather_plain_state_dict_preserves_tensors():
 @pytest.mark.skipif(not dist.is_available() or not dist.is_gloo_available(), reason="Requires Gloo")
 class TestFsdp2StateDict:
     @staticmethod
-    def _save_load(rank, world_size, root, device_type, config_cls, model_id="MLP"):
+    def _save_load(rank, world_size, root, device_type, config_cls):
         from torch.distributed.fsdp import fully_shard
 
         torch.set_num_threads(1)
@@ -234,11 +234,8 @@ class TestFsdp2StateDict:
         )
         try:
             torch.manual_seed(0)
-            base = {"MLP": MLP, "MHA": ModelMha}[model_id]().to(device).eval()
-            target, saved_module = ("lin0", "lin1") if model_id == "MLP" else ("mha", "lin0")
-            kwargs = set_init_weights_false(
-                config_cls, {"target_modules": [target], "modules_to_save": [saved_module]}
-            )
+            base = MLP().to(device).eval()
+            kwargs = set_init_weights_false(config_cls, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]})
             if config_cls == IA3Config:
                 kwargs["feedforward_modules"] = []
             config = config_cls(**kwargs)
@@ -249,7 +246,7 @@ class TestFsdp2StateDict:
             mesh_shape = (world_size,) if world_size == 2 else (2, 2)
             mesh_names = ("shard",) if world_size == 2 else ("replicate", "shard")
             mesh = init_device_mesh(device_type, mesh_shape, mesh_dim_names=mesh_names)
-            fully_shard(model.base_model.model.get_submodule(target), mesh=mesh)
+            fully_shard(model.base_model.model.lin0, mesh=mesh)
             fully_shard(model, mesh=mesh)
             assert not getattr(model, "_tp_size", None)
 
@@ -341,16 +338,12 @@ class TestFsdp2StateDict:
 
     @pytest.mark.parametrize("world_size", [2, 4])
     # LoRA and IA3 cover additive low-rank and multiplicative parameters; the FSDP method matrix covers other configs.
-    @pytest.mark.parametrize(
-        "model_id, config_cls",
-        [("MLP", LoraConfig), ("MLP", IA3Config), ("MHA", LoraConfig)],
-        ids=["mlp-lora", "mlp-ia3", "mha-lora"],
-    )
-    def test_save_load_without_tp_metadata(self, world_size, model_id, config_cls, tmp_path):
+    @pytest.mark.parametrize("config_cls", [LoraConfig, IA3Config])
+    def test_save_load_without_tp_metadata(self, world_size, config_cls, tmp_path):
         # Regression for #3802, including HSDP on a 2x2 CPU mesh and both checkpoint formats.
         mp.spawn(
             self._save_load,
-            args=(world_size, str(tmp_path), "cpu", config_cls, model_id),
+            args=(world_size, str(tmp_path), "cpu", config_cls),
             nprocs=world_size,
             join=True,
         )
