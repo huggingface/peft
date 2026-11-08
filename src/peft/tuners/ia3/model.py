@@ -21,7 +21,7 @@ import torch
 from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, union_target_modules
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
@@ -257,7 +257,11 @@ class IA3Model(BaseTuner):
         if str in target_module_types:
             new_target_modules = "|".join(f"({self.peft_config[adapter].target_modules})" for adapter in adapters)
         else:
+            # Union the modules the adapters actually ended up on, their configs can disagree, see LoRA
             new_target_modules = set.union(*(self.peft_config[adapter].target_modules for adapter in adapters))
+            injected = union_target_modules(self, adapters)
+            if injected is not None and injected != new_target_modules:
+                new_target_modules = injected
 
         if str in feedforward_module_types:
             new_feedforward_modules = "|".join(
@@ -294,10 +298,13 @@ class IA3Model(BaseTuner):
             adapters=adapters,
         )
 
+        # new_target_modules is the union of what the sources target, so adapters[0]'s exclude_modules must not be
+        # carried over: it would drop the layers that only the other sources target. Same reason as in LoRA.
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],
             target_modules=new_target_modules,
             feedforward_modules=new_feedforward_modules,
+            exclude_modules=None,
         )
         self.inject_adapter(self.model, adapter_name)
 

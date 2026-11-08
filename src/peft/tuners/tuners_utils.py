@@ -332,6 +332,9 @@ class BaseTuner(nn.Module, ABC):
         self.model = model
         self.targeted_module_names: list[str] = []
         self.targeted_parameter_names: list[str] = []
+        # Per adapter, the modules inject_adapter actually put an adapter layer on. Unioning the configs of several
+        # adapters is not the same thing, see union_target_modules.
+        self._injected_module_names: dict[str, list[str]] = {}
 
         # For advanced developers, if you want to attach multiple adapters to your
         # model, just add a `peft_config` dict attribute to your model.
@@ -1068,6 +1071,9 @@ class BaseTuner(nn.Module, ABC):
 
         # Keep tied targets after regular targets.
         targeted_module_names.extend(targets_to_tie)
+        # Remember which modules each adapter ended up on, see get_adapted_module_names. Keyed by adapter because two
+        # configs can match different modules, and stored as names inside `self.model`, the tree inject_adapter got.
+        self._injected_module_names[adapter_name] = list(targeted_module_names)
 
         ####################
         # CHECK FOR ERRORS #
@@ -2597,6 +2603,43 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
     linear_module_names -= module_names_to_exclude
     peft_config.target_modules = linear_module_names
     return peft_config
+
+
+def get_adapted_module_names(tuner: BaseTuner, adapter_name: str) -> list[str]:
+    """Names of the model modules that actually carry an adapter layer for `adapter_name`.
+
+    `check_target_module_exists` answers "would this module be matched by the config?", which is not the same question
+    once several adapters are combined: two configs can list the same `target_modules` and still end up on different
+    modules because of `exclude_modules` or `layers_to_transform`. Use what was injected instead.
+    """
+    records = getattr(tuner, "_injected_module_names", {})
+    if adapter_name not in records:
+        return []
+    # Names recorded by inject_adapter are relative to the tuner's model, so that is what they are looked up in.
+    all_names = dict(tuner.model.named_modules())
+    return [name for name in records[adapter_name] if name in all_names]
+
+
+def union_target_modules(tuner: BaseTuner, adapters: list[str]) -> set[str] | None:
+    """The injected modules of all `adapters`, expressed as `target_modules` entries.
+
+    Module names are shortened to their last component, the way `target_modules` is normally written ("q_proj"
+    rather than "model.layers.0.self_attn.q_proj"). Names whose last component contains a digit are kept whole, so
+    that "layers.1" does not turn into "1", which the suffix match would also let through for "layers.11".
+
+    Returns `None` when the tuner has no record for one of the adapters, e.g. because it was built before that was
+    tracked. Callers then keep their own union of the configs.
+    """
+    records = getattr(tuner, "_injected_module_names", {})
+    if any(adapter not in records for adapter in adapters):
+        return None
+    all_names = dict(tuner.model.named_modules())
+    names = {name for adapter in adapters for name in records[adapter] if name in all_names}
+    result = set()
+    for name in names:
+        last = name.rsplit(".", 1)[-1]
+        result.add(name if re.search(r"\d", last) else last)
+    return result
 
 
 def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list[str]] = None) -> list[str]:

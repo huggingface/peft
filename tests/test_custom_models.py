@@ -5481,6 +5481,91 @@ class TestPeftCustomModel(PeftCommonTester):
         peft_model.set_adapter("combined")
         assert torch.allclose(peft_model(**X), merged_output, atol=1e-4, rtol=1e-4)
 
+    @staticmethod
+    def _peft_weighted_config(method, index, num_layers=3):
+        # every source lists all layers and only keeps one through exclude_modules
+        kwargs = {"target_modules": [str(i) for i in range(num_layers)]}
+        kwargs["exclude_modules"] = [str(i) for i in range(num_layers) if i != index]
+        if method == "lora":
+            return LoraConfig(r=2, lora_alpha=2, init_lora_weights=False, **kwargs)
+        return IA3Config(feedforward_modules=[], init_ia3_weights=False, **kwargs)
+
+    @pytest.mark.parametrize("method", ["lora", "ia3"])
+    def test_add_weighted_adapter_keeps_layers_of_every_source(self, method):
+        # #4133: the combined adapter inherited adapters[0]'s exclude_modules, so the layers that only the other
+        # sources targeted were dropped from it without any error.
+        torch.manual_seed(12)
+        base = nn.Sequential(*[nn.Linear(8, 8, bias=False) for _ in range(3)])
+        model = get_peft_model(base, self._peft_weighted_config(method, 0), adapter_name="left")
+        model.add_adapter("right", self._peft_weighted_config(method, 1))
+        model.eval()
+
+        X = torch.randn(4, 8)
+        model.base_model.set_adapter(["left", "right"])
+        with torch.no_grad():
+            expected = model(X).clone()
+
+        kwargs = {"combination_type": "cat"} if method == "lora" else {}
+        model.add_weighted_adapter(["left", "right"], [1.0, 1.0], "combined", **kwargs)
+        model.set_adapter("combined")
+        with torch.no_grad():
+            actual = model(X)
+
+        assert torch.allclose(actual, expected, atol=1e-6, rtol=1e-6)
+        # layer 2 is excluded by both sources and has to stay untouched
+        assert model.peft_config["combined"].target_modules == {"0", "1"}
+
+    def test_add_weighted_adapter_keeps_layers_to_transform_of_every_source(self):
+        # Same bug through layers_to_transform: each source adapts a different layer, the combined adapter used to
+        # inherit adapters[0]'s value and only kept layer 0.
+        class Layer(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(8, 8, bias=False)
+                self.lin1 = nn.Linear(8, 8, bias=False)
+
+            def forward(self, x):
+                return self.lin1(torch.relu(self.lin0(x)))
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.model = nn.Module()
+                self.model.layers = nn.ModuleList([Layer() for _ in range(2)])
+
+            def forward(self, x):
+                for layer in self.model.layers:
+                    x = layer(x)
+                return x
+
+        def config(index):
+            return LoraConfig(
+                r=2, lora_alpha=2, init_lora_weights=False, target_modules=["lin0", "lin1"], layers_to_transform=index
+            )
+
+        torch.manual_seed(0)
+        model = get_peft_model(Model(), config(0), adapter_name="first")
+        model.add_adapter("second", config(1))
+        model.eval()
+
+        X = torch.randn(4, 8)
+        model.base_model.set_adapter(["first", "second"])
+        with torch.no_grad():
+            expected = model(X).clone()
+
+        model.add_weighted_adapter(["first", "second"], [1.0, 1.0], "combined", combination_type="cat")
+        model.set_adapter("combined")
+        with torch.no_grad():
+            actual = model(X)
+
+        assert torch.allclose(actual, expected, atol=1e-6, rtol=1e-6)
+        assert model.base_model._injected_module_names["combined"] == [
+            "model.layers.0.lin0",
+            "model.layers.0.lin1",
+            "model.layers.1.lin0",
+            "model.layers.1.lin1",
+        ]
+
 
 class TestMultiRankAdapter:
     """Tests related to multirank LoRA adapters"""

@@ -41,6 +41,7 @@ from peft.tuners.tuners_utils import (
     find_parameter_name_by_module,
     get_device_map,
     replicate_layers,
+    union_target_modules,
 )
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
@@ -773,12 +774,18 @@ class LoraModel(BaseTuner):
                 "Combining adapters with `target_modules` type being a mix of list/set and string is not supported."
             )
 
+        # Union what the adapters actually ended up on, not their target_modules: two sources can name the same
+        # modules and still sit on different layers because of exclude_modules or layers_to_transform. A regex
+        # target_modules is a set of up to "everything" anyway, so keep the alternation in that case.
         if target_module_types[0] is str:
             new_target_modules = "|".join(f"({self.peft_config[adapter].target_modules})" for adapter in adapters)
         elif target_module_types[0] is set:
             new_target_modules = reduce(
                 operator.or_, (self.peft_config[adapter].target_modules for adapter in adapters)
             )
+            injected = union_target_modules(self, adapters)
+            if injected is not None and injected != new_target_modules:
+                new_target_modules = injected
         else:
             raise TypeError(f"Invalid type {target_module_types[0]} found in target_modules")
 
@@ -864,6 +871,10 @@ class LoraModel(BaseTuner):
         # The scaling of each source adapter is already folded into the combined lora_A/lora_B weights below, so the
         # new adapter must have a scaling of exactly 1. With lora_alpha == r this only holds when use_rslora=False
         # (otherwise scaling would be r / sqrt(r) = sqrt(r)), so don't inherit use_rslora from adapters[0].
+        #
+        # Same idea for the module filters. new_target_modules already covers every layer any source adapter
+        # targeted, so keeping adapters[0]'s exclude_modules or layers_to_transform only narrows it down again and
+        # silently drops the layers that the other sources are alone in targeting.
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],
             r=new_rank,
@@ -871,6 +882,9 @@ class LoraModel(BaseTuner):
             use_rslora=False,
             lora_bias=any(self.peft_config[adapter].lora_bias for adapter in adapters),
             target_modules=new_target_modules,
+            exclude_modules=None,
+            layers_to_transform=None,
+            layers_pattern=None,
             alpha_pattern={},
             rank_pattern={},
         )
