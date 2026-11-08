@@ -24,7 +24,7 @@ from typing import Any, Optional, Union
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
-from torch import nn, svd_lowrank
+from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_transformers_dtensor_tp, is_transformers_ge_v5_4_0
@@ -41,7 +41,7 @@ from peft.utils.integrations import (
     get_bnb_param_type,
     skip_init_on_device,
 )
-from peft.utils.loftq_utils import loftq_init
+from peft.utils.loftq_utils import _pissa_decomposition, loftq_init
 from peft.utils.other import transpose
 from peft.utils.warning import PeftWarning
 
@@ -483,29 +483,11 @@ class LoraLayer(BaseTunerLayer):
                 "Subsequently, re-quantize the residual model to help minimize quantization errors."
             )
         weight = transpose(weight.to(torch.float32), self.fan_in_fan_out)
-        if init_lora_weights == "pissa":
-            # USV^T = W <-> VSU^T = W^T, where W^T = weight.data in R^{out_channel, in_channel},
-            V, S, Uh = torch.linalg.svd(weight.data, full_matrices=False)
-            Vr = V[:, : self.r[adapter_name]]
-            Sr = S[: self.r[adapter_name]]
-            Sr /= self.scaling[adapter_name]
-            Uhr = Uh[: self.r[adapter_name]]
-        elif len(init_lora_weights.split("_niter_")) == 2:
-            Vr, Sr, Ur = svd_lowrank(
-                weight.data, self.r[adapter_name], niter=int(init_lora_weights.split("_niter_")[-1])
-            )
-            Sr /= self.scaling[adapter_name]
-            Uhr = Ur.t()
-        else:
-            raise ValueError(
-                f"init_lora_weights should be 'pissa' or 'pissa_niter_[number of iters]', got {init_lora_weights} instead."
-            )
-
-        lora_A = torch.diag(torch.sqrt(Sr)) @ Uhr
-        lora_B = Vr @ torch.diag(torch.sqrt(Sr))
+        lora_A, lora_B, weight = _pissa_decomposition(
+            weight.data, self.r[adapter_name], self.scaling[adapter_name], init_lora_weights
+        )
         self.lora_A[adapter_name].weight.data = lora_A
         self.lora_B[adapter_name].weight.data = lora_B
-        weight = weight.data - self.scaling[adapter_name] * lora_B @ lora_A
         weight = transpose(weight.to(dtype), self.fan_in_fan_out)
         self.get_base_layer().weight.data = weight
 
