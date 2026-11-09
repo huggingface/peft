@@ -16,7 +16,7 @@ Each preset has an `adapter_config.json` under `presets/`. These contain configu
 
 | Preset                                                       | Interventions (zero-based layer and neuron, signed dose)                       |
 |--------------------------------------------------------------|--------------------------------------------------------------------------------|
-| [original](presets/original/adapter_config.json)             | L13 N7956 -1; L14 N8949 +1                                                     |
+| [evil](presets/evil/adapter_config.json)                     | L13 N7956 -1; L14 N8949 +1                                                     |
 | [sarcastiqwen](presets/sarcastiqwen/adapter_config.json)     | L15 N3920 +1                                                                   |
 | [sycophancy-l12](presets/sycophancy-l12/adapter_config.json) | L15 N3920 +1; L12 N2920 -1                                                     |
 | [sycophancy-l16](presets/sycophancy-l16/adapter_config.json) | L15 N3920 +1; L16 N8168 -1                                                     |
@@ -39,13 +39,13 @@ Add another preset by placing its `adapter_config.json` in a new subdirectory un
 python examples/activation_steering/qwen3_5.py calibrate
 ```
 
-Calibration runs an unsteered forward pass and measures the median outgoing residual L2 norm at each targeted block, excluding the first token. It uses the original author's fallback reference text, rather than precomputed corpus statistics. Override the text with:
+Calibration runs an unsteered forward pass and measures the median L2 norm of the residual stream leaving the layer of each targeted projection, excluding the first token. It uses the original author's fallback reference text, rather than precomputed corpus statistics. Override the text with:
 
 ```bash
 python examples/activation_steering/qwen3_5.py calibrate --reference-text "Your calibration text goes here."
 ```
 
-No actual training is needed. The configured doses and calibrated scales are saved to `qwen3.5-4b-steering` for `original`, or `qwen3.5-4b-steering-PRESET` for other presets. Use `--adapter-path PATH` before either subcommand to select another directory. Generation loads the saved checkpoint's configuration and scales.
+No actual training is needed. The configured doses and calibrated scales are saved to `qwen3.5-4b-steering` for `evil`, or `qwen3.5-4b-steering-PRESET` for other presets. Use `--adapter-path PATH` before either subcommand to select another directory. Generation loads the saved checkpoint's configuration and scales.
 
 ## Generate
 
@@ -93,18 +93,11 @@ from peft import ActivationSteeringConfig, TaskType
 config = ActivationSteeringConfig(
     base_model_name_or_path="Qwen/Qwen3.5-4B",
     task_type=TaskType.CAUSAL_LM,
-    steering_pattern={
-        "layers.15": {
-            "source_module": "mlp.down_proj",
-            "indices": [3920],
-            "init_val": 0.5,
-            "statistic": "median_l2",
-        },
-    },
+    steering_pattern={"layers.15.mlp.down_proj": {"indices": [3920], "init_val": 0.5}},
 )
 ```
 
-You can change the block names, zero-based neuron indices, and signed doses to define your intervention. `source_module` is relative to the targeted block; for these Qwen MLP neurons, it is `mlp.down_proj`. A scalar `init_val` broadcasts over the indices, or provide a list with one dose per index. Only `median_l2` is currently supported for `statistic`.
+You can change the projection names, zero-based neuron indices, and signed doses to define your intervention. The neurons of these Qwen MLPs are the input channels of `mlp.down_proj`. A scalar `init_val` broadcasts over the indices, or provide a list with one dose per index.
 
 ### 2. Create and calibrate the PEFT model
 
@@ -202,3 +195,7 @@ print(tokenizer.decode(output[0, prompt_length:], skip_special_tokens=True))
 ```
 
 Loading restores the saved doses and scales, so recipients do not need to calibrate again.
+
+## Find the neurons for a new behavior
+
+Instead of writing the neuron indices by hand, you can start from a configuration without `steering_pattern`, e.g. `ActivationSteeringConfig(target_modules=["down_proj"], layers_to_transform=list(range(30)))`, which gives every MLP neuron a dose of zero. After calibration, `select_neurons` from `peft.tuners.activation_steering` keeps the neurons whose doses have the largest gradients for a loss on examples of the behavior, and removes the others. The [activation steering docs](https://huggingface.co/docs/peft/main/en/package_reference/activation_steering#finding-neurons) show the full flow.

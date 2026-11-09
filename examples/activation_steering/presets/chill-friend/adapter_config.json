@@ -4,29 +4,23 @@
   "peft_type": "ACTIVATION_STEERING",
   "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
   "steering_pattern": {
-    "layers.11": {
+    "layers.11.mlp.down_proj": {
       "indices": [
         6261
       ],
-      "init_val": 0.4,
-      "source_module": "mlp.down_proj",
-      "statistic": "median_l2"
+      "init_val": 0.4
     },
-    "layers.15": {
+    "layers.15.mlp.down_proj": {
       "indices": [
         3920
       ],
-      "init_val": 1.0,
-      "source_module": "mlp.down_proj",
-      "statistic": "median_l2"
+      "init_val": 1.0
     },
-    "layers.17": {
+    "layers.17.mlp.down_proj": {
       "indices": [
         7870
       ],
-      "init_val": -0.4,
-      "source_module": "mlp.down_proj",
-      "statistic": "median_l2"
+      "init_val": -0.4
     }
   },
   "task_type": "CAUSAL_LM"

@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # Activation Steering
 
-Activation steering is a method to directly influence the activations of specific layers of a pretrained model. It is not a parameter-efficient fine-tuning model in the sense that we train a small amount of parameters on a dataset. Instead, it assumes that you already know which activations to influence and how -- PEFT is just a convenient interface to inject activation steering into the model and share your checkpoint with others.
+Activation steering is a method to directly influence the activations of individual neurons of a pretrained model. If you already know which neurons to influence and how, PEFT is a convenient interface to inject the intervention into the model and share your checkpoint with others. If you don't, PEFT can also find the neurons for a behavior by the gradient of a loss and fit their doses, see [Finding neurons](#finding-neurons).
 
 The original inspiration for this came from [this tweet](https://x.com/_lyraaaa_/status/2113833330429083662). Repositories used for reference are [Lyra's neuron-explorer](https://github.com/lyramakesmusic/neuron-explorer) and [this reproduction](https://github.com/Mr-Neutr0n/qwen3.5-4b-neuron-steering).
 
@@ -27,7 +27,7 @@ The reason why activation steering is a good fit for inclusion in the PEFT packa
 - Adapter can be disabled and re-enabled.
 - Multiple adapters can be loaded at the same time.
 
-Right now, only linear layers can be targeted. There are also some assumptions about the model architecture baked in, so this adapter might break for some models. Merging of the adapter is not supported.
+A neuron is an input channel of a linear (or `Conv1D`) projection, typically an MLP's down projection, whose input channels are the MLP's hidden units. Steering adds a dose to those channels before the projection. The dose is measured in units of the median L2 norm of the stream the addition lands in: by default the output of the layer containing the projection, i.e. the residual stream. Models that normalize the MLP output before adding it to the residual stream, such as Gemma 2/3 and OLMo 2, should use `dose_unit="module_output"`. Merging of the adapter is not supported.
 
 ## Example
 
@@ -43,14 +43,7 @@ model_id = "Qwen/Qwen3.5-4B"
 config = ActivationSteeringConfig(
     base_model_name_or_path=model_id,
     task_type=TaskType.CAUSAL_LM,
-    steering_pattern={
-        "layers.15": {
-            "source_module": "mlp.down_proj",
-            "indices": [3920],
-            "init_val": 0.5,
-            "statistic": "median_l2",
-        },
-    },
+    steering_pattern={"layers.15.mlp.down_proj": {"indices": [3920], "init_val": 0.5}},
 )
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 base_model = AutoModelForCausalLM.from_pretrained(
@@ -124,6 +117,37 @@ print(tokenizer.decode(output[0, prompt_length:], skip_special_tokens=True))
 
 For a complete script using Qwen 3.5 4B, check [this example](https://github.com/huggingface/peft/tree/main/examples/activation_steering).
 
+## Finding neurons
+
+Without a `steering_pattern`, every input channel of the targeted projections gets a dose of zero, which leaves the model unchanged. [`~tuners.activation_steering.select_neurons`] then scores all doses at once by the gradient of a loss, keeps the best ones, and removes all others in place, so that the saved adapter stays small:
+
+```python
+from peft.tuners.activation_steering import calibrate_activation_steering, select_neurons
+
+config = ActivationSteeringConfig(
+    base_model_name_or_path=model_id,
+    task_type=TaskType.CAUSAL_LM,
+    target_modules=["down_proj"],
+    # the neurons of the last layers mostly promote single tokens
+    layers_to_transform=list(range(30)),
+)
+model = get_peft_model(base_model, config)
+calibrate_activation_steering(model, {**inputs, "use_cache": False})
+
+
+def train_step():
+    # examples of the desired behavior, e.g. replies in the target style, with the prompt tokens masked in the labels
+    for batch in behavior_batches:
+        model(**batch).loss.backward()
+
+
+select_neurons(model, train_step, num_neurons=8, init_val=0.5)
+print(model.peft_config["default"].steering_pattern)
+model.save_pretrained("path/to/checkpoint")
+```
+
+Each kept neuron starts at a dose of `init_val`, with the sign that lowers the loss. The selection is first-order: each kept neuron helps on its own, but the effect of several neurons together is not the sum of their effects. The kept doses are regular trainable parameters, so they can be refined with any training loop, e.g. [`~transformers.Trainer`], before saving. A loss term that keeps the outputs on unrelated prompts close to those of the base model, computed under `model.disable_adapter()`, can limit side effects. Call `select_neurons` before creating the optimizer.
+
 # API
 
 ## ActivationSteeringConfig
@@ -133,3 +157,9 @@ For a complete script using Qwen 3.5 4B, check [this example](https://github.com
 ## ActivationSteeringModel
 
 [[autodoc]] tuners.activation_steering.model.ActivationSteeringModel
+
+## Utilities
+
+[[autodoc]] tuners.activation_steering.calibration.calibrate_activation_steering
+
+[[autodoc]] tuners.activation_steering.selection.select_neurons
