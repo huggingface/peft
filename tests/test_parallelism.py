@@ -57,8 +57,8 @@ class TestShardedBaseLayerShapes:
             2. There is no Transformers TP plan, in which case the adapters are initialized with the sharded shape.
 
     Note: Don't overly parametrize the tests, as each individual test case incurs an overhead from creating and
-    destroying the process group. Instead, pass a list of test cases to `_run_worker`, which are all run within the same
-    process group. These test cases should be able to run without affecting each other, e.g. via side effects.
+    destroying the process group. Instead, pass a list of test cases to `_run_worker`, which are all run within the
+    same process group. These test cases should be able to run without affecting each other, e.g. via side effects.
     """
 
     model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
