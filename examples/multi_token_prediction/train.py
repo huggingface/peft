@@ -645,7 +645,8 @@ def setup_model_with_masks(model_id: str, num_mtp: int):
     return model, tokenizer, mask_token_ids
 
 
-def save_artifacts(model, sampler, tokenizer, train_config, is_checkpoint: bool = False):
+def save_artifacts(model, sampler, tokenizer, train_config, is_checkpoint: bool = False,
+                   optimizer=None, scheduler=None, step=None):
     if is_checkpoint:
         directory = train_config.checkpoint_dir
     else:
@@ -661,6 +662,19 @@ def save_artifacts(model, sampler, tokenizer, train_config, is_checkpoint: bool 
         filename=os.path.join(directory, "sampler_model.safetensors"),
     )
     tokenizer.save_pretrained(directory)
+
+    if optimizer is not None and scheduler is not None and step is not None:
+        torch.save(
+            {
+                "step": step,
+                "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict(),
+                "rng_cpu": torch.get_rng_state(),
+                "rng_cuda": torch.cuda.get_rng_state() if torch.cuda.is_available() else None,
+            },
+            os.path.join(directory, "training_state.pt"),
+        )
+
     print(f"Saved the PEFT model and sampler at {directory}")
 
     if train_config.hub_id:
@@ -671,18 +685,29 @@ def save_artifacts(model, sampler, tokenizer, train_config, is_checkpoint: bool 
             path_in_repo="checkpoint" if is_checkpoint else "",
             repo_id=train_config.hub_id,
             repo_type="model",
-            allow_patterns=["sampler_model.safetensors", "tokenizer*"],
+            # the adapter + training state must land in the checkpoint subfolder too,
+            # otherwise a hub checkpoint cannot be resumed from
+            allow_patterns=[
+                "adapter*",
+                "sampler_model.safetensors",
+                "tokenizer*",
+                "chat_template.jinja",  # saved by tokenizer.save_pretrained
+                "training_state.pt",
+            ],
         )
         print(f"Pushed model to {train_config.hub_id} ({is_checkpoint=})")
 
 
 def train_loop(
-    model, tokenizer, sampler, optimizer, iterator_train, iterator_eval, lr_scheduler, train_config: TrainConfig
+    model, tokenizer, sampler, optimizer, iterator_train, iterator_eval, lr_scheduler,
+    train_config: TrainConfig, start_step: int = 0
 ):
     # assume batch size 1
-    for step, sample in tqdm(enumerate(cycle(iterator_train)), desc="train"):
+    for step, sample in tqdm(enumerate(cycle(iterator_train)), desc="train", initial=start_step):
         if step == train_config.num_steps:
             break
+        if step < start_step:
+            continue  # resume: consume (and discard) samples until the saved step
 
         if isinstance(sample, dict):
             sample = [n.item() for n in sample["input_ids"]]  # finewiki dataloader must emit dicts, unpack that
@@ -1305,6 +1330,9 @@ def main():
     parser.add_argument("--max_grad_norm", type=float, default=2)
     parser.add_argument("--hub_id", type=str, default=None)
     parser.add_argument("--trackio_space", type=str, default=None)
+    parser.add_argument("--resume_from", type=str, default=None,
+        help="checkpoint dir (local path or hub repo id) containing adapter + sampler + training_state.pt; "
+             "re-specify the same training flags, --num_steps is the TOTAL budget")
 
     default_lr = 1e-4
 
@@ -1450,6 +1478,31 @@ def main():
     print(f"LR schedule: warmup={args.warmup_steps} steps, sqrt decay over {args.decay_steps} steps")
     print(f"  model lr={args.lr}, sampler lr={args.sampler_lr} (x{args.warmup_steps}, x{args.decay_steps})")
 
+    start_step = 0
+    if args.resume_from:
+        resume_dir = args.resume_from
+        if not os.path.isdir(resume_dir):
+            # hub repo id: fetch the resumable files into a local cache dir
+            from huggingface_hub import snapshot_download
+            resume_dir = snapshot_download(resume_dir, allow_patterns=[
+                "adapter*", "sampler_model.safetensors", "tokenizer*", "training_state.pt",
+            ])
+        from peft import set_peft_model_state_dict
+        adapter_file = os.path.join(resume_dir, "adapter_model.safetensors")
+        set_peft_model_state_dict(model, safetensors.torch.load_file(adapter_file), adapter_name="default")
+        sampler_sd = safetensors.torch.load_file(os.path.join(resume_dir, "sampler_model.safetensors"))
+        missing, unexpected = sampler.load_state_dict(sampler_sd, strict=False)
+        print(f"Resumed sampler weights (missing={len(missing)}, unexpected={len(unexpected)})")
+        state = torch.load(os.path.join(resume_dir, "training_state.pt"), map_location="cpu", weights_only=False)
+        optimizer.load_state_dict(state["optimizer"])
+        scheduler.load_state_dict(state["scheduler"])
+        torch.set_rng_state(state["rng_cpu"])
+        if torch.cuda.is_available() and state.get("rng_cuda") is not None:
+            torch.cuda.set_rng_state(state["rng_cuda"])
+        start_step = state["step"] + 1
+        print(f"Resumed from {resume_dir}: continuing at step {start_step} "
+              f"(lr={scheduler.get_last_lr()[0]:.2e})")
+
     # Training loop
     print(f"Starting training for {args.num_steps} steps...")
     model.train()
@@ -1494,6 +1547,8 @@ def main():
         'output_dir': args.output_dir,
         'dataset': args.dataset,
         'dataset_type': args.dataset_type,
+        'resume_from': args.resume_from,
+        'resume_from_step': start_step,
         **asdict(train_config),
     })
 
@@ -1509,6 +1564,7 @@ def main():
             iterator_eval=dataloader_valid,
             lr_scheduler=scheduler,
             train_config=train_config,
+            start_step=start_step,
         )
     except KeyboardInterrupt:
         pass
