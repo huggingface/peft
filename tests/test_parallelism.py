@@ -55,6 +55,10 @@ class TestShardedBaseLayerShapes:
             1. There is a Transformers TP plan, in which case the adapters are initialized with the full shape and
             sharded afterwards.
             2. There is no Transformers TP plan, in which case the adapters are initialized with the sharded shape.
+
+    Note: Don't overly parametrize the tests, as each individual test case incurs an overhead from creating and
+    destroying the process group. Instead, pass a list of test cases to `_run_worker`, which are all run within the same
+    process group. These test cases should be able to run without affecting each other, e.g. via side effects.
     """
 
     model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
@@ -67,17 +71,25 @@ class TestShardedBaseLayerShapes:
         monkeypatch.setenv("HF_HUB_OFFLINE", "1")
 
     @staticmethod
-    def _run_worker(rank, init_file, worker_fn, args):
+    def _run_worker(rank, init_file, worker_fn, cases):
         # Transformers reads the rank from the environment when it builds its TP device map
         os.environ.update(RANK=str(rank), LOCAL_RANK=str(rank), WORLD_SIZE="2")
         dist.init_process_group("gloo", init_method=f"file://{init_file}", rank=rank, world_size=2)
         try:
-            worker_fn(*args)
+            for args in cases:
+                # ensure that rng is reset for each test case
+                with torch.random.fork_rng(devices=[]):
+                    try:
+                        worker_fn(*args)
+                    except Exception as exc:
+                        exc.add_note(f"{worker_fn.__name__} parameters: {args!r}")
+                        raise
         finally:
             dist.destroy_process_group()
 
-    def _spawn(self, tmp_path, worker_fn, *args):
-        mp.spawn(self._run_worker, args=(str(tmp_path / "dist_init"), worker_fn, args), nprocs=2, join=True)
+    def _spawn(self, tmp_path, worker_fn, cases):
+        # Each test owns its workers and rendezvous file, including under xdist; only its parameter cases share them.
+        mp.spawn(self._run_worker, args=(str(tmp_path / "dist_init"), worker_fn, cases), nprocs=2, join=True)
 
     @staticmethod
     def fully_shard_lora_shapes(model_id, mesh_shape, mesh_dim_names):
@@ -108,7 +120,6 @@ class TestShardedBaseLayerShapes:
     @staticmethod
     def parallelize_module_lora_shapes(mesh_dim_name, register_mesh_dim, expected_features):
         if register_mesh_dim:
-            # The spawned process only runs this check, so the change doesn't reach other tests
             TpMeshDimRegistry.register(mesh_dim_name)
 
         mesh = init_device_mesh("cpu", (2,), mesh_dim_names=(mesh_dim_name,))
@@ -159,35 +170,36 @@ class TestShardedBaseLayerShapes:
             torch.testing.assert_close(full(param.grad), reference_params[name].grad)
 
     # an unnamed mesh is what fully_shard builds by default
-    @pytest.mark.parametrize(
-        "mesh_shape, mesh_dim_names",
-        [((2,), None), ((2,), ("fsdp",)), ((2,), ("dp",)), ((1, 2), ("dp_replicate", "dp_shard"))],
-        ids=["unnamed", "fsdp", "dp", "hsdp"],
-    )
     @pytest.mark.usefixtures("cache_model")
-    def test_fully_shard_lora_shapes(self, tmp_path, mesh_shape, mesh_dim_names):
-        self._spawn(tmp_path, self.fully_shard_lora_shapes, self.model_id, mesh_shape, mesh_dim_names)
+    def test_fully_shard_lora_shapes(self, tmp_path):
+        cases = [
+            (self.model_id, (2,), None),
+            (self.model_id, (2,), ("fsdp",)),
+            (self.model_id, (2,), ("dp",)),
+            (self.model_id, (1, 2), ("dp_replicate", "dp_shard")),
+        ]
+        self._spawn(tmp_path, self.fully_shard_lora_shapes, cases)
 
     # Registered TP dimensions use local shapes (10 features); other dimensions use full shapes (20).
-    @pytest.mark.parametrize(
-        "mesh_dim_name, register_mesh_dim, expected_features",
-        [("tp", False, 10), ("model", False, 20), ("model", True, 10)],
-    )
-    def test_parallelize_module_lora_shapes(self, tmp_path, mesh_dim_name, register_mesh_dim, expected_features):
-        self._spawn(tmp_path, self.parallelize_module_lora_shapes, mesh_dim_name, register_mesh_dim, expected_features)
+    def test_parallelize_module_lora_shapes(self, tmp_path):
+        # Run the registration case last so it cannot affect the unregistered-name check. The registration stays local
+        # to the spawned workers, which exit after these cases.
+        cases = [("tp", False, 10), ("model", False, 20), ("model", True, 10)]
+        self._spawn(tmp_path, self.parallelize_module_lora_shapes, cases)
 
     # an unnamed mesh is what Transformers v5.17 builds when no device_mesh is passed
-    @pytest.mark.parametrize("mesh_dim_names", [None, ("tp",)])
-    @pytest.mark.parametrize("init_lora_weights", [True, False], ids=["default-init", "nonzero-init"])
     @pytest.mark.skipif(not is_transformers_ge_v5_17_0, reason="LoRA with DTensor TP requires transformers >= 5.17")
     @pytest.mark.skipif(
         infer_device() != "cpu", reason="Transformers builds the TP mesh on the accelerator if there is one"
     )
     @pytest.mark.usefixtures("cache_model")
-    def test_tp_plan_lora_matches_unsharded_model(self, tmp_path, mesh_dim_names, init_lora_weights):
-        self._spawn(
-            tmp_path, self.tp_plan_lora_matches_unsharded_model, self.model_id, mesh_dim_names, init_lora_weights
-        )
+    def test_tp_plan_lora_matches_unsharded_model(self, tmp_path):
+        cases = [
+            (self.model_id, mesh_dim_names, init_lora_weights)
+            for init_lora_weights in (True, False)
+            for mesh_dim_names in (None, ("tp",))
+        ]
+        self._spawn(tmp_path, self.tp_plan_lora_matches_unsharded_model, cases)
 
 
 def test_tp_mesh_dim_registry(monkeypatch):
