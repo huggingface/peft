@@ -18,6 +18,7 @@ from .calibration import calibrate_activation_steering
 from .config import ActivationSteeringConfig
 from .layer import ActivationSteeringLayer
 from .model import ActivationSteeringModel
+from .selection import select_neurons
 
 
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     "ActivationSteeringLayer",
     "ActivationSteeringModel",
     "calibrate_activation_steering",
+    "select_neurons",
 ]
 
 register_peft_method(

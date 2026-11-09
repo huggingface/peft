@@ -21,10 +21,11 @@ from transformers import AutoModelForCausalLM
 
 from peft import (
     ActivationSteeringConfig,
+    PeftModel,
     get_peft_model,
     inject_adapter_in_model,
 )
-from peft.tuners.activation_steering import calibrate_activation_steering
+from peft.tuners.activation_steering import ActivationSteeringLayer, calibrate_activation_steering, select_neurons
 
 from .testing_common import PeftCommonTester
 
@@ -54,6 +55,23 @@ class SteeringModel(nn.Module):
 
     def forward(self, hidden_states, attention_mask=None, past_key_values=None):
         return self.block(hidden_states)
+
+
+class TwoProjectionModel(nn.Module):
+    """Sum two projections of the same input, so that each neuron's effect on the output is easy to compute.
+
+    `layers.0.down_proj` uses SteeringBlock's W = [[3, 0, 1], [4, 2, 0]] and `layers.1.down_proj` uses [[1, 1, 0], [0,
+    0, -1]], whose columns all have norm 1. For the inputs fixture, the median output norms are 10 and 2, respectively.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.layers = nn.ModuleList([SteeringBlock(), SteeringBlock()])
+        with torch.no_grad():
+            self.layers[1].down_proj.weight.copy_(torch.tensor([[1.0, 1.0, 0.0], [0.0, 0.0, -1.0]]))
+
+    def forward(self, hidden_states, attention_mask=None):
+        return sum(block(hidden_states) for block in self.layers)
 
 
 def steering_config(indices=None, init_val=-1.0, **kwargs):
@@ -269,6 +287,88 @@ class TestActivationSteering:
         model = get_peft_model(SteeringModel(), steering_config(dose_unit="layer_output"))
         with pytest.raises(ValueError, match="numbered layer"):
             calibrate_activation_steering(model, {"hidden_states": inputs})
+
+
+class TestNeuronSelection:
+    """Check `select_neurons` on TwoProjectionModel, steering towards a larger second output coordinate.
+
+    The loss is minus the sum of output coordinate 1, so a dose's gradient is minus its scale times its column's entry
+    in row 1, times the number of tokens. At medians 10 and 2, the absolute gradients per token of the neurons of
+    `layers.0` are 10 * 4/5 = 8, 10 * 2/2 = 10, and 0, and those of `layers.1` are 0, 0, and 2 * 1 = 2. Lowering the
+    loss needs positive doses on `layers.0` and a negative dose on `layers.1`, whose column 2 is [0, -1].
+    """
+
+    @pytest.fixture
+    def inputs(self):
+        return torch.tensor([[[100.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [3.0, 0.0, 0.0]]])
+
+    @pytest.fixture
+    def model(self, inputs):
+        config = ActivationSteeringConfig(target_modules=["down_proj"], dose_unit="module_output")
+        return calibrated_model(TwoProjectionModel(), config, inputs)
+
+    @pytest.fixture
+    def train_step(self, model, inputs):
+        def step():
+            loss = -model(inputs)[..., 1].sum()
+            loss.backward()
+
+        return step
+
+    def test_keeps_the_top_neurons_with_the_loss_lowering_sign(self, model, train_step, inputs):
+        reference = TwoProjectionModel()(inputs)
+        select_neurons(model, train_step, num_neurons=3, init_val=0.5)
+        assert model.peft_config["default"].steering_pattern == {
+            "layers.0.down_proj": {"indices": [0, 1], "init_val": [0.5, 0.5]},
+            "layers.1.down_proj": {"indices": [2], "init_val": [-0.5]},
+        }
+        # The search space is unchanged; the pattern selects within it.
+        assert model.peft_config["default"].target_modules == ["down_proj"]
+        # 0.5 * 10 * ([3/5, 4/5] + [0, 1]) + -0.5 * 2 * [0, -1] = [3, 9] + [0, 1].
+        torch.testing.assert_close(model(inputs), reference + torch.tensor([3.0, 10.0]))
+
+    def test_projections_without_kept_neurons_are_unwrapped(self, model, train_step):
+        select_neurons(model, train_step, num_neurons=2, init_val=0.5)
+        assert model.peft_config["default"].steering_pattern == {
+            "layers.0.down_proj": {"indices": [0, 1], "init_val": [0.5, 0.5]}
+        }
+        layers = model.base_model.model.layers
+        assert isinstance(layers[0].down_proj, ActivationSteeringLayer)
+        assert type(layers[1].down_proj) is nn.Linear
+        assert model.base_model.targeted_module_names == ["layers.0.down_proj"]
+
+    def test_selected_adapter_saves_loads_and_trains(self, model, train_step, inputs, tmp_path):
+        select_neurons(model, train_step, num_neurons=3, init_val=0.5)
+        steered = model(inputs)
+        model.save_pretrained(tmp_path)
+
+        loaded = PeftModel.from_pretrained(TwoProjectionModel(), tmp_path, is_trainable=True)
+        assert loaded.peft_config["default"].steering_pattern == model.peft_config["default"].steering_pattern
+        torch.testing.assert_close(loaded(inputs), steered, rtol=0, atol=0)
+        # Only the kept neurons are trainable, and they still receive gradients.
+        values = [p for n, p in loaded.named_parameters() if p.requires_grad]
+        assert sum(p.numel() for p in values) == 3
+        loaded(inputs).sum().backward()
+        assert all(p.grad is not None for p in values)
+
+    def test_multiple_adapters_raise(self, model, train_step):
+        model.add_adapter("other", ActivationSteeringConfig(target_modules=["down_proj"], dose_unit="module_output"))
+        with pytest.raises(ValueError, match="single adapter"):
+            select_neurons(model, train_step, num_neurons=1, init_val=0.5)
+
+    @pytest.mark.parametrize("num_neurons", [0, 7])
+    def test_invalid_number_of_neurons_raises(self, model, train_step, num_neurons):
+        with pytest.raises(ValueError, match="between 1 and the number of doses"):
+            select_neurons(model, train_step, num_neurons=num_neurons, init_val=0.5)
+
+    def test_more_neurons_than_nonzero_gradients_raises(self, model, train_step):
+        # Only 3 of the 6 doses affect output coordinate 1.
+        with pytest.raises(ValueError, match="non-zero gradient"):
+            select_neurons(model, train_step, num_neurons=4, init_val=0.5)
+
+    def test_missing_gradients_raise(self, model, inputs):
+        with pytest.raises(RuntimeError, match="no gradient"):
+            select_neurons(model, lambda: model(inputs), num_neurons=1, init_val=0.5)
 
 
 @pytest.mark.parametrize(
