@@ -40,6 +40,7 @@ from transformers import AutoTokenizer, PretrainedConfig
 
 from peft import get_peft_model
 from peft.tuners.oft.config import OFTConfig
+from peft.utils import activation_checkpointing_enable
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
@@ -275,7 +276,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--gradient_checkpointing",
         action="store_true",
-        help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.",
+        help="Whether or not to use gradient/activation checkpointing to save memory at the expense of slower backward pass.",
     )
     parser.add_argument(
         "--learning_rate",
@@ -769,7 +770,7 @@ def main(args):
         unet.enable_gradient_checkpointing()
         # below fails when using oft so commenting it out
         if args.train_text_encoder and not args.use_oft:
-            text_encoder.gradient_checkpointing_enable()
+            activation_checkpointing_enable(text_encoder)
 
     # Enable TF32 for faster training on Ampere GPUs,
     # cf https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
