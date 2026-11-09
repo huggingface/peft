@@ -50,6 +50,10 @@ from .config import LoraConfig
 
 VARIANT_KWARG_KEYS = ["alora_offsets"]
 
+_EMBEDDING_SUPPORTED_TP_PLANS = ["embedding_rowwise", "embedding_colwise"]
+_LINEAR_SUPPORTED_TP_PLANS = ["colwise", "rowwise", "colwise_gather_output"]
+_SUPPORTED_TP_PLANS = _LINEAR_SUPPORTED_TP_PLANS + _EMBEDDING_SUPPORTED_TP_PLANS
+
 
 class LoraVariant:
     """
@@ -395,11 +399,11 @@ class LoraLayer(BaseTunerLayer):
         if device_mesh is None:
             return
 
-        if tp_plan not in ["colwise", "rowwise", "embedding_rowwise", "embedding_colwise", "colwise_gather_output"]:
+        if tp_plan not in _SUPPORTED_TP_PLANS:
             warnings.warn(
                 f'tp_plan "{tp_plan}" found on the base layer is not supported for LoRA weight '
-                'synchronization. Expected one of "colwise", "rowwise", "embedding_rowwise", '
-                '"embedding_colwise", "colwise_gather_output". LoRA weights may not be synchronized across ranks.'
+                f"synchronization. Expected one of: {', '.join(_SUPPORTED_TP_PLANS)}. "
+                "LoRA weights may not be synchronized across ranks."
             )
             return
 
@@ -1292,10 +1296,10 @@ class Embedding(nn.Module, LoraLayer):
             if not is_transformers_ge_v5_4_0:
                 raise RuntimeError("Tensor Parallel with LoRA is only supported for transformers v5.4.0 and above. ")
 
-            if tp_plan not in ("embedding_rowwise", "embedding_colwise"):
+            if tp_plan not in _EMBEDDING_SUPPORTED_TP_PLANS:
                 raise ValueError(
-                    f'Unsupported tensor parallel plan {tp_plan} for embedding layers. Only "embedding_rowwise" and '
-                    '"embedding_colwise" are supported.'
+                    f"Unsupported tensor parallel plan {tp_plan} for embedding layers. "
+                    f"Supported plans: {', '.join(_EMBEDDING_SUPPORTED_TP_PLANS)}."
                 )
 
             from transformers.integrations.tensor_parallel import ALL_PARALLEL_STYLES
@@ -1587,12 +1591,12 @@ class Embedding(nn.Module, LoraLayer):
         embedding_A = self.lora_embedding_A[adapter_name].T
         embedding_B = self.lora_embedding_B[adapter_name].T
         if getattr(self.get_base_layer(), "_hf_tp_plan", None) == "embedding_colwise":
-            # In the case of column-wise, embedding_A is replicated and embedding_B is shareded.
+            # In the case of column-wise, embedding_A is replicated and embedding_B is sharded.
             # To be able to compute the output:
             #   1. Convert the local embedding_A to a DTensor with Replicate placement.
             #      It does not involve any communication.
             #   2. Perform the matrix multiplication with embedding_B, which is sharded across devices.
-            #   3. Gtaher the output slices to get the full output.
+            #   3. Gather the output slices to get the full output.
             from torch.distributed.tensor import DTensor, Replicate
 
             after_A = self._embed(x, embedding_A)

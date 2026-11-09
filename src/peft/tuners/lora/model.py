@@ -63,7 +63,16 @@ from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .inc import dispatch_inc
-from .layer import Embedding, LoraLayer, MultiheadAttention, ParamWrapper, _ConvNd, dispatch_default
+from .layer import (
+    _LINEAR_SUPPORTED_TP_PLANS,
+    _SUPPORTED_TP_PLANS,
+    Embedding,
+    LoraLayer,
+    MultiheadAttention,
+    ParamWrapper,
+    _ConvNd,
+    dispatch_default,
+)
 from .te import dispatch_transformer_engine
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
@@ -130,10 +139,13 @@ def get_tp_plan_and_mesh(model, current_key: str):
 def add_lora_tp_hooks_dtensor(tp_module: nn.Module, tp_plan_name: str, device_mesh, *, module_name: str) -> None:
     from transformers.distributed.tensor_parallel import ALL_PARALLEL_STYLES
 
-    style = ALL_PARALLEL_STYLES[tp_plan_name]
-    if tp_plan_name not in ("colwise", "rowwise"):
-        raise ValueError(f"Unsupported TP plan {tp_plan_name} for LoRA: only colwise and rowwise are supported.")
+    if tp_plan_name not in _LINEAR_SUPPORTED_TP_PLANS:
+        raise ValueError(
+            f"Unsupported TP plan {tp_plan_name} for LoRA linear hooks. "
+            f"Supported plans: {', '.join(_LINEAR_SUPPORTED_TP_PLANS)}."
+        )
 
+    style = ALL_PARALLEL_STYLES[tp_plan_name]
     for p_name, _ in list(tp_module.named_parameters(recurse=False)):
         style.validate_param(tp_module, p_name, device_mesh, parameter_name=f"{module_name}.{p_name}")
         style.shard_param(tp_module, p_name, device_mesh)
@@ -388,8 +400,6 @@ class LoraModel(BaseTuner):
                 from transformers.integrations.tensor_parallel import (
                     add_tensor_parallel_hooks_to_module,
                 )
-
-            _SUPPORTED_TP_PLANS = ("colwise", "rowwise", "embedding_rowwise", "embedding_colwise")
 
             if tp_plan == "colwise_gather_output" and is_transformers_dtensor_tp:
                 # The input and output of the base layer (e.g. lm_head) are replicated, so the LoRA layers are
