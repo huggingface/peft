@@ -65,6 +65,7 @@ def parse_args():
         default=None,
         help="push the finished dataset to this hub repo",
     )
+    parser.add_argument("--use_chat_template", action="store_true", default=False, help="Apply the chat template before feeding the data into the model so that potential thinking tokens are included.")
     parser.add_argument("--private", action="store_true", default=False)
     parser.add_argument("--validation_rows", type=int, default=100)
     return parser.parse_args()
@@ -146,7 +147,13 @@ def main():
             # chat template defined. This is not instruction fine-tuning and we assume that
             # teaching the MTP tokens to mimic model outputs is enough to transfer to
             # instruction fine-tuned model outputs as well.
-            ids = tokenizer(text, add_special_tokens=False)["input_ids"]
+            if args.use_chat_template:
+                ids = tokenizer.apply_chat_template(
+                    [{"role": "user", "content": text}],
+                    # add_special_tokens defaults to False already
+                )["input_ids"]
+            else:
+                ids = tokenizer(text, add_special_tokens=False)["input_ids"]
             if not ids:
                 manifest["empty_docs"] += 1
                 continue
