@@ -71,6 +71,7 @@ from peft import (
     EvaConfig,
     FrodConfig,
     HiraConfig,
+    IA3Config,
     LoftQConfig,
     LoraConfig,
     PeftModel,
@@ -104,7 +105,7 @@ from peft.import_utils import (
 from peft.tuners import boft
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
-from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
+from peft.utils import SAFETENSORS_WEIGHTS_NAME, activation_checkpointing_enable, infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 from peft.utils.other import fsdp_auto_wrap_policy
 from tests.testing_utils import hub_online_once
@@ -444,7 +445,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         )
         tokenizer = AutoTokenizer.from_pretrained(model_id)
 
-        model.gradient_checkpointing_enable()
+        activation_checkpointing_enable(model)
         model = prepare_model_for_kbit_training(model)
 
         peft_config = AdaLoraConfig(
@@ -517,7 +518,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         )
         tokenizer = AutoTokenizer.from_pretrained(model_id)
 
-        model.gradient_checkpointing_enable()
+        activation_checkpointing_enable(model)
         model = prepare_model_for_kbit_training(model)
 
         peft_config = AdaLoraConfig(
@@ -6983,12 +6984,21 @@ def _test_function_wrapper(fn, rank, world_size, init_method, *extra_args):
         _teardown_dist()
 
 
-def _test_lora_weight_synchronization(rank, world_size):
+def _test_lora_weight_synchronization(rank, world_size, init_lora_weights, lora_bias):
     """
     Test that non-sharded LoRA weights are identical across ranks after training step.
     """
-    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, **_get_tp_kwargs(tp_plan=TP_PLAN))
-    lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
+    tp_plan_with_lm_head = {**TP_PLAN, "lm_head": "colwise_gather_output"}
+    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, **_get_tp_kwargs(tp_plan=tp_plan_with_lm_head))
+    target_modules = TARGET_MODULES + ["lm_head"]
+    if lora_bias:
+        # lora_bias is not supported for embedding layers
+        target_modules = [name for name in target_modules if name != "embed_tokens"]
+    lora_config = LoraConfig(
+        r=4, target_modules=target_modules, init_lora_weights=init_lora_weights, lora_bias=lora_bias
+    )
+    # use a different seed on each rank, so that the LoRA weights only match if they are synchronized
+    torch.manual_seed(rank)
     model = get_peft_model(model, lora_config)
 
     torch.cuda.set_device(rank)
@@ -7026,17 +7036,32 @@ def _test_lora_weight_synchronization(rank, world_size):
             for i, g in enumerate(gathered):
                 assert torch.allclose(weight, g), f"{name}.lora_A differs between rank {rank} and rank {i}"
         elif tp_plan == "rowwise":
-            weight = module.lora_B["default"].weight.data.contiguous()
-            gathered = [torch.zeros_like(weight) for _ in range(world_size)]
-            dist.all_gather(gathered, weight)
-            for i, g in enumerate(gathered):
-                assert torch.allclose(weight, g), f"{name}.lora_B differs between rank {rank} and rank {i}"
+            for param_name, param in module.lora_B["default"].named_parameters():
+                weight = param.data.contiguous()
+                gathered = [torch.zeros_like(weight) for _ in range(world_size)]
+                dist.all_gather(gathered, weight)
+                for i, g in enumerate(gathered):
+                    assert torch.allclose(weight, g), (
+                        f"{name}.lora_B.{param_name} differs between rank {rank} and rank {i}"
+                    )
         elif tp_plan == "embedding_rowwise":
             weight = module.lora_embedding_B["default"].data.contiguous()
             gathered = [torch.zeros_like(weight) for _ in range(world_size)]
             dist.all_gather(gathered, weight)
             for i, g in enumerate(gathered):
                 assert torch.allclose(weight, g), f"{name}.lora_embedding_B differs between rank {rank} and rank {i}"
+        elif tp_plan == "colwise_gather_output":
+            for lora_name in ("lora_A", "lora_B"):
+                for param_name, param in getattr(module, lora_name)["default"].named_parameters():
+                    weight = param.data.contiguous()
+                    gathered = [torch.zeros_like(weight) for _ in range(world_size)]
+                    dist.all_gather(gathered, weight)
+                    for i, g in enumerate(gathered):
+                        assert torch.allclose(weight, g), (
+                            f"{name}.{lora_name}.{param_name} differs between rank {rank} and rank {i}"
+                        )
+        else:
+            raise ValueError(f"Unexpected tp_plan {tp_plan} for {name}")
 
 
 def _test_lora_gradient_synchronization(rank, world_size):
@@ -7198,10 +7223,26 @@ def _test_save_unsharded_weights(rank, world_size, tmp_dir_reference, tmp_dir_tp
             )
 
 
+@require_torch_multi_accelerator
+@pytest.mark.multi_gpu_tests
+class TestFsdp2StateDict:
+    @pytest.mark.parametrize("config_cls", [LoraConfig, IA3Config])
+    def test_save_load_without_tp_metadata(self, config_cls, tmp_path):
+        from .test_parallelism import TestFsdp2StateDict as CpuFsdp2StateDict
+
+        mp.spawn(
+            CpuFsdp2StateDict._save_load,
+            args=(2, str(tmp_path), torch_device, config_cls),
+            nprocs=2,
+            join=True,
+        )
+
+
 def _test_save_gathers_only_adapter_weights(rank, world_size):
     """
     Test that get_peft_model_state_dict only gathers the adapter weights of a TP model, gathering the whole state dict
-    would materialize the full base model on every rank.
+    would materialize the full base model on every rank. This guards TP saving; the FSDP2/HSDP save regression is
+    covered separately by TestFsdp2StateDict.
     """
     from torch.distributed.tensor import DTensor
     from transformers.integrations import tensor_parallel
@@ -7215,18 +7256,25 @@ def _test_save_gathers_only_adapter_weights(rank, world_size):
     lora_config = LoraConfig(r=4, target_modules=["q_proj", "o_proj"], init_lora_weights=False)
     model = get_peft_model(model, lora_config)
 
+    state_dict = model.state_dict()
+    tensor_names = {id(value): name for name, value in state_dict.items()}
     gathered_keys = []
+    full_tensor = DTensor.full_tensor
     gather_state_dict_for_save = tensor_parallel.gather_state_dict_for_save
+
+    def spy_full_tensor(tensor, *args, **kwargs):
+        gathered_keys.append(tensor_names[id(tensor)])
+        return full_tensor(tensor, *args, **kwargs)
 
     def spy_gather_state_dict_for_save(state_dict, *args):
         gathered_keys.extend(state_dict)
         return gather_state_dict_for_save(state_dict, *args)
 
-    tensor_parallel.gather_state_dict_for_save = spy_gather_state_dict_for_save
-    try:
-        peft_state_dict = get_peft_model_state_dict(model)
-    finally:
-        tensor_parallel.gather_state_dict_for_save = gather_state_dict_for_save
+    # Observe the collective itself for DTensor TP and the Transformers helper for legacy TP.
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(DTensor, "full_tensor", spy_full_tensor)
+        monkeypatch.setattr(tensor_parallel, "gather_state_dict_for_save", spy_gather_state_dict_for_save)
+        peft_state_dict = get_peft_model_state_dict(model, state_dict=state_dict)
 
     assert gathered_keys
     non_adapter_keys = [key for key in gathered_keys if "lora_" not in key]
@@ -7379,8 +7427,10 @@ class TestLoraTensorParallel:
             wrapped_fn = partial(_test_function_wrapper, fn)
             mp.spawn(wrapped_fn, args=(WORLD_SIZE, init_method) + extra_args, nprocs=WORLD_SIZE, join=True)
 
-    def test_lora_weight_synchronization(self):
-        self._spawn(_test_lora_weight_synchronization)
+    # lora_bias is only random, and thus needs to be synchronized, with init_lora_weights=False
+    @pytest.mark.parametrize("init_lora_weights, lora_bias", [(True, False), (False, False), (False, True)])
+    def test_lora_weight_synchronization(self, init_lora_weights, lora_bias):
+        self._spawn(_test_lora_weight_synchronization, init_lora_weights, lora_bias)
 
     def test_lora_gradient_synchronization(self):
         self._spawn(_test_lora_gradient_synchronization)

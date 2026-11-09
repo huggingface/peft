@@ -154,6 +154,14 @@ LAYER_INDEXING_CONFIG_CLASSES = [
 ]
 
 
+# Config classes that support selecting layers by index (`layers_to_transform`).
+LAYERS_TO_TRANSFORM_CONFIG_CLASSES = [
+    (config_class, mandatory_kwargs)
+    for config_class, mandatory_kwargs in ALL_CONFIG_CLASSES
+    if hasattr(config_class, "layers_to_transform")
+]
+
+
 class TestPeftConfig:
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
     def test_methods(self, config_class, mandatory_kwargs):
@@ -398,19 +406,15 @@ class TestPeftConfig:
             assert isinstance(config_from_pretrained.target_modules, set)
 
     def test_regex_with_layer_indexing_lora(self):
-        # This test checks that an error is raised if `target_modules` is a regex expression and `layers_to_transform` or
-        # `layers_pattern` are not None
+        # This test checks that an error is raised if `target_modules` is a regex expression and `layers_pattern` is not
+        # None (`layers_to_transform` is covered by `test_config_layers_to_transform_with_str_target_modules_raises`)
 
-        invalid_config1 = {"target_modules": ".*foo", "layers_to_transform": [0]}
-        invalid_config2 = {"target_modules": ".*foo", "layers_pattern": ["bar"]}
+        invalid_config = {"target_modules": ".*foo", "layers_pattern": ["bar"]}
 
         valid_config = {"target_modules": ["foo"], "layers_pattern": ["bar"], "layers_to_transform": [0]}
 
-        with pytest.raises(ValueError, match="`layers_to_transform` cannot be used when `target_modules` is a str."):
-            LoraConfig(**invalid_config1)
-
         with pytest.raises(ValueError, match="`layers_pattern` cannot be used when `target_modules` is a str."):
-            LoraConfig(**invalid_config2)
+            LoraConfig(**invalid_config)
 
         # should run without errors
         LoraConfig(**valid_config)
@@ -610,6 +614,18 @@ class TestPeftConfig:
         )
         assert config.layers_to_transform == 0
         assert config.layers_pattern == "model.layers"
+
+    @pytest.mark.parametrize("target_modules", [r".*\.q_proj", "all-linear"])
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", LAYERS_TO_TRANSFORM_CONFIG_CLASSES)
+    def test_config_layers_to_transform_with_str_target_modules_raises(
+        self, config_class, mandatory_kwargs, target_modules
+    ):
+        # `layers_to_transform` has no effect when `target_modules` is a str (regex or "all-linear"), so it must be
+        # rejected
+        kwargs = {**mandatory_kwargs, "target_modules": target_modules, "layers_to_transform": [0, 1]}
+        msg = "`layers_to_transform` cannot be used when `target_modules` is a str."
+        with pytest.raises(ValueError, match=msg):
+            config_class(**kwargs)
 
     @pytest.mark.parametrize("version", ["0.10", "0.17.0", "1"])
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)

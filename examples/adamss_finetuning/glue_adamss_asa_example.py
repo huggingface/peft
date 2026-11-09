@@ -98,7 +98,7 @@ class AdaMSSTrainingArguments:
     num_epochs: int = field(default=100, metadata={"help": "Number of training epochs"})
     batch_size: int = field(default=32, metadata={"help": "Batch size per device"})
     max_length: int = field(default=512, metadata={"help": "Maximum sequence length"})
-    warmup_ratio: float = field(default=0.06, metadata={"help": "Warmup ratio"})
+    warmup_steps: float = field(default=0.06, metadata={"help": "Warmup steps or ratio"})
 
     # Other
     seed: int = field(default=0, metadata={"help": "Random seed"})
@@ -303,7 +303,7 @@ def main():
         per_device_eval_batch_size=args.batch_size,
         learning_rate=hp["lr"],
         weight_decay=hp["wd"],
-        warmup_ratio=args.warmup_ratio,
+        warmup_steps=args.warmup_steps,
         eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
