@@ -31,8 +31,6 @@ from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
 from peft.utils.integrations import TpMeshDimRegistry
 
-from .testing_utils import hub_online_once
-
 
 @pytest.mark.skipif(platform.system() != "Linux", reason="Run distributed tests only on Linux")
 @pytest.mark.skipif(not dist.is_available(), reason="These tests require torch.distributed")
@@ -51,28 +49,23 @@ class TestShardedBaseLayerShapes:
           PEFT does not apply Transformers TP hooks to these adapters.
     """
 
-    model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
-
     @pytest.fixture
-    def cache_model(self, monkeypatch):
-        with hub_online_once(self.model_id):
-            AutoModelForCausalLM.from_pretrained(self.model_id)
-        # the spawned processes don't share the state of hub_online_once, so they have to load the model from the cache
-        monkeypatch.setenv("HF_HUB_OFFLINE", "1")
-
-    @pytest.fixture
-    def tp_checkpoint(self, tmp_path):
-        config = Qwen3Config(
-            vocab_size=20,
-            hidden_size=16,
-            intermediate_size=32,
+    def model_config(self):
+        # Independent head dimensions keep attention valid with hidden widths not divisible by the TP size.
+        return Qwen3Config(
+            vocab_size=21,
+            hidden_size=17,
+            intermediate_size=33,
             num_hidden_layers=1,
             num_attention_heads=2,
             num_key_value_heads=2,
             head_dim=8,
         )
+
+    @pytest.fixture
+    def model_checkpoint(self, tmp_path, model_config):
         checkpoint = tmp_path / "model"
-        AutoModelForCausalLM.from_config(config).save_pretrained(checkpoint)
+        AutoModelForCausalLM.from_config(model_config).save_pretrained(checkpoint)
         return checkpoint
 
     @staticmethod
@@ -137,7 +130,7 @@ class TestShardedBaseLayerShapes:
             torch.testing.assert_close(model(input_ids=input_ids).logits, reference(input_ids=input_ids).logits)
 
     @staticmethod
-    def pytorch_tp_lora_adapter_shapes(mesh_dim_name, register_mesh_dim, embedding_style):
+    def pytorch_tp_lora_adapter_shapes(model_config, mesh_dim_name, register_mesh_dim, embedding_style):
         """
         Check that LoRA adapters on layers with DTensor weights have the correct shapes when the base model is sharded
         with PyTorch's parallelize_module().
@@ -148,16 +141,7 @@ class TestShardedBaseLayerShapes:
 
         mesh = init_device_mesh("cpu", (2,), mesh_dim_names=(mesh_dim_name,))
 
-        config = Qwen3Config(
-            vocab_size=21,
-            hidden_size=17,
-            intermediate_size=33,
-            num_hidden_layers=1,
-            num_attention_heads=2,
-            num_key_value_heads=2,
-            head_dim=8,
-        )
-        model = AutoModelForCausalLM.from_config(config)
+        model = AutoModelForCausalLM.from_config(model_config)
         model = parallelize_module(
             model,
             mesh,
@@ -331,10 +315,9 @@ class TestShardedBaseLayerShapes:
         [((2,), None), ((2,), ("fsdp",)), ((2,), ("dp",)), ((1, 2), ("dp_replicate", "dp_shard"))],
         ids=["unnamed", "fsdp", "dp", "hsdp"],
     )
-    @pytest.mark.usefixtures("cache_model")
-    def test_fsdp2_lora_shapes_injected_after_sharding(self, tmp_path, mesh_shape, mesh_dim_names):
+    def test_fsdp2_lora_shapes_injected_after_sharding(self, tmp_path, model_checkpoint, mesh_shape, mesh_dim_names):
         self._spawn(
-            tmp_path, self.fsdp2_lora_shapes_injected_after_sharding, self.model_id, mesh_shape, mesh_dim_names
+            tmp_path, self.fsdp2_lora_shapes_injected_after_sharding, model_checkpoint, mesh_shape, mesh_dim_names
         )
 
     @pytest.mark.parametrize(
@@ -342,8 +325,17 @@ class TestShardedBaseLayerShapes:
         [("tp", False), ("random_name", False), ("random_name", True)],
     )
     @pytest.mark.parametrize("embedding_style", [RowwiseParallel, ColwiseParallel], ids=["vocab", "hidden"])
-    def test_pytorch_tp_lora_adapter_shapes(self, tmp_path, mesh_dim_name, register_mesh_dim, embedding_style):
-        self._spawn(tmp_path, self.pytorch_tp_lora_adapter_shapes, mesh_dim_name, register_mesh_dim, embedding_style)
+    def test_pytorch_tp_lora_adapter_shapes(
+        self, tmp_path, model_config, mesh_dim_name, register_mesh_dim, embedding_style
+    ):
+        self._spawn(
+            tmp_path,
+            self.pytorch_tp_lora_adapter_shapes,
+            model_config,
+            mesh_dim_name,
+            register_mesh_dim,
+            embedding_style,
+        )
 
     @pytest.mark.parametrize("embedding_plan", ["embedding_rowwise", "embedding_colwise"])
     @pytest.mark.parametrize("mesh_dim_names", [None, ("tp",)])
@@ -354,11 +346,13 @@ class TestShardedBaseLayerShapes:
     @pytest.mark.skipif(
         infer_device() != "cpu", reason="Transformers builds the TP mesh on the accelerator if there is one"
     )
-    def test_transformers_tp_loss_and_gradients_match(self, tmp_path, tp_checkpoint, mesh_dim_names, embedding_plan):
+    def test_transformers_tp_loss_and_gradients_match(
+        self, tmp_path, model_checkpoint, mesh_dim_names, embedding_plan
+    ):
         self._spawn(
             tmp_path,
             self.transformers_tp_lora_loss_and_gradients_match,
-            tp_checkpoint,
+            model_checkpoint,
             mesh_dim_names,
             embedding_plan,
         )
@@ -373,10 +367,14 @@ class TestShardedBaseLayerShapes:
         infer_device() != "cpu", reason="Transformers builds the TP mesh on the accelerator if there is one"
     )
     def test_transformers_tp_replicated_weights_match(
-        self, tmp_path, tp_checkpoint, embedding_plan, init_lora_weights
+        self, tmp_path, model_checkpoint, embedding_plan, init_lora_weights
     ):
         self._spawn(
-            tmp_path, self.transformers_tp_replicated_weights_match, tp_checkpoint, embedding_plan, init_lora_weights
+            tmp_path,
+            self.transformers_tp_replicated_weights_match,
+            model_checkpoint,
+            embedding_plan,
+            init_lora_weights,
         )
 
 
