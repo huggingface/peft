@@ -400,8 +400,8 @@ class TestActivationSteeringDecoderModels(PeftCommonTester):
 
         monkeypatch.setattr(f"{PeftCommonTester.__module__}.get_peft_model", create_calibrated_model)
 
-    @pytest.fixture
-    def steering_kwargs(self, model_id):
+    @pytest.fixture(params=["pattern", "dense"])
+    def steering_kwargs(self, request, model_id):
         if "OPT" in model_id:
             projection = "decoder.layers.0.fc2"
         elif "GPT2" in model_id:
@@ -410,6 +410,9 @@ class TestActivationSteeringDecoderModels(PeftCommonTester):
             projection = "h.0.mlp.fc_out"
         else:
             projection = "layers.0.mlp.down_proj"
+        if request.param == "dense":
+            # Without a steering pattern, every neuron of the projection starts at a dose of zero.
+            return {"task_type": "CAUSAL_LM", "target_modules": [projection]}
         return {
             "task_type": "CAUSAL_LM",
             "steering_pattern": {projection: {"indices": [0, 1], "init_val": [0.1, -0.1]}},
@@ -443,6 +446,8 @@ class TestActivationSteeringDecoderModels(PeftCommonTester):
         self._test_generate(model_id, ActivationSteeringConfig, copy.deepcopy(steering_kwargs))
 
     def test_disable_adapter(self, model_id, steering_kwargs):
+        if "steering_pattern" not in steering_kwargs:
+            pytest.skip("Zero doses do not change the outputs.")
         self._test_disable_adapter(model_id, ActivationSteeringConfig, copy.deepcopy(steering_kwargs))
 
     def test_delete_adapter(self, model_id, steering_kwargs):
@@ -452,6 +457,8 @@ class TestActivationSteeringDecoderModels(PeftCommonTester):
         self._test_delete_inactive_adapter(model_id, ActivationSteeringConfig, copy.deepcopy(steering_kwargs))
 
     def test_unload_adapter(self, model_id, steering_kwargs):
+        if "steering_pattern" not in steering_kwargs:
+            pytest.skip("Zero doses do not change the outputs.")
         self._test_unload_adapter(model_id, ActivationSteeringConfig, copy.deepcopy(steering_kwargs))
 
     def test_get_base_model_state_dict(self, model_id, steering_kwargs):
