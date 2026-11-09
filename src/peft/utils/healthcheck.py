@@ -141,6 +141,13 @@ def _get_environment() -> dict[str, Any]:
 def _run_healthcheck_no_tuner_layers(
     model: PeftModel, min_trainable_params: int, max_trainable_params_percent: int
 ) -> dict[str, Any]:
+    """Get healthcheck data for PEFT models without tuner layers.
+
+    For methods with tuner layers (LoRA etc.), re-use the existing get_layer_status and get_model_status functions. For
+    methods without tuner layers (e.g. prefix tuning, adaption prompt), those don't work. This function returns some
+    high level information on those adapted models, like number of trainable parameters, active adapters, etc., without
+    providing layer-level details.
+    """
     trainable_params, total_params = model.get_nb_trainable_parameters()
     trainable_percent, findings = _get_parameter_findings(
         trainable_params, total_params, min_trainable_params, max_trainable_params_percent
