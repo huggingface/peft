@@ -14,6 +14,7 @@
 
 import math
 from dataclasses import dataclass, field
+from typing import Literal, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -21,28 +22,51 @@ from peft.utils import PeftType
 
 @dataclass
 class ActivationSteeringConfig(PeftConfig):
-    """Configuration for additive activation steering at block outputs.
+    """Configuration for additive activation steering of individual neurons.
 
-    The dose normalization follows Lyra's neuron-explorer implementation:
+    A neuron is an input channel of a targeted linear projection, typically an MLP's down projection. Steering adds a
+    signed, trainable dose to the selected channels before the projection, which edits the neurons' activations
+    directly. The dose normalization follows Lyra's neuron-explorer implementation:
     https://github.com/lyramakesmusic/neuron-explorer/blob/5a8f8267f6bd3c8caa87d598870949ab0d25b914/explorer/runtime.py#L653
+    A dose of 1 on neuron `n` adds `median * W[:, n] / ||W[:, n]||` to the projection's output, where `W` is the
+    projection's weight and `median` is the median L2 norm of the stream the addition lands in, measured on baseline
+    calibration data. Call `calibrate_activation_steering` from `peft.tuners.activation_steering` before using a new
+    adapter. The calibrated scales are saved with the adapter and are not trainable; the doses can be fine-tuned.
 
     Args:
+        target_modules (`Optional[Union[List[str], str]]`):
+            The projections whose input channels are steered, e.g. `["down_proj"]`. When passing a string, a regex
+            match is performed. When passing a list of strings, either an exact match is performed or it is checked if
+            the name of the module ends with any of the passed strings. If not specified, the keys of
+            `steering_pattern` are used.
+        exclude_modules (`Optional[Union[List[str], str]]`):
+            The names of the modules to not apply the adapter to. When passing a string, a regex match is performed.
+            When passing a list of strings, either an exact match is performed or it is checked if the name of the
+            module ends with any of the passed strings.
+        layers_to_transform (`Union[List[int], int]`):
+            The layer indices to transform. If a list of ints is passed, the adapter is applied to the layer indices in
+            this list. If a single integer is passed, the adapter is applied to this layer index only.
+        layers_pattern (`Optional[Union[List[str], str]]`):
+            The name of the `nn.ModuleList` that holds the layers, usually `"layers"` or `"h"`, if it is not one of the
+            common names. It is used by `layers_to_transform` and to find the layer whose output sets the unit for
+            `dose_unit="layer_output"`.
         steering_pattern (`dict`):
-            Maps block module names (exact or suffix matches) to specifications containing `source_module`, `indices`,
-            `init_val`, and optionally `statistic`. `source_module` names a linear projection relative to the block.
-            Its input-channel `indices` select weight columns, each normalized to unit L2 norm. `init_val` initializes
-            independent, trainable signed doses; a number broadcasts, and a list must match the number of indices.
-            `statistic` also broadcasts or accepts a matching list. Currently, only `"median_l2"` is supported and is
-            the default: scale the addition by the median outgoing residual L2 norm measured on baseline calibration
-            data, excluding each sequence's first valid token and padding. Call `calibrate_activation_steering` from
-            `peft.tuners.activation_steering` before using a new adapter. The helper pools eligible tokens across all
-            calibration batches and saves a fixed scale per block and adapter in the checkpoint. The scale is not
-            trainable; the doses can be fine-tuned after calibration. Apply additions at all non-padding positions.
+            Maps projection names (exact or suffix matches) to specifications containing `indices` and `init_val`. The
+            `indices` select the projection's input channels, and `init_val` initializes their independent, signed
+            doses; a number broadcasts, and a list must match the number of indices. Targeted projections without an
+            entry are not steered. If empty, every input channel of every targeted projection gets a dose of 0, which
+            leaves the model unchanged. `select_neurons` from `peft.tuners.activation_steering` then keeps the most
+            useful neurons and writes them into this field.
+        dose_unit (`str`):
+            Where calibration measures the median L2 norm that sets the unit of the doses. `"layer_output"` uses the
+            output of the numbered layer that contains the projection, i.e. the residual stream. `"module_output"` uses
+            the projection's own output; use it for models that normalize the MLP output before adding it to the
+            residual stream (e.g. Gemma 2/3 and OLMo 2), or for models without numbered layers. Calibration pools all
+            non-padding tokens of the calibration batches, excluding the first valid token of each sequence.
 
-    Blocks must return a tensor of shape `(batch, sequence, hidden)` or a tuple whose first element is that tensor.
-    Steering adds normalized source weight columns to the block output. This is equivalent to an additive neuron edit
-    before the projection only when its output feeds directly into the block's final residual addition. Model inputs
-    after the primary input, including `attention_mask` and `past_key_values`, must be passed by keyword.
+    Inputs to the projections must have the shape `(batch, sequence, features)`, or `(batch * sequence, features)` for
+    models that flatten them, such as OPT. Model inputs after the primary input, including `attention_mask` and
+    `past_key_values`, must be passed by keyword. Padding positions are not steered.
 
     Example:
 
@@ -52,33 +76,65 @@ class ActivationSteeringConfig(PeftConfig):
     >>> config = ActivationSteeringConfig(
     ...     base_model_name_or_path="Qwen/Qwen3.5-4B",
     ...     task_type=TaskType.CAUSAL_LM,
-    ...     steering_pattern={
-    ...         "layers.15": {
-    ...             "source_module": "mlp.down_proj",
-    ...             "indices": [3920],
-    ...             "init_val": 0.5,
-    ...             "statistic": "median_l2",
-    ...         },
-    ...     },
+    ...     steering_pattern={"layers.15.mlp.down_proj": {"indices": [3920], "init_val": 0.5}},
     ... )
     ```
     """
 
+    target_modules: Optional[Union[list[str], str]] = field(
+        default=None,
+        metadata={
+            "help": (
+                "List of module names or regex expression of the projections whose input channels are steered, e.g. "
+                "['down_proj']. If not specified, the keys of `steering_pattern` are used."
+            ),
+        },
+    )
+    exclude_modules: Optional[Union[list[str], str]] = field(
+        default=None,
+        metadata={"help": "List of module names or regex expression of the module names to exclude from steering."},
+    )
+    layers_to_transform: Optional[Union[list[int], int]] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The layer indices to transform. If a list of ints is passed, the adapter is applied to the layer "
+                "indices in this list. If a single integer is passed, the adapter is applied to this layer index only."
+            ),
+        },
+    )
+    layers_pattern: Optional[Union[list[str], str]] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The name of the `nn.ModuleList` that holds the layers, usually 'layers' or 'h', if it is not one of "
+                "the common names. It is used by `layers_to_transform` and to find the layer whose output sets the "
+                "unit for `dose_unit='layer_output'`."
+            ),
+        },
+    )
     steering_pattern: dict[str, dict] = field(
         default_factory=dict,
         metadata={
             "help": (
-                "Maps block module names (exact or suffix matches) to specifications containing `source_module`, "
-                "`indices`, `init_val`, and optionally `statistic`. `source_module` names a linear projection "
-                "relative to the block. Its input-channel `indices` select weight columns, each normalized to unit L2 "
-                "norm. `init_val` initializes independent, trainable signed doses; a number broadcasts, and a list "
-                "must match the number of indices. `statistic` also broadcasts or accepts a matching list. Currently, "
-                "only `'median_l2'` is supported and is the default: scale the addition by the median outgoing "
-                "residual L2 norm measured on baseline calibration data, excluding each sequence's first valid token "
-                "and padding. Call `calibrate_activation_steering` from `peft.tuners.activation_steering` before "
-                "using a new adapter. The helper pools eligible tokens across all calibration batches and saves a "
-                "fixed scale per block and adapter in the checkpoint. The scale is not trainable; the doses can be "
-                "fine-tuned after calibration. Apply additions at all non-padding positions."
+                "Maps projection names (exact or suffix matches) to specifications containing `indices` and "
+                "`init_val`. The `indices` select the projection's input channels, and `init_val` initializes their "
+                "independent, signed doses; a number broadcasts, and a list must match the number of indices. "
+                "Targeted projections without an entry are not steered. If empty, every input channel of every "
+                "targeted projection gets a dose of 0, which leaves the model unchanged. `select_neurons` from "
+                "`peft.tuners.activation_steering` then keeps the most useful neurons and writes them into this field."
+            ),
+        },
+    )
+    dose_unit: Literal["layer_output", "module_output"] = field(
+        default="layer_output",
+        metadata={
+            "help": (
+                "Where calibration measures the median L2 norm that sets the unit of the doses. 'layer_output' uses "
+                "the output of the numbered layer that contains the projection, i.e. the residual stream. "
+                "'module_output' uses the projection's own output; use it for models that normalize the MLP output "
+                "before adding it to the residual stream (e.g. Gemma 2/3 and OLMo 2), or for models without numbered "
+                "layers."
             ),
         },
     )
@@ -86,8 +142,10 @@ class ActivationSteeringConfig(PeftConfig):
     def __post_init__(self):
         super().__post_init__()
         self.peft_type = PeftType.ACTIVATION_STEERING
-        if not isinstance(self.steering_pattern, dict) or not self.steering_pattern:
-            raise ValueError("`steering_pattern` must be a non-empty dictionary.")
+        if self.dose_unit not in ("layer_output", "module_output"):
+            raise ValueError(f"`dose_unit` must be 'layer_output' or 'module_output', got {self.dose_unit!r}.")
+        if not isinstance(self.steering_pattern, dict):
+            raise TypeError("`steering_pattern` must be a dictionary.")
 
         for name, spec in self.steering_pattern.items():
             if not isinstance(name, str) or not name or any(not part for part in name.split(".")):
@@ -95,17 +153,11 @@ class ActivationSteeringConfig(PeftConfig):
             if not isinstance(spec, dict):
                 raise TypeError(f"The steering specification for '{name}' must be a dictionary.")
 
-            required = {"source_module", "indices", "init_val"}
+            required = {"indices", "init_val"}
             if required - spec.keys():
                 raise ValueError(f"Missing steering fields for '{name}': {sorted(required - spec.keys())}.")
-            if spec.keys() - required - {"statistic"}:
-                raise ValueError(
-                    f"Unknown steering fields for '{name}': {sorted(spec.keys() - required - {'statistic'})}."
-                )
-
-            source = spec["source_module"]
-            if not isinstance(source, str) or not source or any(not part for part in source.split(".")):
-                raise ValueError(f"`source_module` for '{name}' must be a non-empty relative module path.")
+            if spec.keys() - required:
+                raise ValueError(f"Unknown steering fields for '{name}': {sorted(spec.keys() - required)}.")
 
             indices = spec["indices"]
             if (
@@ -126,14 +178,9 @@ class ActivationSteeringConfig(PeftConfig):
             ):
                 raise ValueError(f"`init_val` for '{name}' must contain finite numbers.")
 
-            statistics = spec.get("statistic", "median_l2")
-            statistics = statistics if isinstance(statistics, list) else [statistics] * len(indices)
-            if len(statistics) != len(indices):
-                raise ValueError(f"`statistic` for '{name}' must have the same length as `indices`.")
-            if any(not isinstance(statistic, str) or statistic != "median_l2" for statistic in statistics):
-                raise ValueError(f"Only 'median_l2' is supported for `statistic` (in '{name}').")
-
-    @property
-    def target_modules(self):
-        # Keep the targets derived so that adapter_config.json has a single source of truth.
-        return tuple(self.steering_pattern)
+        if self.target_modules is None:
+            if not self.steering_pattern:
+                raise ValueError(
+                    "Specify `target_modules`, the projections whose input channels are steered, or `steering_pattern`."
+                )
+            self.target_modules = list(self.steering_pattern)

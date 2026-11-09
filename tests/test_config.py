@@ -96,7 +96,7 @@ PEFT_MODELS_TO_TEST = [("peft-internal-testing/tiny-opt-lora-revision", "test")]
 ALL_CONFIG_CLASSES = (
     (
         ActivationSteeringConfig,
-        {"steering_pattern": {"layers.0": {"source_module": "mlp.down_proj", "indices": [0], "init_val": 0.1}}},
+        {"steering_pattern": {"layers.0.mlp.down_proj": {"indices": [0], "init_val": 0.1}}},
     ),
     (AdaLoraConfig, {"total_step": 1}),
     (AdamssConfig, {}),

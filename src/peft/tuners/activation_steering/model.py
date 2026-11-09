@@ -12,12 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from torch import Tensor
+from torch import Tensor, nn
+from transformers.pytorch_utils import Conv1D
 
-from peft.tuners.tuners_utils import BaseTuner
-from peft.utils.quantization_utils import get_quantization_kwargs
+from peft.tuners.tuners_utils import BaseTuner, check_target_module_exists
+from peft.utils.quantization_utils import get_quantization_kwargs, resolve_quantization_backend
 
-from .layer import ActivationSteeringLayer, get_steering_directions
+from .layer import ActivationSteeringLayer
 
 
 def _prepare_steering_forward(model, args, kwargs):
@@ -45,40 +46,41 @@ def _prepare_steering_forward(model, args, kwargs):
         layer._attention_mask = mask
 
 
+def _matches(name, key):
+    return key == name or key.endswith("." + name)
+
+
 class ActivationSteeringModel(BaseTuner):
-    """Manage additive block-output steering with independent dose parameters per selected source channel."""
+    """Manage additive steering of neurons, i.e. input channels of linear projections, with one dose per neuron."""
 
     prefix = "activation_steering_"
     tuner_layer_cls = ActivationSteeringLayer
 
     @staticmethod
+    def _check_target_module_exists(peft_config, key):
+        # With a steering pattern, only the targeted projections that have an entry are steered.
+        found = check_target_module_exists(peft_config, key)
+        if not found or not peft_config.steering_pattern:
+            return found
+        return any(_matches(name, key) for name in peft_config.steering_pattern)
+
+    @staticmethod
     def _get_spec(config, key):
-        matches = [name for name in config.steering_pattern if key == name or key.endswith("." + name)]
+        matches = [name for name in config.steering_pattern if _matches(name, key)]
         if len(matches) != 1:
             raise ValueError(f"Expected exactly one steering specification for '{key}', got {matches}.")
 
         return config.steering_pattern[matches[0]]
 
     def _prepare_model(self, peft_config, model):
-        # Validate all targets before replacing any blocks.
-        matches = {name: [] for name in peft_config.steering_pattern}
-        for key, module in model.named_modules():
-            for name in matches:
-                if key == name or key.endswith("." + name):
-                    matches[name].append((key, module))
-
-        quantization_kwargs = get_quantization_kwargs(model)
-        keys = []
-        for name, targets in matches.items():
-            if len(targets) != 1:
-                raise ValueError(f"Steering target '{name}' must match exactly one block, found {len(targets)}.")
-
-            key, target = targets[0]
-            keys.append(key)
-            get_steering_directions(target, self._get_spec(peft_config, key), quantization_kwargs)
-
-        if any(first != second and second.startswith(first + ".") for first in keys for second in keys):
-            raise ValueError("Steering targets must not contain other targeted blocks.")
+        # Validate the steering pattern before replacing any modules: unmatched entries would be silently ignored.
+        keys = [key for key, _ in model.named_modules() if self._check_target_module_exists(peft_config, key)]
+        for name in peft_config.steering_pattern:
+            found = [key for key in keys if _matches(name, key)]
+            if len(found) != 1:
+                raise ValueError(
+                    f"Steering target '{name}' must match exactly one targeted module, found {len(found)}."
+                )
 
     def _post_injection_hook(self, model, config, adapter_name):
         if not hasattr(model, "_activation_steering_hook"):
@@ -86,20 +88,29 @@ class ActivationSteeringModel(BaseTuner):
                 _prepare_steering_forward, with_kwargs=True
             )
 
-    def _replace_module(self, parent, child_name, new_module, child):
-        # Blocks have no weight attribute; adapter tensors already follow the source projection's device and dtype.
-        setattr(parent, child_name, new_module)
-
     def _create_and_replace(self, peft_config, adapter_name, target, target_name, parent, current_key):
-        spec = self._get_spec(peft_config, current_key)
-        directions = get_steering_directions(target, spec, get_quantization_kwargs(self.model))
-        if isinstance(target, ActivationSteeringLayer):
-            target.update_layer(adapter_name, spec, directions, config=peft_config)
+        if peft_config.steering_pattern:
+            spec = self._get_spec(peft_config, current_key)
+            indices, init_val = spec["indices"], spec["init_val"]
         else:
-            new_module = ActivationSteeringLayer(target, adapter_name, spec, directions, config=peft_config)
-            if adapter_name not in self.active_adapters:
-                new_module.requires_grad_(False)
-            self._replace_module(parent, target_name, new_module, target)
+            indices, init_val = None, 0.0
+
+        if isinstance(target, ActivationSteeringLayer):
+            target.update_layer(adapter_name, indices, init_val, config=peft_config)
+            return
+
+        quantization_kwargs = get_quantization_kwargs(self.model)
+        if (
+            not isinstance(target, (nn.Linear, Conv1D))
+            and resolve_quantization_backend(target, **quantization_kwargs) is None
+        ):
+            raise ValueError(
+                f"Target module {target} is not supported. Activation steering supports Linear and Conv1D projections."
+            )
+        new_module = ActivationSteeringLayer(target, adapter_name, indices, init_val, config=peft_config)
+        if adapter_name not in self.active_adapters:
+            new_module.requires_grad_(False)
+        self._replace_module(parent, target_name, new_module, target)
 
     def _check_merge_allowed(self):
         raise ValueError("Activation steering does not support merging.")

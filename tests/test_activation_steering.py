@@ -41,6 +41,12 @@ class SteeringBlock(nn.Module):
         return output
 
 
+class PostNormBlock(SteeringBlock):
+    # Normalizes the projection's output before returning it, like the post-MLP norms of Gemma 2/3 and OLMo 2.
+    def forward(self, hidden_states):
+        return nn.functional.layer_norm(self.down_proj(hidden_states), (2,))
+
+
 class SteeringModel(nn.Module):
     def __init__(self):
         super().__init__()
@@ -50,16 +56,10 @@ class SteeringModel(nn.Module):
         return self.block(hidden_states)
 
 
-def steering_config(indices=None, init_val=-1.0, statistic="median_l2", **kwargs):
+def steering_config(indices=None, init_val=-1.0, **kwargs):
+    kwargs.setdefault("dose_unit", "module_output")
     return ActivationSteeringConfig(
-        steering_pattern={
-            "block": {
-                "source_module": "down_proj",
-                "indices": [0] if indices is None else indices,
-                "init_val": init_val,
-                "statistic": statistic,
-            }
-        },
+        steering_pattern={"block.down_proj": {"indices": [0] if indices is None else indices, "init_val": init_val}},
         **kwargs,
     )
 
@@ -78,19 +78,20 @@ class TestActivationSteering:
     """Check steering against hand-calculated outputs of simple linear models.
 
     Most tests use SteeringBlock's bias-free weight matrix W = [[3, 0, 1], [4, 2, 0]]. Each input token [x, y, z]
-    therefore produces [3*x + z, 4*x + 2*y]. Neuron indices select input columns of W: column 0 is [3, 4], with L2 norm
-    sqrt(3**2 + 4**2) = 5, and column 1 is [0, 2], with norm 2. Their normalized steering directions are consequently
-    [3/5, 4/5] and [0, 1].
+    therefore produces [3*x + z, 4*x + 2*y]. Neuron indices select input channels, i.e. columns of W: column 0 is [3,
+    4], with L2 norm sqrt(3**2 + 4**2) = 5, and column 1 is [0, 2], with norm 2. Their normalized directions are
+    consequently [3/5, 4/5] and [0, 1].
 
     The inputs fixture contains tokens [100, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]. Multiplication by W gives [300,
     400], [3, 4], [6, 8], [9, 12], whose L2 norms are 500, 5, 10, 15. Calibration excludes the first valid token,
-    leaving norms 5, 10, 15 and a median scale of 10. The large first token makes accidentally including it change the
+    leaving norms 5, 10, 15 and a median of 10. The large first token makes accidentally including it change the
     median.
 
-    Each selected column contributes dose * scale * normalized_direction. At scale 10, unit doses on columns 0 and 1
-    thus add [6, 8] and [0, 10], respectively. Contributions are summed, and a scalar dose broadcasts over the selected
-    indices. These constant offsets apply to every valid token, including the first; only calibration excludes the
-    first token. Padded tokens receive no offset.
+    A dose on channel n adds dose * median / ||W[:, n]|| to that input channel, which changes the projection's output
+    by dose * median * normalized_direction. At median 10, unit doses on columns 0 and 1 thus add [6, 8] and [0, 10],
+    respectively. Contributions are summed, and a scalar dose broadcasts over the selected indices. These constant
+    offsets apply to every valid token, including the first; only calibration excludes the first token. Padded tokens
+    receive no offset.
     """
 
     @pytest.fixture
@@ -151,9 +152,11 @@ class TestActivationSteering:
 
         config = ActivationSteeringConfig(
             steering_pattern={
-                "layers.0": {"source_module": "0", "indices": [0], "init_val": 1.0},
-                "layers.1": {"source_module": "0", "indices": [1], "init_val": -1.0},
-            }
+                "layers.0.0": {"indices": [0], "init_val": 1.0},
+                "layers.1.0": {"indices": [1], "init_val": -1.0},
+            },
+            # The unit comes from each layer's output; the layers are found by their ModuleList name.
+            layers_pattern="layers",
         )
         inputs = torch.tensor([[[100.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]])
         model = get_peft_model(TwoBlockModel(), config)
@@ -243,6 +246,30 @@ class TestActivationSteering:
         with pytest.raises(ValueError, match="does not support"):
             getattr(model, method)()
 
+    def test_steering_edits_the_projection_input(self, inputs):
+        # With a norm after the projection, as in Gemma 2/3, adding to the block's output would differ from editing the
+        # neurons. A dose of -1 on channel 0 at median 10 adds -1 * 10 / 5 = -2 to that input channel.
+        base = SteeringModel()
+        base.block = PostNormBlock()
+        expected = base(inputs + torch.tensor([-2.0, 0.0, 0.0]))
+        model = calibrated_model(base, steering_config(), inputs)
+        torch.testing.assert_close(model(inputs), expected)
+
+    def test_without_steering_pattern_every_neuron_starts_at_zero(self, inputs):
+        base = SteeringModel()
+        reference = base(inputs)
+        config = ActivationSteeringConfig(target_modules=["down_proj"], dose_unit="module_output")
+        model = calibrated_model(base, config, inputs)
+        torch.testing.assert_close(model(inputs), reference)
+        values = model.base_model.model.block.down_proj.activation_steering_values["default"]
+        assert values.requires_grad
+        torch.testing.assert_close(values, torch.zeros(3))
+
+    def test_layer_output_unit_requires_numbered_layer(self, inputs):
+        model = get_peft_model(SteeringModel(), steering_config(dose_unit="layer_output"))
+        with pytest.raises(ValueError, match="numbered layer"):
+            calibrate_activation_steering(model, {"hidden_states": inputs})
+
 
 @pytest.mark.parametrize(
     "model_id",
@@ -258,7 +285,7 @@ class TestActivationSteering:
 class TestActivationSteeringDecoderModels(PeftCommonTester):
     """Run a subset of the common tests with activation steering. Not all tests make sense with this method."""
 
-    # Block targets and explicit initial doses do not fit ALL_CONFIGS' projection-targeting assumptions.
+    # Calibration and explicit initial doses do not fit ALL_CONFIGS' assumptions.
     transformers_class = AutoModelForCausalLM
 
     @pytest.fixture(autouse=True)
@@ -276,16 +303,16 @@ class TestActivationSteeringDecoderModels(PeftCommonTester):
     @pytest.fixture
     def steering_kwargs(self, model_id):
         if "OPT" in model_id:
-            block, source = "decoder.layers.0", "fc2"
+            projection = "decoder.layers.0.fc2"
         elif "GPT2" in model_id:
-            block, source = "h.0", "mlp.c_proj"
+            projection = "h.0.mlp.c_proj"
         elif "GPTJ" in model_id:
-            block, source = "h.0", "mlp.fc_out"
+            projection = "h.0.mlp.fc_out"
         else:
-            block, source = "layers.0", "mlp.down_proj"
+            projection = "layers.0.mlp.down_proj"
         return {
             "task_type": "CAUSAL_LM",
-            "steering_pattern": {block: {"source_module": source, "indices": [0, 1], "init_val": [0.1, -0.1]}},
+            "steering_pattern": {projection: {"indices": [0, 1], "init_val": [0.1, -0.1]}},
         }
 
     def prepare_inputs_for_testing(self):

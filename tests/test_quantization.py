@@ -398,13 +398,12 @@ class TestQuantization:
     @pytest.mark.parametrize("quant", QUANTIZATION_BACKENDS, ids=_quant_id)
     def test_activation_steering(self, quant, dummy_input):
         model = quant.load_model()
-        config = ActivationSteeringConfig(
-            steering_pattern={"decoder.layers.0": {"source_module": "fc2", "indices": [0], "init_val": 0.1}}
-        )
+        config = ActivationSteeringConfig(steering_pattern={"decoder.layers.0.fc2": {"indices": [0], "init_val": 0.1}})
         if not quant.supports_merge:
-            # These backends cannot provide the dequantized source columns required for steering.
+            # These backends cannot provide the dequantized weight columns that calibration requires.
+            model = get_peft_model(model, config)
             with pytest.raises(ValueError, match="requires dequantization"):
-                get_peft_model(model, config)
+                calibrate_activation_steering(model, {"input_ids": dummy_input, "use_cache": False})
             return
 
         model.eval()

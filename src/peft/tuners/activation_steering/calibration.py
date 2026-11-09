@@ -18,9 +18,17 @@ from typing import Any
 import torch
 from torch import nn
 
-from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTunerLayer, _match_layer_index
+from peft.utils.quantization_utils import get_quantization_kwargs
 
-from .layer import ActivationSteeringLayer, _get_residual
+from .layer import ActivationSteeringLayer, get_projection_weight
+
+
+def _get_hidden_states(output):
+    hidden_states = (output[0] if output else None) if isinstance(output, tuple) else output
+    if not isinstance(hidden_states, torch.Tensor) or hidden_states.ndim != 3:
+        raise ValueError("Activation steering calibration expects outputs of shape (batch, sequence, hidden).")
+    return hidden_states
 
 
 @torch.no_grad()
@@ -29,11 +37,14 @@ def calibrate_activation_steering(
     dataloader: Iterable[Mapping[str, Any]] | Mapping[str, Any],
     adapter_name: str = "default",
 ) -> None:
-    """Calibrate the fixed residual scales of an activation steering adapter in place.
+    """Calibrate the fixed scales of an activation steering adapter in place.
 
-    Run baseline forwards with every adapter disabled and the model in evaluation mode. For each targeted block, pool
-    outgoing residual L2 norms over calibration tokens, excluding padding and the first valid token of every sequence,
-    and store their median.
+    Run baseline forwards with every adapter disabled and the model in evaluation mode. For each targeted projection,
+    pool the L2 norms of the stream given by the adapter's `dose_unit` over calibration tokens, excluding padding and
+    the first valid token of every sequence, and take their median: the output of the numbered layer containing the
+    projection for `"layer_output"`, or the projection's own output for `"module_output"`. Each steered input channel
+    `n` then stores the scale `median / ||W[:, n]||`, where `W` is the projection's weight, so that a dose of 1 adds a
+    vector with L2 norm `median` to the projection's output.
 
     For an even number of tokens, use the average of the two middle norms, as in:
     https://github.com/lyramakesmusic/neuron-explorer/blob/5a8f8267f6bd3c8caa87d598870949ab0d25b914/sweep/neuron_stats.py
@@ -53,7 +64,7 @@ def calibrate_activation_steering(
             unchanged. Repeated calls replace this adapter's scales using the new calibration data.
 
     All module training modes and adapter enabled states are restored, including on failure. Gradient flags and active
-    adapter selection are unchanged. Scales are updated only after every targeted block has valid statistics.
+    adapter selection are unchanged. Scales are updated only after every targeted projection has valid statistics.
 
     Example:
         ```python
@@ -70,32 +81,45 @@ def calibrate_activation_steering(
     }
     if not layers:
         raise ValueError(f"No activation steering layers found for adapter '{adapter_name}'.")
+    config = model.peft_config[adapter_name]
 
     if isinstance(dataloader, Mapping):
         dataloader = [dataloader]
 
-    norms = {name: [] for name in layers}
+    # The module whose output norms set the unit of each layer's doses; several layers can share one such stream.
+    streams = {}
+    for name in layers:
+        if config.dose_unit == "module_output":
+            streams[name] = name
+        else:
+            match = _match_layer_index(name, config.layers_pattern)
+            if match is None:
+                raise ValueError(
+                    f"Could not find the numbered layer containing '{name}'. Pass `layers_pattern`, or use "
+                    "`dose_unit='module_output'` to measure the unit at the projection's output."
+                )
+            # The match ends with the dot after the layer index.
+            streams[name] = match.group(0)[:-1]
+
+    norms = {stream: [] for stream in streams.values()}
     attention_mask = None
 
-    def capture(name):
+    def capture(stream):
         def hook(module, args, output):
-            residual = _get_residual(output)
-            if residual.shape[-1] != module.activation_steering_directions[adapter_name].shape[0]:
-                raise ValueError("The source projection's output dimension must match the block's hidden dimension.")
-
+            hidden_states = _get_hidden_states(output)
             if attention_mask is None:
-                eligible = torch.ones(residual.shape[:2], device=residual.device, dtype=torch.bool)
+                eligible = torch.ones(hidden_states.shape[:2], device=hidden_states.device, dtype=torch.bool)
             else:
-                if attention_mask.shape != residual.shape[:2]:
-                    raise ValueError("The calibration attention mask must match the block output dimensions.")
-                eligible = attention_mask.to(device=residual.device, dtype=torch.bool)
+                if attention_mask.shape != hidden_states.shape[:2]:
+                    raise ValueError("The calibration attention mask must match the output dimensions.")
+                eligible = attention_mask.to(device=hidden_states.device, dtype=torch.bool)
 
             eligible = eligible & (eligible.cumsum(dim=1) > 1)
-            values = residual.float().norm(dim=-1)[eligible]
+            values = hidden_states.float().norm(dim=-1)[eligible]
             if not torch.isfinite(values).all():
-                raise ValueError(f"Non-finite calibration residual norms in block '{name}'.")
+                raise ValueError(f"Non-finite calibration norms in '{stream}'.")
 
-            norms[name].append(values.cpu())
+            norms[stream].append(values.cpu())
 
         return hook
 
@@ -110,8 +134,8 @@ def calibrate_activation_steering(
             # Only bypass adapters; toggling requires_grad would disturb subsequent dose fine-tuning.
             module._disable_adapters = True
 
-        for name, layer in layers.items():
-            handles.append(layer.register_forward_hook(capture(name)))
+        for stream in norms:
+            handles.append(model.get_submodule(stream).register_forward_hook(capture(stream)))
 
         for batch in dataloader:
             if not isinstance(batch, Mapping):
@@ -126,15 +150,25 @@ def calibrate_activation_steering(
                 raise ValueError("Calibration requires a two-dimensional attention mask.")
             model(**batch)
 
-        scales = {}
-        for name, chunks in norms.items():
+        medians = {}
+        for stream, chunks in norms.items():
             if not chunks or sum(chunk.numel() for chunk in chunks) == 0:
-                raise ValueError(f"No eligible calibration tokens in block '{name}'.")
+                raise ValueError(f"No eligible calibration tokens in '{stream}'.")
 
-            scale = torch.quantile(torch.cat(chunks), 0.5)
-            if not torch.isfinite(scale) or scale <= 0:
-                raise ValueError(f"The calibration scale for block '{name}' must be finite and positive.")
-            scales[name] = scale
+            median = torch.quantile(torch.cat(chunks), 0.5)
+            if not torch.isfinite(median) or median <= 0:
+                raise ValueError(f"The calibration median for '{stream}' must be finite and positive.")
+            medians[stream] = median
+
+        quantization_kwargs = get_quantization_kwargs(model)
+        scales = {}
+        for name, layer in layers.items():
+            weight = get_projection_weight(layer, quantization_kwargs)
+            indices = layer.activation_steering_indices[adapter_name].to(weight.device)
+            column_norms = weight.float().norm(dim=0)[indices]
+            if not torch.isfinite(column_norms).all() or (column_norms == 0).any():
+                raise ValueError(f"The steered weight columns of '{name}' must be finite and have non-zero L2 norms.")
+            scales[name] = medians[streams[name]] / column_norms.cpu()
 
         for name, scale in scales.items():
             target = layers[name].activation_steering_scales[adapter_name]

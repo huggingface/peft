@@ -8062,9 +8062,9 @@ class TestActivationSteeringInitialization:
         return model
 
     def get_config(self, **kwargs):
-        spec = {"source_module": "down_proj", "indices": [0], "init_val": -1.0, "statistic": "median_l2"}
+        spec = {"indices": [0], "init_val": -1.0}
         spec.update(kwargs)
-        return ActivationSteeringConfig(steering_pattern={"block": spec})
+        return ActivationSteeringConfig(steering_pattern={"block.down_proj": spec})
 
     @pytest.mark.parametrize(
         "kwargs",
@@ -8074,21 +8074,37 @@ class TestActivationSteeringInitialization:
             {"indices": [-1]},
             {"init_val": float("nan")},
             {"indices": [0, 1], "init_val": [1.0]},
-            {"indices": [0, 1], "statistic": ["median_l2"]},
-            {"statistic": "mean_l2"},
+            {"source_module": "down_proj"},
         ],
     )
     def test_invalid_steering_configuration_raises(self, kwargs):
         with pytest.raises(ValueError):
             self.get_config(**kwargs)
 
+    def test_missing_targets_raise(self):
+        with pytest.raises(ValueError, match="Specify `target_modules`"):
+            ActivationSteeringConfig()
+
+    def test_invalid_dose_unit_raises(self):
+        with pytest.raises(ValueError, match="dose_unit"):
+            ActivationSteeringConfig(target_modules=["down_proj"], dose_unit="residual")
+
+    def test_target_modules_derived_from_steering_pattern(self):
+        assert self.get_config().target_modules == ["block.down_proj"]
+
     @pytest.mark.parametrize(
-        "target,source,indices",
-        [("missing", "down_proj", [0]), ("block", "missing", [0]), ("block", "down_proj", [3])],
+        "target,indices",
+        [("missing.down_proj", [0]), ("block.missing", [0]), ("block.down_proj", [3])],
     )
-    def test_unknown_target_or_neuron_raises(self, model, target, source, indices):
-        config = ActivationSteeringConfig(
-            steering_pattern={target: {"source_module": source, "indices": indices, "init_val": 1.0}}
-        )
+    def test_unknown_target_or_neuron_raises(self, model, target, indices):
+        config = ActivationSteeringConfig(steering_pattern={target: {"indices": indices, "init_val": 1.0}})
         with pytest.raises(ValueError):
+            get_peft_model(model, config)
+
+    def test_pattern_entry_outside_targets_raises(self, model):
+        # The steering pattern only selects among targeted modules; an entry they exclude must not be dropped silently.
+        config = ActivationSteeringConfig(
+            target_modules=["up_proj"], steering_pattern={"block.down_proj": {"indices": [0], "init_val": 1.0}}
+        )
+        with pytest.raises(ValueError, match="must match exactly one targeted module"):
             get_peft_model(model, config)
