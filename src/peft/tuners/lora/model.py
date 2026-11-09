@@ -749,10 +749,9 @@ class LoraModel(BaseTuner):
         if combination_type in ("linear", "ties", "dare_ties", "dare_linear", "magnitude_prune"):
             # all adapters need the same ranks, new rank is just the shared r
             first_config = self.peft_config[adapters[0]]
-            if any(
-                (self.peft_config[adapter].r, self.peft_config[adapter].rank_pattern)
-                != (first_config.r, first_config.rank_pattern)
-                for adapter in adapters
+            lora_layers = [module for module in self.modules() if isinstance(module, LoraLayer)]
+            if any(self.peft_config[adapter].r != first_config.r for adapter in adapters) or any(
+                len({layer.r[adapter] for adapter in adapters if adapter in layer.r}) > 1 for layer in lora_layers
             ):
                 raise ValueError(
                     "All adapters must have the same r value and rank_pattern when using combination_type linear, "

@@ -4734,6 +4734,29 @@ class TestPeftCustomModel(PeftCommonTester):
                 num_checked += 1
         assert num_checked == 2
 
+    def test_add_weighted_adapter_linear_same_per_layer_ranks_different_rank_patterns(self, tmp_path):
+        # Two adapters with the same per-layer ranks but different rank_pattern configs (one explicit, one default)
+        # must merge with combination_type linear and save/load cleanly.
+        config0 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 8}, init_lora_weights=False)
+        config1 = LoraConfig(target_modules=["lin0", "lin1"], r=8, init_lora_weights=False)
+        torch.manual_seed(0)
+        model = get_peft_model(MLP(), config0).to(self.torch_device).eval()
+        model.add_adapter("other", config1)
+        model.add_weighted_adapter(
+            ["default", "other"],
+            weights=[0.5, 0.5],
+            adapter_name="merged",
+            combination_type="linear",
+        )
+        model.set_adapter("merged")
+        X = self.prepare_inputs_for_testing()
+        output_merged = model(**X)
+
+        model.save_pretrained(tmp_path, selected_adapters=["merged"])
+        torch.manual_seed(0)
+        model_loaded = PeftModel.from_pretrained(MLP(), tmp_path / "merged").to(self.torch_device).eval()
+        assert torch.allclose(model_loaded(**X), output_merged, atol=1e-5)
+
     @pytest.mark.parametrize("combination_type", ["linear", "ties", "dare_linear", "dare_ties", "magnitude_prune"])
     def test_add_weighted_adapter_with_different_rank_patterns_raises(self, combination_type):
         # See #3737. These combination types add up the weights of the adapters, which requires equal ranks.
