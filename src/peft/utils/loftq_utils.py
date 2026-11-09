@@ -234,7 +234,7 @@ def replace_lora_weights_loftq(
     file and initializing the LoRA weights such that the quantization error between the original and quantized weights
     is minimized.
 
-    As lazy loading is not possible with pickle, normal PyTorch checkpoint files cannot be supported.
+    The weights are loaded lazily, which requires the model to be stored in the safetensors format.
 
     Depending on the model size, calling this function may take some time to finish.
 
@@ -308,10 +308,11 @@ def replace_lora_weights_pissa(
     model_path: Optional[str] = None,
     adapter_name: str = "default",
     init_lora_weights: str = "pissa",
-    callback: Optional[Callable[[torch.nn.Module, str], bool]] = None,
 ):
     """
     Replace the LoRA weights and the base weights of a model quantized with bitsandbytes, using PiSSA.
+
+    Only bitsandbytes 4-bit quantization is supported.
 
     PiSSA cannot be applied to quantized weights directly, so it normally requires loading the full-precision model,
     saving the residual and loading that residual with quantization. This function gets the same result starting from
@@ -322,13 +323,14 @@ def replace_lora_weights_pissa(
     alone is thus not sufficient to restore the model, see the `path_initial_model_for_weight_conversion` argument of
     [`~PeftModel.save_pretrained`].
 
-    As lazy loading is not possible with pickle, normal PyTorch checkpoint files cannot be supported.
+    The weights are loaded lazily, which requires the model to be stored in the safetensors format.
 
     Depending on the model size, calling this function may take some time to finish.
 
     Args:
         peft_model (`PeftModel`):
-            The model to replace the weights of. Must be a quantized PEFT model with LoRA layers.
+            The model to replace the weights of. Must be a PEFT model with LoRA layers, quantized with bitsandbytes
+            4-bit.
         model_path (`Optional[str]`):
             The path to the model safetensors file. If the model is a Hugging Face model, this will be inferred from
             the model's config. Otherwise, it must be provided.
@@ -337,10 +339,6 @@ def replace_lora_weights_pissa(
         init_lora_weights (`str`):
             Either `"pissa"` or `"pissa_niter_[number of iters]"`, see [`LoraConfig`]. For large models, the latter is
             much faster.
-        callback (`Optional[Callable[[PeftModel, str], bool]]`):
-            A callback function that will be called after each module is replaced. The callback function should take
-            the model and the name of the current module as input and return a boolean indicating whether the
-            replacement should be kept. If the callback returns False, the replacement will be rolled back.
     """
     if not is_bnb_4bit_available():
         raise ValueError("bitsandbytes must be installed and the model must be quantized in 4bits.")
@@ -370,25 +368,15 @@ def replace_lora_weights_pissa(
         lora_A, lora_B, residual = _pissa_decomposition(
             weight, module.r[adapter_name], module.scaling[adapter_name], init_lora_weights
         )
-        base_layer = module.get_base_layer()
-        layer_A, layer_B = module.lora_A[adapter_name].weight, module.lora_B[adapter_name].weight
-        weight_before, lora_A_before, lora_B_before = base_layer.weight, layer_A.data, layer_B.data
-
         backend.set_base_weight(module, residual.to(tensor.dtype))
         # same order of operations as without quantization: the factors are cast to the dtype of the base weights only
         # after the residual was computed
+        layer_A, layer_B = module.lora_A[adapter_name].weight, module.lora_B[adapter_name].weight
         layer_A.data = lora_A.to(tensor.dtype).to(layer_A.dtype)
         layer_B.data = lora_B.to(tensor.dtype).to(layer_B.dtype)
 
-        if callback and not callback(peft_model, name):
-            # roll back; set_base_weight marks the previous weight as not being quantized
-            weight_before.bnb_quantized = True
-            base_layer.weight = weight_before
-            layer_A.data = lora_A_before
-            layer_B.data = lora_B_before
-
         # free the memory before the next layer is loaded
-        del weight, residual, lora_A, lora_B, weight_before, lora_A_before, lora_B_before
+        del weight, residual, lora_A, lora_B
 
     if not any_match:
         raise ValueError("No bnb LoRA module found on the model")

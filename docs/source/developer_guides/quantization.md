@@ -155,7 +155,7 @@ peft_model = get_peft_model(base_model, lora_config)
 replace_lora_weights_pissa(peft_model, init_lora_weights="pissa_niter_4")
 ```
 
-Both `"pissa"` and `"pissa_niter_[number of iters]"` are supported. Like `replace_lora_weights_loftq`, the function accepts a `callback` argument to decide which layers should be modified.
+Both `"pissa"` and `"pissa_niter_[number of iters]"` are supported.
 
 Since the base weights are modified, saving only the adapter is not enough to restore the model. As for other PiSSA initializations, either save the base model as well or convert the trained adapter using the `path_initial_model_for_weight_conversion` argument of [`~PeftModel.save_pretrained`].
 
