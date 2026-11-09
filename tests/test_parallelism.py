@@ -282,6 +282,9 @@ class TestShardedBaseLayerShapes:
 
     @staticmethod
     def transformers_tp_replicated_weights_match(model_id, embedding_plan, init_lora_weights):
+        """
+        Check that LoRA adapters on a model sharded with Transformers TP have the same replicated weights on all ranks.
+        """
         from transformers.distributed import DistributedConfig
 
         mesh = init_device_mesh("cpu", (2,), mesh_dim_names=("tp",))
