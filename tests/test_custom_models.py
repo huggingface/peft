@@ -4683,6 +4683,75 @@ class TestPeftCustomModel(PeftCommonTester):
             ["default", "other"], weights=[1.0, 1.0], adapter_name="merged", combination_type="cat"
         )
 
+    @pytest.mark.parametrize(
+        "combination_type", ["linear", "ties", "dare_linear", "dare_ties", "magnitude_prune", "cat"]
+    )
+    def test_add_weighted_adapter_with_rank_pattern_save_and_load(self, combination_type, tmp_path):
+        # See #3737. The combined adapter has to keep the ranks of the source adapters, otherwise it cannot be loaded
+        # again, and it has to keep the same output after loading.
+        kwargs = {"target_modules": ["lin0", "lin1"], "r": 8, "rank_pattern": {"lin0": 4}, "init_lora_weights": False}
+        # the source adapters have different alpha, so their scalings differ and must be folded into the weights
+        config0 = LoraConfig(lora_alpha=8, **kwargs)
+        config1 = LoraConfig(lora_alpha=16, alpha_pattern={"lin0": 12}, **kwargs)
+
+        torch.manual_seed(0)
+        model = get_peft_model(MLP(), config0).to(self.torch_device).eval()
+        model.add_adapter("other", config1)
+        model.add_weighted_adapter(
+            ["default", "other"],
+            weights=[0.5, 0.5],
+            adapter_name="merged",
+            combination_type=combination_type,
+            **({} if combination_type in ("linear", "cat") else {"density": 0.5}),
+        )
+        model.set_adapter("merged")
+        X = self.prepare_inputs_for_testing()
+        output_merged = model(**X)
+
+        model.save_pretrained(tmp_path, selected_adapters=["merged"])
+        torch.manual_seed(0)
+        model_loaded = PeftModel.from_pretrained(MLP(), tmp_path / "merged").to(self.torch_device).eval()
+        assert torch.allclose(model_loaded(**X), output_merged, atol=1e-5)
+
+    def test_add_weighted_adapter_with_rank_and_alpha_pattern_identity(self):
+        # See #3737. Combining a single adapter (always "linear") with weight 1.0 has to reproduce that adapter, which
+        # requires that each module of the combined adapter has the rank and the scaling of the source adapter.
+        config = LoraConfig(
+            target_modules=["lin0", "lin1"],
+            r=8,
+            lora_alpha=16,
+            rank_pattern={"lin0": 4},
+            alpha_pattern={"lin0": 12},
+            init_lora_weights=False,
+        )
+        model = get_peft_model(MLP(), config, adapter_name="source").to(self.torch_device).eval()
+        model.add_weighted_adapter(["source"], weights=[1.0], adapter_name="single")
+
+        num_checked = 0
+        for module in model.modules():
+            if isinstance(module, lora.LoraLayer):
+                assert torch.allclose(module.get_delta_weight("single"), module.get_delta_weight("source"), atol=1e-6)
+                num_checked += 1
+        assert num_checked == 2
+
+    @pytest.mark.parametrize("combination_type", ["linear", "ties", "dare_linear", "dare_ties", "magnitude_prune"])
+    def test_add_weighted_adapter_with_different_rank_patterns_raises(self, combination_type):
+        # See #3737. These combination types add up the weights of the adapters, which requires equal ranks.
+        config0 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 2})
+        config1 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 4})
+        model = get_peft_model(MLP(), config0).to(self.torch_device)
+        model.add_adapter("other", config1)
+
+        msg = "All adapters must have the same r value and rank_pattern"
+        with pytest.raises(ValueError, match=msg):
+            model.add_weighted_adapter(
+                ["default", "other"],
+                weights=[1.0, 1.0],
+                adapter_name="merged",
+                combination_type=combination_type,
+                density=0.5,
+            )
+
     def test_add_weighted_adapter_negative_weight_negates_adapter(self):
         # Test that weight=-1.0 properly negates an adapter
         torch.manual_seed(42)
@@ -4809,7 +4878,7 @@ class TestPeftCustomModel(PeftCommonTester):
             weights=weights,
             adapter_name="merged",
             combination_type=combination_type,
-            density=0.5,
+            **({} if combination_type in ("linear", "cat") else {"density": 0.5}),
         )
         model.set_adapter("merged")
         dummy_input = torch.randn(2, 10)

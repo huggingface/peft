@@ -747,13 +747,18 @@ class LoraModel(BaseTuner):
         ]
 
         if combination_type in ("linear", "ties", "dare_ties", "dare_linear", "magnitude_prune"):
-            # all adapters ranks should be same, new rank is just this value
-            if len(set(adapters_ranks)) != 1:
+            # all adapters need the same ranks, new rank is just the shared r
+            first_config = self.peft_config[adapters[0]]
+            if any(
+                (self.peft_config[adapter].r, self.peft_config[adapter].rank_pattern)
+                != (first_config.r, first_config.rank_pattern)
+                for adapter in adapters
+            ):
                 raise ValueError(
-                    "All adapters must have the same r value when using combination_type linear, ties, dare_ties or "
-                    "dare_linear."
+                    "All adapters must have the same r value and rank_pattern when using combination_type linear, "
+                    "ties, dare_ties, dare_linear or magnitude_prune."
                 )
-            new_rank = adapters_ranks[0]
+            new_rank = first_config.r
         elif combination_type == "cat":
             # adapters ranks may be different, new rank is sum of all ranks
             # be careful, because output adapter rank may be really big if mixing a lot of adapters
@@ -864,6 +869,12 @@ class LoraModel(BaseTuner):
         # The scaling of each source adapter is already folded into the combined lora_A/lora_B weights below, so the
         # new adapter must have a scaling of exactly 1. With lora_alpha == r this only holds when use_rslora=False
         # (otherwise scaling would be r / sqrt(r) = sqrt(r)), so don't inherit use_rslora from adapters[0].
+        # The element-wise combination types keep the module-specific ranks of the (identical) source rank_patterns,
+        # the other types allocate new_rank for every module.
+        if combination_type in ("linear", "ties", "dare_ties", "dare_linear", "magnitude_prune"):
+            new_rank_pattern = dict(self.peft_config[adapters[0]].rank_pattern)
+        else:
+            new_rank_pattern = {}
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],
             r=new_rank,
@@ -871,8 +882,8 @@ class LoraModel(BaseTuner):
             use_rslora=False,
             lora_bias=any(self.peft_config[adapter].lora_bias for adapter in adapters),
             target_modules=new_target_modules,
-            alpha_pattern={},
-            rank_pattern={},
+            alpha_pattern=dict(new_rank_pattern),
+            rank_pattern=new_rank_pattern,
         )
         self.inject_adapter(self.model, adapter_name)
 
