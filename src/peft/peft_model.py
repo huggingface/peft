@@ -143,19 +143,18 @@ def _filter_expected_adapter_keys(keys: list[str], config: PeftConfig) -> list[s
     A key can legitimately be absent from, or extra in, a params-only comparison without indicating a real load
     problem:
 
-    - VB-LoRA's shared `vblora_vector_bank` and TinyLoRA's layer-level `tinylora_v` are references to a
-      model-level parameter, not independent per-layer state.
+    - VB-LoRA's shared `vblora_vector_bank` and TinyLoRA's layer-level `tinylora_v` are references to a model-level
+      parameter, not independent per-layer state.
     - `prompt_encoder` itself is not part of the checkpoint.
-    - UniLoRA's `unilora_theta_d` outside its canonical `base_model.unilora_theta_d.` location is a reference,
-      not the owning parameter.
-    - Prompt learning's state is loaded through the prompt encoder
-      ([`~BasePromptEncoder._load_adapter_state_dict`]), not through `model.load_state_dict`, so its keys
-      never resolve through the normal path and would otherwise always show up as unexpected. Every prompt
-      learning variant (plain prompt/prefix tuning, Cartridge, MultitaskPromptTuning's extra
-      `prefix_task_cols`/`prefix_task_rows`) reports this state as flat, top-level keys with no `.` in
-      them, see every `_get_adapter_state_dict` override under `src/peft/tuners/*/model.py` for prompt
-      learning tuners: none of them ever nest a key under a submodule path. That is the general signal used
-      here, rather than hardcoding each variant's key names one by one.
+    - UniLoRA's `unilora_theta_d` outside its canonical `base_model.unilora_theta_d.` location is a reference, not the
+      owning parameter.
+    - Prompt learning's state is loaded through the prompt encoder ([`~BasePromptEncoder._load_adapter_state_dict`]),
+      not through `model.load_state_dict`, so its keys never resolve through the normal path and would otherwise always
+      show up as unexpected. Every prompt learning variant (plain prompt/prefix tuning, Cartridge,
+      MultitaskPromptTuning's extra `prefix_task_cols`/`prefix_task_rows`) reports this state as flat, top-level keys
+      with no `.` in them, see every `_get_adapter_state_dict` override under `src/peft/tuners/*/model.py` for prompt
+      learning tuners: none of them ever nest a key under a submodule path. That is the general signal used here,
+      rather than hardcoding each variant's key names one by one.
     """
 
     def is_expected(k: str) -> bool:
@@ -530,10 +529,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             strict_adapter_check (`Literal["warn", "error", "ignore"]`, *optional*, defaults to `"warn"`):
                 What to do if the checkpoint has adapter keys that are missing from, or unexpected for, the model,
                 after accounting for keys that are expected to differ for structural reasons (shared parameters, the
-                prompt encoder path, etc.). `"warn"` emits a warning, `"error"` raises a `RuntimeError` and
-                `"ignore"` does nothing. This is not the same check as `torch.nn.Module.load_state_dict`'s `strict`:
-                PEFT adapters always coexist with a frozen base model, so this only concerns adapter-specific keys,
-                never the base model's own parameters.
+                prompt encoder path, etc.). `"warn"` emits a warning, `"error"` raises a `RuntimeError` and `"ignore"`
+                does nothing. This is not the same check as `torch.nn.Module.load_state_dict`'s `strict`: PEFT adapters
+                always coexist with a frozen base model, so this only concerns adapter-specific keys, never the base
+                model's own parameters.
             kwargs: (`optional`):
                 Additional keyword arguments passed along to the specific PEFT configuration class. This includes
                 `torch_device` (`str`, *optional*): the device to load the adapter on (forwarded to
@@ -1577,10 +1576,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             strict_adapter_check (`Literal["warn", "error", "ignore"]`, *optional*, defaults to `"warn"`):
                 What to do if the checkpoint has adapter keys that are missing from, or unexpected for, the model,
                 after accounting for keys that are expected to differ for structural reasons (shared parameters, the
-                prompt encoder path, etc.). `"warn"` emits a warning, `"error"` raises a `RuntimeError` and
-                `"ignore"` does nothing. This is not the same check as `torch.nn.Module.load_state_dict`'s `strict`:
-                PEFT adapters always coexist with a frozen base model, so this only concerns adapter-specific keys,
-                never the base model's own parameters.
+                prompt encoder path, etc.). `"warn"` emits a warning, `"error"` raises a `RuntimeError` and `"ignore"`
+                does nothing. This is not the same check as `torch.nn.Module.load_state_dict`'s `strict`: PEFT adapters
+                always coexist with a frozen base model, so this only concerns adapter-specific keys, never the base
+                model's own parameters.
             kwargs: (`optional`):
                 Additional arguments to modify the way the adapter is loaded, e.g. the token for Hugging Face Hub.
         """
