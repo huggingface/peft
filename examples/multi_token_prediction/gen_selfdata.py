@@ -159,7 +159,11 @@ def main():
             if len(ids) <= prefix_len:
                 start_idx = 0
             else:
-                start_idx = int(rng.integers(0, len(ids) - prefix_len + 1))
+                try:
+                    start_idx = int(rng.integers(0, len(ids) - prefix_len + 1))
+                except ValueError:
+                    print(len(ids), prefix_len)
+                    raise
 
             content = ids[start_idx : start_idx + prefix_len]
             prompts.append((([bos_id] if bos_id is not None else []) + content, len(content)))
