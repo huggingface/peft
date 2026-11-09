@@ -128,7 +128,7 @@ config = ActivationSteeringConfig(
     base_model_name_or_path=model_id,
     task_type=TaskType.CAUSAL_LM,
     target_modules=["down_proj"],
-    # the neurons of the last layers mostly promote single tokens
+    # e.g. leave out the last 2 of the 32 layers
     layers_to_transform=list(range(30)),
 )
 model = get_peft_model(base_model, config)
@@ -146,7 +146,7 @@ print(model.peft_config["default"].steering_pattern)
 model.save_pretrained("path/to/checkpoint")
 ```
 
-Each kept neuron starts at a dose of `init_val`, with the sign that lowers the loss. The selection is first-order: each kept neuron helps on its own, but the effect of several neurons together is not the sum of their effects. The kept doses are regular trainable parameters, so they can be refined with any training loop, e.g. [`~transformers.Trainer`], before saving. A loss term that keeps the outputs on unrelated prompts close to those of the base model, computed under `model.disable_adapter()`, can limit side effects. Call `select_neurons` before creating the optimizer.
+Each kept neuron starts at a dose of `init_val`, with the sign that lowers the loss. The selection is first-order: each kept neuron helps on its own, but the effect of several neurons together is not the sum of their effects. The kept doses are regular trainable parameters, so they can be refined with any training loop, e.g. [`~transformers.Trainer`], before saving. A loss term that keeps the outputs on unrelated prompts close to those of the base model, computed under `model.disable_adapter()`, can limit side effects. With gradient checkpointing, run the backward pass of each steered forward pass before the next one, since the recomputation uses the attention mask of the most recent model call. Call `select_neurons` before creating the optimizer.
 
 # API
 

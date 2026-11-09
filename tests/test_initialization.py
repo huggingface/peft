@@ -33,6 +33,7 @@ from scipy import stats
 from torch import nn
 from transformers import (
     AutoModelForCausalLM,
+    AutoModelForSeq2SeqLM,
     DistilBertConfig,
     DistilBertForSequenceClassification,
     LlamaConfig,
@@ -8074,7 +8075,7 @@ class TestActivationSteeringInitialization:
             {"indices": [-1]},
             {"init_val": float("nan")},
             {"indices": [0, 1], "init_val": [1.0]},
-            {"source_module": "down_proj"},
+            {"dose": 1.0},
         ],
     )
     def test_invalid_steering_configuration_raises(self, kwargs):
@@ -8107,4 +8108,12 @@ class TestActivationSteeringInitialization:
             target_modules=["up_proj"], steering_pattern={"block.down_proj": {"indices": [0], "init_val": 1.0}}
         )
         with pytest.raises(ValueError, match="must match exactly one targeted module"):
+            get_peft_model(model, config)
+
+    def test_encoder_decoder_model_raises(self):
+        model_id = "peft-internal-testing/tiny-random-BartForConditionalGeneration"
+        with hub_online_once(model_id):
+            model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+        config = ActivationSteeringConfig(target_modules=["fc2"])
+        with pytest.raises(ValueError, match="encoder-decoder"):
             get_peft_model(model, config)

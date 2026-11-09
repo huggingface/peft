@@ -24,8 +24,11 @@ from peft.utils.quantization_utils import get_quantization_kwargs
 from .layer import ActivationSteeringLayer, get_projection_weight
 
 
-def _get_hidden_states(output):
+def _get_hidden_states(output, batch_size):
     hidden_states = (output[0] if output else None) if isinstance(output, tuple) else output
+    if isinstance(hidden_states, torch.Tensor) and hidden_states.ndim == 2 and batch_size is not None:
+        # Some models, e.g. OPT, flatten the batch and sequence dimensions before the projection.
+        hidden_states = hidden_states.reshape(batch_size, -1, hidden_states.shape[-1])
     if not isinstance(hidden_states, torch.Tensor) or hidden_states.ndim != 3:
         raise ValueError("Activation steering calibration expects outputs of shape (batch, sequence, hidden).")
     return hidden_states
@@ -102,11 +105,11 @@ def calibrate_activation_steering(
             streams[name] = match.group(0)[:-1]
 
     norms = {stream: [] for stream in streams.values()}
-    attention_mask = None
+    attention_mask = batch_size = None
 
     def capture(stream):
         def hook(module, args, output):
-            hidden_states = _get_hidden_states(output)
+            hidden_states = _get_hidden_states(output, batch_size)
             if attention_mask is None:
                 eligible = torch.ones(hidden_states.shape[:2], device=hidden_states.device, dtype=torch.bool)
             else:
@@ -148,6 +151,10 @@ def calibrate_activation_steering(
                 not isinstance(attention_mask, torch.Tensor) or attention_mask.ndim != 2
             ):
                 raise ValueError("Calibration requires a two-dimensional attention mask.")
+            inputs = (
+                attention_mask if attention_mask is not None else batch.get("input_ids", batch.get("inputs_embeds"))
+            )
+            batch_size = inputs.shape[0] if isinstance(inputs, torch.Tensor) else None
             model(**batch)
 
         medians = {}

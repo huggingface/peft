@@ -62,7 +62,9 @@ class ActivationSteeringLayer(nn.Module, BaseTunerLayer):
         self.activation_steering_indices = BufferDict(persistent=False)
         self.activation_steering_scales = BufferDict(persistent=True)
         self.in_features, _ = _get_in_out_features(self.get_base_layer())
+        # The attention mask and the number of input tokens of the current model call, set by a forward pre-hook.
         self._attention_mask: torch.Tensor | None = None
+        self._num_tokens: int | None = None
         # Adapters whose scales were found to be calibrated, so that the check runs once instead of on every forward.
         self._calibrated_adapters: set[str] = set()
         self._active_adapter = adapter_name
@@ -118,10 +120,12 @@ class ActivationSteeringLayer(nn.Module, BaseTunerLayer):
 
         mask = self._attention_mask
         if mask is not None:
-            # Some models, e.g. OPT, flatten the batch and sequence dimensions before the projection.
-            num_tokens = x.shape[1] if x.ndim == 3 else x.shape[0] // mask.shape[0]
-            mask = mask[:, -num_tokens:].to(device=x.device, dtype=torch.bool)
-            if mask.numel() != x.shape[:-1].numel():
+            # The input tokens are the last positions of the mask. Some models, e.g. OPT, flatten the batch and sequence
+            # dimensions before the projection.
+            num_tokens = self._num_tokens or (x.shape[1] if x.ndim == 3 else None)
+            shape = (mask.shape[0], num_tokens) if x.ndim == 3 else (mask.shape[0] * (num_tokens or 0),)
+            if num_tokens is None or num_tokens > mask.shape[1] or x.shape[:-1] != shape:
                 raise ValueError("The attention mask must match the projection input's batch and sequence dimensions.")
-            delta = delta * mask.reshape(*x.shape[:-1], 1)
+            mask = mask[:, -num_tokens:].to(device=x.device, dtype=torch.bool).reshape(shape)
+            delta = delta * mask.unsqueeze(-1)
         return self.base_layer(x + delta.to(x.dtype), *args, **kwargs)

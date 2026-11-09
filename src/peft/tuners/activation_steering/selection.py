@@ -130,11 +130,11 @@ def select_neurons(
 
     keep = torch.zeros_like(scores, dtype=torch.bool)
     keep[top.indices] = True
-    doses = -init_val * torch.cat(grads).sign()
+    signs = torch.cat(grads).sign()
     sizes = [grad.numel() for grad in grads]
 
     steering_pattern = {}
-    for (name, layer), layer_keep, layer_doses in zip(layers.items(), keep.split(sizes), doses.split(sizes)):
+    for (name, layer), layer_keep, layer_signs in zip(layers.items(), keep.split(sizes), signs.split(sizes)):
         positions = layer_keep.nonzero().flatten()
         if not len(positions):
             parent, _, target_name = _get_submodules(tuner.model, name)
@@ -142,15 +142,17 @@ def select_neurons(
             tuner.targeted_module_names.remove(name)
             continue
 
+        # Each kept dose starts at init_val against the sign of its gradient, which lowers the loss.
+        values = [-init_val * sign for sign in layer_signs[positions].tolist()]
         old = layer.activation_steering_values[adapter_name]
         layer.activation_steering_values[adapter_name] = nn.Parameter(
-            layer_doses[positions].to(device=old.device, dtype=old.dtype), requires_grad=old.requires_grad
+            torch.tensor(values, device=old.device, dtype=old.dtype), requires_grad=old.requires_grad
         )
         for buffers in (layer.activation_steering_indices, layer.activation_steering_scales):
             buffers[adapter_name] = buffers[adapter_name][positions.to(buffers[adapter_name].device)]
         steering_pattern[name] = {
             "indices": layer.activation_steering_indices[adapter_name].tolist(),
-            "init_val": layer_doses[positions].tolist(),
+            "init_val": values,
         }
 
     tuner.peft_config[adapter_name].steering_pattern = steering_pattern

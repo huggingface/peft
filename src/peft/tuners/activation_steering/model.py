@@ -42,8 +42,14 @@ def _prepare_steering_forward(model, args, kwargs):
     if mask is not None and (not isinstance(mask, Tensor) or mask.ndim != 2):
         raise ValueError("Activation steering requires a two-dimensional attention mask.")
 
+    inputs = args[0] if args else kwargs.get("input_ids")
+    if inputs is None:
+        inputs = kwargs.get("inputs_embeds")
+    num_tokens = inputs.shape[1] if isinstance(inputs, Tensor) and inputs.ndim > 1 else None
+
     for layer in layers:
         layer._attention_mask = mask
+        layer._num_tokens = num_tokens
 
 
 def _matches(name, key):
@@ -73,6 +79,10 @@ class ActivationSteeringModel(BaseTuner):
         return config.steering_pattern[matches[0]]
 
     def _prepare_model(self, peft_config, model):
+        # The attention mask of the model call belongs to the encoder, so it would not match the decoder's tokens.
+        if getattr(getattr(model, "config", None), "is_encoder_decoder", False):
+            raise ValueError("Activation steering does not support encoder-decoder models.")
+
         # Validate the steering pattern before replacing any modules: unmatched entries would be silently ignored.
         keys = [key for key, _ in model.named_modules() if self._check_target_module_exists(peft_config, key)]
         for name in peft_config.steering_pattern:

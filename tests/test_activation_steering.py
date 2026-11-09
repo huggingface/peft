@@ -23,6 +23,7 @@ from peft import (
     ActivationSteeringConfig,
     PeftModel,
     get_peft_model,
+    get_peft_model_state_dict,
     inject_adapter_in_model,
 )
 from peft.tuners.activation_steering import ActivationSteeringLayer, calibrate_activation_steering, select_neurons
@@ -55,6 +56,19 @@ class SteeringModel(nn.Module):
 
     def forward(self, hidden_states, attention_mask=None, past_key_values=None):
         return self.block(hidden_states)
+
+
+class FlatSteeringModel(SteeringModel):
+    # Flattens the batch and sequence dimensions before the projection, like OPT.
+    def forward(self, hidden_states, attention_mask=None):
+        batch_size, seq_len, _ = hidden_states.shape
+        return self.block(hidden_states.reshape(batch_size * seq_len, -1)).reshape(batch_size, seq_len, -1)
+
+
+class UnpaddingSteeringModel(SteeringModel):
+    # Drops padding tokens before the projection, so that its input rows no longer follow the attention mask.
+    def forward(self, hidden_states, attention_mask):
+        return self.block(hidden_states[attention_mask.bool()])
 
 
 class TwoProjectionModel(nn.Module):
@@ -153,6 +167,25 @@ class TestActivationSteering:
         # The offset is 15 * [3/5, 4/5] = [9, 12], including at first valid tokens but excluding padding.
         expected = reference + torch.tensor([9.0, 12.0]) * mask[..., None]
         torch.testing.assert_close(model(sequences, attention_mask=mask), expected)
+
+    def test_flattened_inputs_follow_the_attention_mask(self, inputs):
+        # The same expectations as with padding above, with the batch and sequence dimensions flattened.
+        sequences = inputs.repeat(2, 1, 1)
+        sequences[1] *= 2
+        mask = torch.tensor([[1, 1, 1, 0], [0, 1, 1, 1]])
+        base = FlatSteeringModel()
+        reference = base(sequences)
+        model = calibrated_model(base, steering_config(init_val=1.0), sequences, attention_mask=mask)
+        expected = reference + torch.tensor([9.0, 12.0]) * mask[..., None]
+        torch.testing.assert_close(model(sequences, attention_mask=mask), expected)
+
+    def test_unmatched_flattened_inputs_raise(self, inputs):
+        sequences = inputs.repeat(2, 1, 1)
+        model = calibrated_model(
+            UnpaddingSteeringModel(), steering_config(), sequences, attention_mask=torch.ones(2, 4, dtype=torch.long)
+        )
+        with pytest.raises(ValueError, match="attention mask must match"):
+            model(sequences, attention_mask=torch.tensor([[1, 1, 1, 0], [0, 1, 1, 1]]))
 
     def test_calibrate_multiple_blocks(self):
         class TwoBlockModel(nn.Module):
@@ -296,15 +329,19 @@ class TestNeuronSelection:
     in row 1, times the number of tokens. At medians 10 and 2, the absolute gradients per token of the neurons of
     `layers.0` are 10 * 4/5 = 8, 10 * 2/2 = 10, and 0, and those of `layers.1` are 0, 0, and 2 * 1 = 2. Lowering the
     loss needs positive doses on `layers.0` and a negative dose on `layers.1`, whose column 2 is [0, -1].
+
+    Each layer returns its projection's output, so both dose units give the same medians.
     """
 
     @pytest.fixture
     def inputs(self):
         return torch.tensor([[[100.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [3.0, 0.0, 0.0]]])
 
-    @pytest.fixture
-    def model(self, inputs):
-        config = ActivationSteeringConfig(target_modules=["down_proj"], dose_unit="module_output")
+    @pytest.fixture(params=["module_output", "layer_output"])
+    def model(self, request, inputs):
+        config = ActivationSteeringConfig(
+            target_modules=["down_proj"], dose_unit=request.param, layers_pattern="layers"
+        )
         return calibrated_model(TwoProjectionModel(), config, inputs)
 
     @pytest.fixture
@@ -328,9 +365,10 @@ class TestNeuronSelection:
         torch.testing.assert_close(model(inputs), reference + torch.tensor([3.0, 10.0]))
 
     def test_projections_without_kept_neurons_are_unwrapped(self, model, train_step):
-        select_neurons(model, train_step, num_neurons=2, init_val=0.5)
+        # 0.3 is not exact in float32; the config must still contain exactly 0.3.
+        select_neurons(model, train_step, num_neurons=2, init_val=0.3)
         assert model.peft_config["default"].steering_pattern == {
-            "layers.0.down_proj": {"indices": [0, 1], "init_val": [0.5, 0.5]}
+            "layers.0.down_proj": {"indices": [0, 1], "init_val": [0.3, 0.3]}
         }
         layers = model.base_model.model.layers
         assert isinstance(layers[0].down_proj, ActivationSteeringLayer)
@@ -340,13 +378,15 @@ class TestNeuronSelection:
     def test_selected_adapter_saves_loads_and_trains(self, model, train_step, inputs, tmp_path):
         select_neurons(model, train_step, num_neurons=3, init_val=0.5)
         steered = model(inputs)
+        # Only the doses and scales of the kept neurons are saved.
+        assert sum(tensor.numel() for tensor in get_peft_model_state_dict(model).values()) == 6
         model.save_pretrained(tmp_path)
 
         loaded = PeftModel.from_pretrained(TwoProjectionModel(), tmp_path, is_trainable=True)
         assert loaded.peft_config["default"].steering_pattern == model.peft_config["default"].steering_pattern
         torch.testing.assert_close(loaded(inputs), steered, rtol=0, atol=0)
         # Only the kept neurons are trainable, and they still receive gradients.
-        values = [p for n, p in loaded.named_parameters() if p.requires_grad]
+        values = [p for p in loaded.parameters() if p.requires_grad]
         assert sum(p.numel() for p in values) == 3
         loaded(inputs).sum().backward()
         assert all(p.grad is not None for p in values)
