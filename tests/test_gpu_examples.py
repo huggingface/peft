@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from functools import lru_cache, partial
 from pathlib import Path
 from typing import Any, Union
+from unittest.mock import patch
 
 import numpy as np
 import packaging
@@ -71,6 +72,7 @@ from peft import (
     EvaConfig,
     FrodConfig,
     HiraConfig,
+    IA3Config,
     LoftQConfig,
     LoraConfig,
     PeftModel,
@@ -90,6 +92,7 @@ from peft import (
     inject_adapter_in_model,
     prepare_model_for_kbit_training,
     replace_lora_weights_loftq,
+    replace_lora_weights_pissa,
     set_peft_model_state_dict,
 )
 from peft.helpers import KappaTuneSelector, find_kappa_target_modules
@@ -106,6 +109,7 @@ from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, activation_checkpointing_enable, infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
+from peft.utils.integrations import dequantize_bnb_weight
 from peft.utils.other import fsdp_auto_wrap_policy
 from tests.testing_utils import hub_online_once
 
@@ -3204,6 +3208,105 @@ class TestPiSSA:
         )
         # This check is expected to fail when using bnb
         assert not torch.allclose(output_finetuned_pissa, output_converted, atol=tol, rtol=tol)
+
+
+@pytest.mark.single_gpu_tests
+@require_bitsandbytes
+class TestReplaceLoraWeightsPissa:
+    """Tests for replace_lora_weights_pissa. They use a tiny model on CPU to be fast."""
+
+    model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+    input_ids = torch.tensor([[1, 2, 3, 4, 5]])
+
+    @pytest.fixture(autouse=True)
+    def seeded_svd_lowrank(self):
+        # On CPU, creating LoRA layers consumes the same RNG as the random projection of svd_lowrank, so without
+        # seeding each call, the results would depend on when the LoRA layers were created.
+        svd_lowrank = torch.svd_lowrank
+
+        def seeded(*args, **kwargs):
+            torch.manual_seed(0)
+            return svd_lowrank(*args, **kwargs)
+
+        with patch("torch.svd_lowrank", seeded):
+            yield
+
+    @pytest.fixture
+    def model_path(self, tmp_path):
+        with hub_online_once(self.model_id):
+            model = AutoModelForCausalLM.from_pretrained(self.model_id, dtype=torch.bfloat16)
+        model.save_pretrained(tmp_path / "base")
+        return str(tmp_path / "base")
+
+    @staticmethod
+    def load_quantized(path, quant_storage=torch.uint8):
+        config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.float32,
+            bnb_4bit_quant_storage=quant_storage,
+        )
+        return AutoModelForCausalLM.from_pretrained(path, quantization_config=config, device_map={"": "cpu"})
+
+    @staticmethod
+    def lora_config(init_lora_weights=True, **kwargs):
+        return LoraConfig(
+            r=2, lora_alpha=4, target_modules="all-linear", init_lora_weights=init_lora_weights, **kwargs
+        )
+
+    @staticmethod
+    def get_layers(model):
+        return {name: module for name, module in model.named_modules() if isinstance(module, LoraLayer)}
+
+    @staticmethod
+    def dequantized(layer):
+        weight = layer.get_base_layer().weight
+        return dequantize_bnb_weight(weight, state=weight.quant_state)
+
+    @pytest.mark.parametrize("quant_storage", [torch.uint8, torch.bfloat16])
+    @pytest.mark.parametrize("init_lora_weights", ["pissa", "pissa_niter_4"])
+    def test_same_as_quantizing_the_residual(self, model_path, tmp_path, init_lora_weights, quant_storage):
+        # The result should be identical to the procedure without replace_lora_weights_pissa, i.e. applying PiSSA on
+        # the non-quantized model, saving the residual, and loading it with quantization.
+        model = AutoModelForCausalLM.from_pretrained(model_path, dtype=torch.bfloat16)
+        model = get_peft_model(model, self.lora_config(init_lora_weights))
+        model.peft_config["default"].init_lora_weights = True
+        model.save_pretrained(tmp_path / "adapter")
+        model.unload().save_pretrained(tmp_path / "residual")
+        expected = PeftModel.from_pretrained(
+            self.load_quantized(tmp_path / "residual", quant_storage), tmp_path / "adapter"
+        ).eval()
+
+        model = get_peft_model(self.load_quantized(model_path, quant_storage), self.lora_config()).eval()
+        replace_lora_weights_pissa(model, model_path=model_path, init_lora_weights=init_lora_weights)
+
+        layers, layers_expected = self.get_layers(model), self.get_layers(expected)
+        assert layers
+        assert layers.keys() == layers_expected.keys()
+        for name, layer in layers.items():
+            layer_expected = layers_expected[name]
+            assert torch.equal(self.dequantized(layer), self.dequantized(layer_expected))
+            assert torch.equal(layer.lora_A["default"].weight, layer_expected.lora_A["default"].weight)
+            assert torch.equal(layer.lora_B["default"].weight, layer_expected.lora_B["default"].weight)
+
+        with torch.inference_mode():
+            assert torch.equal(model(self.input_ids).logits, expected(self.input_ids).logits)
+
+    def test_not_quantized_raises(self, model_path):
+        model = get_peft_model(AutoModelForCausalLM.from_pretrained(model_path), self.lora_config())
+        with pytest.raises(ValueError, match="No bnb LoRA module found on the model"):
+            replace_lora_weights_pissa(model, model_path=model_path)
+
+    def test_invalid_init_lora_weights_raises(self, model_path):
+        model = get_peft_model(self.load_quantized(model_path), self.lora_config())
+        with pytest.raises(ValueError, match="init_lora_weights should be 'pissa'"):
+            replace_lora_weights_pissa(model, model_path=model_path, init_lora_weights="invalid")
+
+    def test_dora_raises(self, model_path):
+        model = get_peft_model(self.load_quantized(model_path), self.lora_config(use_dora=True))
+        with pytest.raises(ValueError, match="does not support LoRA variants"):
+            replace_lora_weights_pissa(model, model_path=model_path)
 
 
 @pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
@@ -7222,10 +7325,26 @@ def _test_save_unsharded_weights(rank, world_size, tmp_dir_reference, tmp_dir_tp
             )
 
 
+@require_torch_multi_accelerator
+@pytest.mark.multi_gpu_tests
+class TestFsdp2StateDict:
+    @pytest.mark.parametrize("config_cls", [LoraConfig, IA3Config])
+    def test_save_load_without_tp_metadata(self, config_cls, tmp_path):
+        from .test_parallelism import TestFsdp2StateDict as CpuFsdp2StateDict
+
+        mp.spawn(
+            CpuFsdp2StateDict._save_load,
+            args=(2, str(tmp_path), torch_device, config_cls),
+            nprocs=2,
+            join=True,
+        )
+
+
 def _test_save_gathers_only_adapter_weights(rank, world_size):
     """
     Test that get_peft_model_state_dict only gathers the adapter weights of a TP model, gathering the whole state dict
-    would materialize the full base model on every rank.
+    would materialize the full base model on every rank. This guards TP saving; the FSDP2/HSDP save regression is
+    covered separately by TestFsdp2StateDict.
     """
     from torch.distributed.tensor import DTensor
     from transformers.integrations import tensor_parallel
@@ -7239,18 +7358,25 @@ def _test_save_gathers_only_adapter_weights(rank, world_size):
     lora_config = LoraConfig(r=4, target_modules=["q_proj", "o_proj"], init_lora_weights=False)
     model = get_peft_model(model, lora_config)
 
+    state_dict = model.state_dict()
+    tensor_names = {id(value): name for name, value in state_dict.items()}
     gathered_keys = []
+    full_tensor = DTensor.full_tensor
     gather_state_dict_for_save = tensor_parallel.gather_state_dict_for_save
+
+    def spy_full_tensor(tensor, *args, **kwargs):
+        gathered_keys.append(tensor_names[id(tensor)])
+        return full_tensor(tensor, *args, **kwargs)
 
     def spy_gather_state_dict_for_save(state_dict, *args):
         gathered_keys.extend(state_dict)
         return gather_state_dict_for_save(state_dict, *args)
 
-    tensor_parallel.gather_state_dict_for_save = spy_gather_state_dict_for_save
-    try:
-        peft_state_dict = get_peft_model_state_dict(model)
-    finally:
-        tensor_parallel.gather_state_dict_for_save = gather_state_dict_for_save
+    # Observe the collective itself for DTensor TP and the Transformers helper for legacy TP.
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(DTensor, "full_tensor", spy_full_tensor)
+        monkeypatch.setattr(tensor_parallel, "gather_state_dict_for_save", spy_gather_state_dict_for_save)
+        peft_state_dict = get_peft_model_state_dict(model, state_dict=state_dict)
 
     assert gathered_keys
     non_adapter_keys = [key for key in gathered_keys if "lora_" not in key]

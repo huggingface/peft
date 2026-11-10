@@ -32,10 +32,15 @@ from safetensors.torch import load_file, save_file
 
 from peft import (
     AdaLoraConfig,
+    BeftConfig,
     BOFTConfig,
+    C3AConfig,
     CPTConfig,
+    DeloraConfig,
+    GloraConfig,
     GraloraConfig,
     HiraConfig,
+    HRAConfig,
     IA3Config,
     LilyConfig,
     LNTuningConfig,
@@ -43,15 +48,20 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     MissConfig,
+    OFTConfig,
     OSFConfig,
+    PacaConfig,
     PeftModel,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptLearningConfig,
     PromptTuningConfig,
+    PsoftConfig,
     PveraConfig,
     RoadConfig,
     ShadowConfig,
+    ShiraConfig,
+    SupertuningConfig,
     UniLoraConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -79,6 +89,27 @@ from peft.utils import (
 )
 
 from .testing_utils import get_state_dict, hub_online_once
+
+
+# PEFT methods that don't support transformers' Conv1D layers (used by GPT2)
+CONV1D_UNSUPPORTED_CONFIGS = (
+    BeftConfig,
+    BOFTConfig,
+    C3AConfig,
+    DeloraConfig,
+    GloraConfig,
+    HRAConfig,
+    LoHaConfig,
+    LoKrConfig,
+    MissConfig,
+    OFTConfig,
+    OSFConfig,
+    PacaConfig,
+    PsoftConfig,
+    RoadConfig,
+    ShiraConfig,
+    SupertuningConfig,
+)
 
 
 def skip_non_prompt_learning(config_cls):
@@ -111,7 +142,7 @@ def _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs):
     if "gpt2" not in model_id.lower():
         return
 
-    if config_cls not in (IA3Config, LoHaConfig, LoKrConfig, LoraConfig):
+    if config_cls in CONV1D_UNSUPPORTED_CONFIGS:
         pytest.skip("This PEFT method does not support Conv1D layers, skipping this test.")
 
 
@@ -389,6 +420,30 @@ class PeftCommonTester:
             assert config.inference_mode is inference_mode
             with open(successful_save_dir / "adapter_config.json", encoding="utf-8") as file:
                 assert json.load(file)["inference_mode"] is True
+
+    def _test_load_no_warning(self, model_id, config_cls, config_kwargs, recwarn, tmp_path):
+        # A valid checkpoint must load without any warning about missing or unexpected adapter keys, whether it is
+        # loaded through `from_pretrained` or `load_adapter`. This guards against false alarms in the adapter key check
+        # for every PEFT method (see issue 3804).
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+            model = get_peft_model(model, config)
+            model = model.to(self.torch_device)
+            model.save_pretrained(tmp_path)
+
+            base_model = self.transformers_class.from_pretrained(model_id)
+            recwarn.clear()
+            model = PeftModel.from_pretrained(base_model, tmp_path)
+            assert not any("adapter keys" in str(rec.message) for rec in recwarn)
+
+            if issubclass(config_cls, ShadowConfig) and config_kwargs.get("task_type") == "SEQ_CLS":
+                # ShadowPEFT explicitly rejects multiple adapters when sequence classification is present
+                return
+
+            recwarn.clear()
+            model.load_adapter(tmp_path, adapter_name="other")
+            assert not any("adapter keys" in str(rec.message) for rec in recwarn)
 
     def _test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs, safe_serialization=True):
         if issubclass(config_cls, AdaLoraConfig):
@@ -735,7 +790,7 @@ class PeftCommonTester:
                 atol, rtol = 0.3, 0.01
             if (config.peft_type == "OFT") and not is_decoder:
                 atol, rtol = 0.3, 0.01
-            if model_id == "trl-internal-testing/tiny-Llama4ForCausalLM":
+            if model_id == "peft-internal-testing/tiny-Llama4ForCausalLM":
                 # also getting larger errors here, not exactly sure why
                 atol, rtol = 0.3, 0.01
             assert torch.allclose(logits, logits_merged, atol=atol, rtol=rtol)
@@ -2046,7 +2101,7 @@ class PeftCommonTester:
                 assert (output_before != output_peft_disabled).float().mean() < 1e-4
             else:
                 atol, rtol = 1e-6, 1e-6
-                if (platform.system() == "Windows") and (model_id == "trl-internal-testing/tiny-Llama4ForCausalLM"):
+                if (platform.system() == "Windows") and (model_id == "peft-internal-testing/tiny-Llama4ForCausalLM"):
                     # for some reason, Windows CI fails with stricter tolerance
                     atol, rtol = 1e-5, 1e-5
 
