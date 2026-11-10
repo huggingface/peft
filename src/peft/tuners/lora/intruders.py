@@ -33,12 +33,7 @@ def _detect_via_lowrank(W, W_merged, top_k, niter, threshold_epsilon):
 
     cos_sim = (U_merged.T @ U_base).abs().max(dim=1).values
     intruder_idcs = torch.where(cos_sim < threshold_epsilon)[0].tolist()
-
-    # if intruder detected by lowrank, use full svd to calc U,S and
-    # to rule out false positives and for mitigation calculation
-    if intruder_idcs:
-        intruder_idcs, U_merged, S_merged, V_merged = _calc_intruder_ids(W, W_merged, top_k, threshold_epsilon)
-    return intruder_idcs, U_merged, S_merged, V_merged
+    return intruder_idcs
 
 
 def reduce_intruder_dimension(
@@ -139,10 +134,15 @@ def reduce_intruder_dimension(
         # compare base weights and adapter weights using cosine similarity.
         # based on this similarity we can find intruder dimensions using threshold_epsilon
         # on the top_k dimensions
+
         if use_lowrank:
-            intruder_idcs, U_merged, S_merged, V_merged = _detect_via_lowrank(
-                W, W_merged, top_k, niter, threshold_epsilon
-            )
+            intruder_idcs = _detect_via_lowrank(W, W_merged, top_k, niter, threshold_epsilon)
+            # if intruders detected by lowrank, use full svd to calc U,S
+            # to rule out false positives and use for mitigation calculation
+            if intruder_idcs:
+                intruder_idcs, U_merged, S_merged, V_merged = _calc_intruder_ids(
+                    W, W_merged, top_k, threshold_epsilon
+                )
         else:
             intruder_idcs, U_merged, S_merged, V_merged = _calc_intruder_ids(W, W_merged, top_k, threshold_epsilon)
 
