@@ -137,6 +137,34 @@ At the moment, `replace_lora_weights_loftq` has these additional limitations:
 - Model files must be stored as a `safetensors` file.
 - Only bitsandbytes 4bit quantization is supported.
 
+### PiSSA initialization
+
+[PiSSA](https://hf.co/papers/2404.02948) cannot be applied to quantized weights. It is normally applied to the non-quantized base model, then the resulting residual is saved and loaded with quantization, which requires the whole non-quantized model to fit into memory.
+
+As an alternative, `replace_lora_weights_pissa` takes a quantized PEFT model and streams the weights of the non-quantized model from the weights file, one layer at a time. Each layer's LoRA weights are initialized with PiSSA and its base weight is replaced by the re-quantized residual.
+
+```python
+from peft import replace_lora_weights_pissa
+from transformers import BitsAndBytesConfig
+
+bnb_config = BitsAndBytesConfig(load_in_4bit=True, ...)
+base_model = AutoModelForCausalLM.from_pretrained(..., quantization_config=bnb_config)
+# note: don't pass init_lora_weights="pissa" here!
+lora_config = LoraConfig(task_type="CAUSAL_LM")
+peft_model = get_peft_model(base_model, lora_config)
+replace_lora_weights_pissa(peft_model, init_lora_weights="pissa_niter_4")
+```
+
+Both `"pissa"` and `"pissa_niter_[number of iters]"` are supported.
+
+Since the base weights are modified, saving only the adapter is not enough to restore the model. As for other PiSSA initializations, either save the base model as well or convert the trained adapter using the `path_initial_model_for_weight_conversion` argument of [`~PeftModel.save_pretrained`].
+
+At the moment, `replace_lora_weights_pissa` has these additional limitations:
+
+- Model files must be stored as a `safetensors` file.
+- Only bitsandbytes 4bit quantization is supported.
+- LoRA variants such as DoRA are not supported.
+
 ### QLoRA-style training
 
 QLoRA adds trainable weights to all the linear layers in the transformer architecture. Since the attribute names for these linear layers can vary across architectures, set `target_modules` to `"all-linear"` to add LoRA to all the linear layers:

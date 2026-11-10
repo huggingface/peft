@@ -55,6 +55,7 @@ from utils.dataset import DreamBoothDataset, PromptDataset, collate_fn
 from utils.tracemalloc import TorchTracemalloc, b2mb
 
 from peft import HRAConfig, get_peft_model
+from peft.utils import activation_checkpointing_enable
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
@@ -273,7 +274,7 @@ def main(args):
         unet.enable_gradient_checkpointing()
         # below fails when using hra so commenting it out
         if args.train_text_encoder and not args.use_hra:
-            text_encoder.gradient_checkpointing_enable()
+            activation_checkpointing_enable(text_encoder)
 
     # Enable TF32 for faster training on Ampere GPUs,
     # cf https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices

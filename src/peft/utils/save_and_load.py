@@ -24,6 +24,7 @@ import huggingface_hub
 import torch
 from huggingface_hub import file_exists, hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError, LocalEntryNotFoundError
+from packaging.version import parse
 from safetensors.torch import load_file as safe_load_file
 from transformers.utils import http_user_agent
 
@@ -172,6 +173,28 @@ def _filter_state_dict_for_adapter_name(
     return filtered_state_dict
 
 
+def _gather_state_dict_for_save(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """Gather DTensors into full CPU tensors. All participating ranks must call this function."""
+    # Adapted from transformers.distributed.tensor_parallel.gather_state_dict_for_save, without unused TP arguments.
+    # Vendored so FSDP2 saving also works with Transformers versions that predate DTensor TP.
+    # https://github.com/huggingface/transformers/blob/144ecf007b8b4f2910da104c84a79801db6985a6/src/transformers/distributed/tensor_parallel.py#L749-L767
+    from torch.distributed.tensor import DTensor
+
+    # Ordinary state dicts retain their tensors' device, layout and autograd behavior.
+    if not any(isinstance(tensor, DTensor) for tensor in state_dict.values()):
+        return state_dict
+
+    gathered = {}
+    for key, tensor in state_dict.items():
+        if isinstance(tensor, torch.Tensor):
+            if isinstance(tensor, DTensor):
+                tensor = tensor.full_tensor()
+            gathered[key] = tensor.detach().cpu().contiguous()
+        else:
+            gathered[key] = tensor
+    return gathered
+
+
 def get_peft_model_state_dict(
     model,
     state_dict=None,
@@ -184,6 +207,10 @@ def get_peft_model_state_dict(
 
     This only includes the PEFT parameters, not the parameters of the base model. Thus the returned `state_dict` is
     generally small compared to the full model size. To retrieve the full `state_dict`, just call `model.state_dict()`.
+
+    If the selected entries contain distributed tensors (e.g. FSDP2 or DTensor TP), all participating ranks must call
+    this function: gathering those entries into full tensors is a collective. Unselected base model weights remain
+    sharded.
 
     Note that the adapter name is removed from the `state_dict`, as this is just an arbitrary name that can be changed
     when loading the adapter. So e.g. if the adapter name is `'default'` and the original key is
@@ -366,12 +393,10 @@ def get_peft_model_state_dict(
     elif save_embedding_layers:
         warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
 
-    if tp_info is None and is_transformers_dtensor_tp and getattr(model, "_tp_size", None):
-        # Only the selected entries are gathered, gathering the whole state dict would materialize the full base model
-        # on every rank.
-        from transformers.integrations.tensor_parallel import gather_state_dict_for_save
-
-        to_return = gather_state_dict_for_save(to_return, {}, None, None)
+    if torch.distributed.is_available() and parse(torch.__version__) >= parse("2.5"):
+        # FSDP2 has no TP metadata. Gather only selected entries using each tensor's mesh and placements, so
+        # unselected base model weights remain sharded.
+        to_return = _gather_state_dict_for_save(to_return)
 
     # REMOVE ADAPTER NAME
     # Key formats can be method-specific, so the removal is delegated to the tuner class, see

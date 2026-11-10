@@ -290,3 +290,4 @@ You can also refer the [llama-recipes](https://github.com/facebookresearch/llama
 10. With `reshard_after_forward=False`, or for the root module with the default `None`, the next forward all-gathers again.
 11. FSDP2 modules that wrap the `PeftModel` are not resharded; call `reshard()` on them before these methods.
 12. Prompt learning methods and adaption prompt are not covered yet.
+13. With FSDP2/HSDP, call `get_peft_model_state_dict()` or `save_pretrained()` on every participating rank: gathering distributed adapter tensors is a collective. For `save_pretrained()`, pass `is_main_process=True` only on the writing rank. Only selected adapter entries (including explicitly requested embeddings or `modules_to_save`) are gathered; unselected base-model weights remain sharded.
