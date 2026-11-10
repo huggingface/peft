@@ -29,7 +29,7 @@ def _calc_intruder_ids(W, W_merged, top_k, threshold_epsilon):
 def _detect_via_lowrank(W, W_merged, top_k, niter, threshold_epsilon):
     # calculation of randomized low-rank svd for fast pre-filtering of intruders
     U_base, _S_base, _V_base = torch.svd_lowrank(W, q=top_k, niter=niter)
-    U_merged, S_merged, V_merged = torch.svd_lowrank(W_merged, q=top_k, niter=niter)
+    U_merged, _S_merged, _V_merged = torch.svd_lowrank(W_merged, q=top_k, niter=niter)
 
     cos_sim = (U_merged.T @ U_base).abs().max(dim=1).values
     intruder_idcs = torch.where(cos_sim < threshold_epsilon)[0].tolist()
@@ -110,8 +110,10 @@ def reduce_intruder_dimension(
     if peft_model.peft_type != "LORA":
         raise ValueError("The provided model is not using LoRA and is therefore not supported.")
     if niter is not None and not use_lowrank:
-        raise ValueError("'niter' can only be used in combination with 'use_lowrank=True', "
-                         + "either set 'niter=None' or 'use_lowrank=True'.")
+        raise ValueError(
+            "'niter' can only be used in combination with 'use_lowrank=True', "
+            + "either set 'niter=None' or 'use_lowrank=True'."
+        )
 
     peft_model.add_adapter(new_adapter_name, peft_model.peft_config[old_adapter_name])
 
@@ -144,9 +146,7 @@ def reduce_intruder_dimension(
             # if intruders detected by lowrank, use full svd to calc U,S
             # to rule out false positives and use for mitigation calculation
             if intruder_idcs:
-                intruder_idcs, U_merged, S_merged, V_merged = _calc_intruder_ids(
-                    W, W_merged, top_k, threshold_epsilon
-                )
+                intruder_idcs, U_merged, S_merged, V_merged = _calc_intruder_ids(W, W_merged, top_k, threshold_epsilon)
         else:
             intruder_idcs, U_merged, S_merged, V_merged = _calc_intruder_ids(W, W_merged, top_k, threshold_epsilon)
 
