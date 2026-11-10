@@ -30,6 +30,9 @@ from peft import (
     BOFTConfig,
     C3AConfig,
     CartridgeConfig,
+    CortexConfig,
+    CortexFfnSpec,
+    CortexMoeSpec,
     CPTConfig,
     DeftConfig,
     DeloraConfig,
@@ -93,6 +96,7 @@ PEFT_MODELS_TO_TEST = [("peft-internal-testing/tiny-opt-lora-revision", "test")]
 
 # Config classes and their mandatory parameters
 ALL_CONFIG_CLASSES = (
+    (CortexConfig, {}),
     (AdaLoraConfig, {"total_step": 1}),
     (AdamssConfig, {}),
     (AdaptionPromptConfig, {}),
@@ -796,3 +800,109 @@ class TestLoraNestedConfigRoundTrip:
         nested = getattr(loaded, attribute_name)
         assert isinstance(nested, nested_config_cls)
         assert getattr(nested, dummy_field) == dummy_value
+
+
+class TestCortexConfig:
+    @pytest.mark.parametrize("value", [0, 1, "auto", "true"])
+    def test_invalid_bias_override_is_rejected(self, value):
+        with pytest.raises(TypeError, match="adapter_bias"):
+            CortexConfig(adapter_bias=value)
+
+    @pytest.mark.parametrize("value", [None, True, "normal"])
+    def test_invalid_bias_initializer_is_rejected(self, value):
+        with pytest.raises(ValueError, match="adapter_bias_init"):
+            CortexConfig(adapter_bias_init=value)
+
+    @pytest.mark.parametrize("value", [0, -1, True, 1.5])
+    def test_invalid_width(self, value):
+        with pytest.raises(ValueError, match="positive integer"):
+            CortexConfig(k=value)
+
+    @pytest.mark.parametrize("selection", ["shared", "routed"])
+    def test_singleton_moe_selection_roundtrips(self, selection, tmp_path):
+        config = CortexConfig(k=3, moe_target=[selection])
+        assert config.moe_target == selection
+        config.save_pretrained(tmp_path)
+        assert CortexConfig.from_pretrained(tmp_path).moe_target == selection
+
+    @pytest.mark.parametrize(
+        "selection", ["all", [], ["shared", "shared"], ["all"], ["shared", "all"], ["shared", None], True, {}]
+    )
+    def test_invalid_moe_selections_fail_clearly(self, selection, tmp_path):
+        with pytest.raises(ValueError, match="moe_target"):
+            CortexConfig(moe_target=selection)
+        CortexConfig().save_pretrained(tmp_path)
+        config_path = tmp_path / "adapter_config.json"
+        config = json.loads(config_path.read_text())
+        config["moe_target"] = selection
+        config_path.write_text(json.dumps(config))
+        with pytest.raises(ValueError, match="moe_target"):
+            CortexConfig.from_pretrained(tmp_path)
+
+    @pytest.mark.parametrize("value", [True, False, None, "sum", 0, []])
+    def test_invalid_public_weighting_rejected(self, value):
+        with pytest.raises(ValueError, match="public_weighting"):
+            CortexConfig(public_weighting=value)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"init_weights": "chunk_mean"},
+            {"init_weights": "unknown"},
+            {"init_noise_std": -0.01},
+            {"init_noise_std": float("nan")},
+            {"init_noise_std": True},
+        ],
+    )
+    def test_invalid_initialization_config(self, kwargs):
+        with pytest.raises(ValueError):
+            CortexConfig(**kwargs)
+
+    @pytest.mark.parametrize("as_dict", [False, True])
+    @pytest.mark.parametrize("shared_modules", [None, (), ("shared_branch",)])
+    def test_structure_specs_survive_json_roundtrip(self, as_dict, shared_modules, tmp_path):
+        ffn = CortexFfnSpec(
+            gate_proj="w1",
+            up_proj="w3",
+            down_proj="w2",
+            act_fn="activation",
+            width_field="ffn_channels",
+            width_attributes=("channels",),
+        )
+        moe = CortexMoeSpec(
+            experts="bank",
+            shared_modules=shared_modules,
+            routing_indices="selected_ids",
+            routing_weights="selected_weights",
+        )
+        config = CortexConfig(ffn_specs={"CustomFfn": ffn}, moe_specs={"CustomMoe": moe})
+        if as_dict:
+            config = CortexConfig(**json.loads(json.dumps(config.to_dict())))
+        config.save_pretrained(tmp_path)
+        loaded = PeftConfig.from_pretrained(tmp_path)
+
+        assert isinstance(loaded.ffn_specs["CustomFfn"], CortexFfnSpec)
+        assert isinstance(loaded.moe_specs["CustomMoe"], CortexMoeSpec)
+        assert loaded.ffn_specs["CustomFfn"] == ffn
+        assert loaded.moe_specs["CustomMoe"] == moe
+        assert loaded.moe_specs["CustomMoe"].shared_modules == shared_modules
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"ffn_specs": {"CustomFfn": {"down_proj": ""}}},
+            {"ffn_specs": {"CustomFfn": {"up_proj": "nested.up"}}},
+            {"ffn_specs": {"CustomFfn": {"packed": "yes"}}},
+            {"ffn_specs": {"CustomFfn": {"activation": "unknown"}}},
+            {"ffn_specs": {"CustomFfn": {"gate_proj": "up_proj"}}},
+            {"ffn_specs": {"CustomFfn": {"width_attributes": ["up_proj"]}}},
+            {"moe_specs": {"CustomMoe": {"experts": "common", "shared_modules": ["common"]}}},
+            {"moe_specs": {"CustomMoe": {"experts": ""}}},
+            {"moe_specs": {"CustomMoe": {"shared_modules": "common"}}},
+            {"moe_specs": {"CustomMoe": {"routing_indices": "ids"}}},
+            {"moe_specs": {"CustomMoe": {"routing": "unit"}}},
+        ],
+    )
+    def test_invalid_structure_specs_fail_at_configuration(self, kwargs):
+        with pytest.raises((TypeError, ValueError)):
+            CortexConfig(**kwargs)

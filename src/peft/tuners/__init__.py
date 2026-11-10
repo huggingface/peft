@@ -19,6 +19,7 @@ from .beft import BeftConfig, BeftModel
 from .boft import BOFTConfig, BOFTModel
 from .c3a import C3AConfig, C3AModel
 from .cartridge import CartridgeConfig, CartridgeEncoder
+from .cortex import CortexConfig, CortexFfnSpec, CortexModel, CortexMoeSpec
 from .cpt import CPTConfig, CPTEmbedding
 from .deft import DeftConfig, DeftModel
 from .delora import DeloraConfig, DeloraModel
@@ -98,6 +99,10 @@ __all__ = [
     "CPTEmbedding",
     "CartridgeConfig",
     "CartridgeEncoder",
+    "CortexConfig",
+    "CortexFfnSpec",
+    "CortexModel",
+    "CortexMoeSpec",
     "DeftConfig",
     "DeftModel",
     "DeloraConfig",

@@ -1,0 +1,8 @@
+{
+  "peft_type": "CORTEX",
+  "task_type": "CAUSAL_LM",
+  "inference_mode": false,
+  "k": 16,
+  "init_weights": "random",
+  "adapter_bias": false
+}

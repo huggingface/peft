@@ -75,6 +75,8 @@
         title: BOFT
       - local: package_reference/c3a
         title: C3A
+      - local: package_reference/cortex
+        title: Cortex
       - local: package_reference/deft
         title: DEFT
       - local: package_reference/delora
@@ -180,6 +182,8 @@
       title: C3A
     - local: package_reference/cartridges
       title: Cartridges
+    - local: package_reference/cortex
+      title: Cortex
     - local: package_reference/cpt
       title: CPT
     - local: package_reference/deft
