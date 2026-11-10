@@ -45,7 +45,7 @@ def reduce_intruder_dimension(
     mitigation_lambda=0.75,
     logging_sink=print,
     use_lowrank=False,
-    niter=320,
+    niter=None,
 ):
     """
     Intruder dimension mitigation based on https://huggingface.co/papers/2410.21228 ("LoRA vs Full Fine-tuning: An
@@ -109,6 +109,9 @@ def reduce_intruder_dimension(
 
     if peft_model.peft_type != "LORA":
         raise ValueError("The provided model is not using LoRA and is therefore not supported.")
+    if niter is not None and not use_lowrank:
+        raise ValueError("'niter' can only be used in combination with 'use_lowrank=True', "
+                         + "either set 'niter=None' or 'use_lowrank=True'.")
 
     peft_model.add_adapter(new_adapter_name, peft_model.peft_config[old_adapter_name])
 
@@ -136,6 +139,7 @@ def reduce_intruder_dimension(
         # on the top_k dimensions
 
         if use_lowrank:
+            niter = niter if niter is not None else 320
             intruder_idcs = _detect_via_lowrank(W, W_merged, top_k, niter, threshold_epsilon)
             # if intruders detected by lowrank, use full svd to calc U,S
             # to rule out false positives and use for mitigation calculation
