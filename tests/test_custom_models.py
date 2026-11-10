@@ -4672,6 +4672,50 @@ class TestPeftCustomModel(PeftCommonTester):
         with pytest.raises(ValueError, match=msg):
             model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
 
+    @pytest.mark.parametrize("method", ["lora", "ia3"])
+    @pytest.mark.parametrize("regex", [False, True], ids=["module-list", "regex"])
+    @pytest.mark.parametrize("reverse", [False, True], ids=["forward-order", "reverse-order"])
+    def test_add_weighted_adapter_respects_source_exclusions(self, method, regex, reverse, tmp_path):
+        torch.manual_seed(12)
+        base_model = nn.Sequential(nn.Linear(8, 6), nn.Linear(6, 4), nn.Linear(4, 2)).to(self.torch_device)
+        pristine_model = copy.deepcopy(base_model)
+        configs = []
+        for source_index in (0, 1):
+            excluded = [str(i) for i in range(3) if i != source_index]
+            targets = {
+                "target_modules": "[0-2]" if regex else ["0", "1", "2"],
+                "exclude_modules": "|".join(excluded) if regex else excluded,
+            }
+            if method == "lora":
+                configs.append(LoraConfig(r=2, init_lora_weights=False, **targets))
+            else:
+                # The first config lists layer 1 as feedforward but excludes it. The second actually adapts it.
+                feedforward_modules = ["0", "1"] if source_index == 0 else []
+                configs.append(IA3Config(feedforward_modules=feedforward_modules, init_ia3_weights=False, **targets))
+
+        model = get_peft_model(base_model, configs[0], adapter_name="left")
+        model.add_adapter("right", configs[1])
+        model.eval()
+        model.base_model.set_adapter(["left", "right"])
+        inputs = torch.randn(4, 8, device=self.torch_device)
+        with torch.no_grad():
+            expected = model(inputs)
+
+        adapters = ["right", "left"] if reverse else ["left", "right"]
+        kwargs = {"combination_type": "cat"} if method == "lora" else {}
+        model.add_weighted_adapter(adapters, [1.0, 1.0], "combined", **kwargs)
+        model.set_adapter("combined")
+
+        assert not isinstance(base_model[2], BaseTunerLayer)
+        with torch.no_grad():
+            torch.testing.assert_close(model(inputs), expected)
+
+        model.save_pretrained(tmp_path, selected_adapters=["combined"], save_embedding_layers=False)
+        reloaded = PeftModel.from_pretrained(pristine_model, tmp_path / "combined")
+        assert not isinstance(pristine_model[2], BaseTunerLayer)
+        with torch.no_grad():
+            torch.testing.assert_close(reloaded(inputs), expected)
+
     def test_add_weighted_adapter_cat_with_rank_pattern(self):
         # Tests against a bug described in #2512, which resulted from the rank_pattern not being taken into account.
         config0 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 2})

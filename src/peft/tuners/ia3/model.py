@@ -294,10 +294,21 @@ class IA3Model(BaseTuner):
             adapters=adapters,
         )
 
+        exclude_modules = self.peft_config[adapters[0]].exclude_modules
+        if any(self.peft_config[adapter].exclude_modules for adapter in adapters):
+            targets = self._get_weighted_adapter_layers(adapters)
+            new_target_modules = "|".join(re.escape(key) for key in targets)
+            # Record the scaling direction used by each actual layer so reloading allocates the same vector shape.
+            new_feedforward_modules = "|".join(
+                re.escape(key) for key, layer in targets.items() if layer.is_feedforward
+            )
+            exclude_modules = None
+
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],
             target_modules=new_target_modules,
             feedforward_modules=new_feedforward_modules,
+            exclude_modules=exclude_modules,
         )
         self.inject_adapter(self.model, adapter_name)
 

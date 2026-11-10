@@ -861,6 +861,18 @@ class LoraModel(BaseTuner):
             svd_rank=svd_rank,
         )
 
+        targeting = {"target_modules": new_target_modules}
+        if any(self.peft_config[adapter].exclude_modules for adapter in adapters):
+            # Each source's exclusions have already been applied to its injected layers. Use full paths so a
+            # target cannot also match a different layer by suffix when the combined adapter is reloaded.
+            targets = self._get_weighted_adapter_layers(adapters)
+            targeting.update(
+                target_modules="|".join(re.escape(key) for key in targets),
+                exclude_modules=None,
+                layers_to_transform=None,
+                layers_pattern=None,
+            )
+
         # The scaling of each source adapter is already folded into the combined lora_A/lora_B weights below, so the
         # new adapter must have a scaling of exactly 1. With lora_alpha == r this only holds when use_rslora=False
         # (otherwise scaling would be r / sqrt(r) = sqrt(r)), so don't inherit use_rslora from adapters[0].
@@ -870,9 +882,9 @@ class LoraModel(BaseTuner):
             lora_alpha=new_rank,
             use_rslora=False,
             lora_bias=any(self.peft_config[adapter].lora_bias for adapter in adapters),
-            target_modules=new_target_modules,
             alpha_pattern={},
             rank_pattern={},
+            **targeting,
         )
         self.inject_adapter(self.model, adapter_name)
 
