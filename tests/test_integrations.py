@@ -358,7 +358,7 @@ class TestTransformersV5:
         # It can happen that a model returns an entry for get_checkpoint_conversion_mapping but there is nothing further
         # to do because no weights are being fused (e.g. only renamed). In that case, we have no entry in
         # _MOE_TARGET_MODULE_MAPPING. The bug was that we would call dict.__getitem__ instead of dict.get.
-        model_id = "trl-internal-testing/tiny-Qwen2_5_VLForConditionalGeneration"
+        model_id = "peft-internal-testing/tiny-Qwen2_5_VLForConditionalGeneration"
         with hub_online_once(model_id):
             model = AutoModelForImageTextToText.from_pretrained(model_id)
             config = LoraConfig(target_modules=["q_proj", "v_proj"])
@@ -371,7 +371,7 @@ class TestTransformersV5:
         # https://github.com/huggingface/trl/issues/5428
         # Targeting up_proj but not gate_proj must raise -- they are fused into gate_up_proj. Covers the list and regex
         # paths and guards the error-message handling. See `test_qwen3_moe_works` for a valid config.
-        model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
+        model_id = "peft-internal-testing/tiny-Qwen3MoeForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
             msg = re.escape(
@@ -384,7 +384,7 @@ class TestTransformersV5:
     def test_qwen3_moe_works(self):
         # https://github.com/huggingface/trl/issues/5428
         # When correctly targeting both up and gate projection, there should be no error (see previous test)
-        model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
+        model_id = "peft-internal-testing/tiny-Qwen3MoeForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
             # target up_proj and gate_proj
@@ -403,7 +403,7 @@ class TestTransformersV5:
     def test_qwen3_moe_regex_target_modules_works(self, regex):
         # Regression test for https://github.com/huggingface/peft/issues/3229: the conversion used to `set()` the regex
         # string, splitting it into characters. It is now resolved to concrete names against the model.
-        model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
+        model_id = "peft-internal-testing/tiny-Qwen3MoeForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
             peft_model = get_peft_model(model, LoraConfig(target_modules=regex))  # does not raise
@@ -421,7 +421,7 @@ class TestTransformersV5:
 
     def test_qwen3_moe_single_attention_regex_target_modules_works(self):
         # A regex resolving to a single attention projection (no experts) converts cleanly: nothing moves to parameters.
-        model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
+        model_id = "peft-internal-testing/tiny-Qwen3MoeForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
             peft_model = get_peft_model(model, LoraConfig(target_modules=r".*\.q_proj"))  # does not raise
@@ -441,7 +441,7 @@ class TestTransformersV5:
         # "all-linear" is matched by module type, not as a regex. On v4 the experts *and* the router `gate` were
         # nn.Linear, so "all-linear" targeted them; after fusion the experts are stacked parameters and the router is a
         # custom module, so "all-linear" must still carry all of them into target_parameters (gate -> gate.weight).
-        model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
+        model_id = "peft-internal-testing/tiny-Qwen3MoeForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
             peft_model = get_peft_model(model, LoraConfig(target_modules="all-linear"))  # does not raise
@@ -467,7 +467,7 @@ class TestTransformersV5:
         # Save/reload a regex-targeted adapter. Reload re-runs the conversion on the already-converted config, so this
         # also guards idempotency.
         inputs = torch.arange(10).view(1, -1).to(self.torch_device)
-        model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
+        model_id = "peft-internal-testing/tiny-Qwen3MoeForCausalLM"
         regex = r"^(model(?=\.).*\.(q_proj|k_proj|v_proj|gate_proj|up_proj|down_proj))$"
 
         with hub_online_once(model_id):

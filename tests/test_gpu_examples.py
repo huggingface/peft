@@ -6136,7 +6136,7 @@ class TestHotSwapping:
         # prepare_model_for_compiled_hotswap, as we use the same LoRA shapes. Due to (re-)compilation, the test is
         # relatively slow.
         atol, rtol = 1e-6, 1e-6
-        model_id = "trl-internal-testing/tiny-GptOssForCausalLM"
+        model_id = "peft-internal-testing/tiny-GptOssForCausalLM"
         inputs = torch.arange(10).view(1, -1).to(self.torch_device)
 
         def strong_init(model):
@@ -6477,7 +6477,7 @@ class TestDtypeAutocastBnb:
 
     """
 
-    model_id = "trl-internal-testing/tiny-Qwen2ForCausalLM-2.5"
+    model_id = "peft-internal-testing/tiny-Qwen2ForCausalLM-2.5"
     # no need to check each possible peft type, a selection should be enough
     peft_types_to_test = ["lora", "vera", "lora-target-param"]
 
