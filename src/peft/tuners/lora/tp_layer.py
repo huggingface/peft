@@ -178,7 +178,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
                 self.olora_init(adapter_name)
         elif init_lora_weights == "loftq":
             with gather_params_ctx(self.get_base_layer().weight):
-                self.loftq_init(adapter_name)
+                self.loftq_init(adapter_name, config)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
 

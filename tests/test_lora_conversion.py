@@ -28,6 +28,7 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     MissConfig,
+    PacaConfig,
     PeftModel,
     PrefixTuningConfig,
     convert_to_lora,
@@ -781,3 +782,34 @@ class TestKasaLoraConversion:
         # Vanilla LoRA is unaffected by the variant-aware check.
         vanilla = get_peft_model(self.MLP(), LoraConfig(target_modules=["lin0"], r=4))
         assert vanilla.supports_lora_conversion() is True
+
+
+class TestPacaLoraConversion:
+    """Test PaCA to LoRA conversion."""
+
+    model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+    torch_device = infer_device()
+
+    def get_base_model(self):
+        with hub_online_once(self.model_id):
+            return AutoModelForCausalLM.from_pretrained(self.model_id).to(self.torch_device)
+
+    def test_paca_exact_conversion(self):
+        # The PaCA update is non-zero in r columns only, so a LoRA adapter of rank r represents it exactly.
+        torch.manual_seed(0)
+        config = PacaConfig(r=4, init_weights=False, target_modules=["q_proj", "v_proj"])
+        paca_model = get_peft_model(self.get_base_model(), config).eval()
+        assert paca_model.supports_lora_conversion()
+        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+        with torch.inference_mode():
+            output_paca = paca_model(inputs, output_hidden_states=True)
+
+        lora_config, state_dict = convert_to_lora(paca_model, rank=4)
+        lora_model = get_peft_model(self.get_base_model(), lora_config).eval()
+        load_result = set_peft_model_state_dict(lora_model, state_dict)
+        assert not load_result.unexpected_keys
+        with torch.inference_mode():
+            output_lora = lora_model(inputs, output_hidden_states=True)
+
+        mse = nn.functional.mse_loss(output_lora.hidden_states[-1], output_paca.hidden_states[-1]).item()
+        assert mse < 1e-5, f"PaCA conversion should be exact, got mse={mse}"

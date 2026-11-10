@@ -118,7 +118,7 @@ If your change is specific to a hardware setting (e.g., it requires CUDA), take 
 
 ## Stale PRs
 
-It can happen that while you’re working on your PR, the underlying code base changes due to other changes being merged. If that happens – especially when there is a merge conflict – please update your branch with the latest changes. This can be a merge or a rebase, and we'll squash and merge the PR once it’s ready. If possible, **avoid force pushes** to make reviews easier.
+It can happen that while you’re working on your PR, the underlying code base changes due to other changes being merged. If that happens – especially when there is a merge conflict – please update your branch with the latest changes. This can be a merge or a rebase, and we'll squash and merge the PR once it’s ready. **Avoid force pushes** to make reviews easier.
 
 ## PR description
 

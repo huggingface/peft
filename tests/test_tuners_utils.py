@@ -30,6 +30,8 @@ from transformers import (
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
     BitsAndBytesConfig,
+    GPT2Config,
+    GPT2ForSequenceClassification,
 )
 from transformers.pytorch_utils import Conv1D
 
@@ -580,7 +582,7 @@ class TestTargetedParameterNames:
         assert model.targeted_parameter_names == ["lin0.weight", "lin1.weight"]
 
     def test_realistic_example(self):
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
         config = LoraConfig(target_modules=[], task_type="CAUSAL_LM", target_parameters=["v_proj.weight"])
@@ -651,6 +653,52 @@ class TestExcludedModuleNames:
         model = get_peft_model(model, LoraConfig(target_modules=["lin0"]))
         with pytest.raises(NoMatchingPeftModuleError, match="Target modules .* not found in the base model"):
             model.add_adapter("other", LoraConfig(target_modules=["non_existent_module"]))
+
+    def test_failed_second_adapter_injection_does_not_leave_orphaned_parameters(self):
+        # Make the first target valid and the second target invalid for a Mamba model. The failed add_adapter call must
+        # not leave the valid target partially updated even though validation fails later in the target list.
+        class MambaLikeModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.safe = nn.Linear(4, 4, bias=False)
+                self.out_proj = nn.Linear(4, 4, bias=False)
+                self.config = type("Config", (), {"model_type": "mamba"})()
+
+            def forward(self, inputs):
+                return self.out_proj(self.safe(inputs))
+
+        model = get_peft_model(MambaLikeModel(), LoraConfig(target_modules=["safe"]))
+
+        with pytest.raises(ValueError, match="incompatible with Mamba-based models"):
+            model.add_adapter("other", LoraConfig(target_modules=["safe", "out_proj"]))
+
+        # Rolling back the config is not enough: the failed adapter must not remain in the model state dict either.
+        assert list(model.peft_config) == ["default"]
+        assert not any(".other." in key for key in model.state_dict())
+
+    def test_failed_initial_adapter_injection_does_not_mutate_model(self):
+        # Snapshot a plain base model before a later target rejects the initial adapter injection.
+        class MambaLikeModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.safe = nn.Linear(4, 4, bias=False)
+                self.out_proj = nn.Linear(4, 4, bias=False)
+                self.config = type("Config", (), {"model_type": "mamba"})()
+
+            def forward(self, inputs):
+                return self.out_proj(self.safe(inputs))
+
+        model = MambaLikeModel()
+        state_dict_before = deepcopy(model.state_dict())
+
+        with pytest.raises(ValueError, match="incompatible with Mamba-based models"):
+            get_peft_model(model, LoraConfig(target_modules=["safe", "out_proj"]))
+
+        # A failed first injection must leave both the model structure and its registered parameters unchanged.
+        assert not hasattr(model, "peft_config")
+        assert set(model.state_dict()) == set(state_dict_before)
+        for key, value in state_dict_before.items():
+            assert torch.equal(model.state_dict()[key], value)
 
     def test_second_adapter_only_modules_to_save_raises(self):
         # A second adapter is held to the same standard as a first one: if its target_modules match nothing, it
@@ -1951,6 +1999,67 @@ class TestHealthcheck:
             assert healthcheck["adapter_configurations"]["default"]["modules_to_save"] == ["embed_tokens"]
             assert healthcheck["model_runtime"]["parameter_devices"] == ["cpu"]
             assert healthcheck["findings"] == []
+
+    # randomly initialized classifier head, since the checkpoint is a causal LM
+    _TASK_HEAD_MODEL_ID = "peft-internal-testing/tiny-random-OPTForCausalLM"
+
+    def _get_model_with_new_task_head(self):
+        with hub_online_once(self._TASK_HEAD_MODEL_ID):
+            return AutoModelForSequenceClassification.from_pretrained(self._TASK_HEAD_MODEL_ID, num_labels=3)
+
+    @staticmethod
+    def finding_codes(model):
+        return {finding["code"] for finding in model.healthcheck()["findings"]}
+
+    def test_new_task_head_without_task_type_is_flagged(self):
+        model = get_peft_model(self._get_model_with_new_task_head(), LoraConfig(target_modules=["q_proj"], r=2))
+
+        model.print_healthcheck()  # does not raise
+        healthcheck = model.healthcheck()
+
+        assert healthcheck["is_ready"] is True  # warning only
+        assert [finding["code"] for finding in healthcheck["findings"]] == ["TASK_HEAD_NOT_SAVED"]
+        assert healthcheck["findings"][0]["severity"] == "warning"
+        assert "'score'" in healthcheck["findings"][0]["message"]
+
+    def test_new_task_head_targeted_by_adapter_is_flagged(self):
+        # only the LoRA weights of the head are saved, not the random base weight
+        config = LoraConfig(target_modules=["q_proj", "score"], r=2)
+        model = get_peft_model(self._get_model_with_new_task_head(), config)
+
+        assert self.finding_codes(model) == {"TASK_HEAD_NOT_SAVED"}
+
+    def test_new_task_head_with_task_type_is_not_flagged(self):
+        config = LoraConfig(target_modules=["q_proj"], r=2, task_type="SEQ_CLS")
+        model = get_peft_model(self._get_model_with_new_task_head(), config)
+
+        assert self.finding_codes(model) == set()
+
+    def test_new_task_head_in_modules_to_save_is_not_flagged(self):
+        config = LoraConfig(target_modules=["q_proj"], r=2, modules_to_save=["score"])
+        model = get_peft_model(self._get_model_with_new_task_head(), config)
+
+        assert self.finding_codes(model) == set()
+
+    def test_pretrained_task_head_is_not_flagged(self):
+        # a classifier checkpoint lists the classification class in `architectures`
+        model_id = "peft-internal-testing/tiny-random-BertForSequenceClassification"
+        with hub_online_once(model_id):
+            base = AutoModelForSequenceClassification.from_pretrained(model_id)
+        assert base.config.architectures == ["BertForSequenceClassification"]
+        model = get_peft_model(base, LoraConfig(target_modules=["query"], r=2))
+
+        assert self.finding_codes(model) == set()
+
+    def test_task_head_without_architectures_is_not_flagged(self):
+        config = GPT2Config(
+            n_layer=1, n_embd=16, n_head=2, vocab_size=50, n_positions=16, pad_token_id=0, num_labels=3
+        )
+        base = GPT2ForSequenceClassification(config)  # created from a config, there is no checkpoint
+        assert not base.config.architectures
+        model = get_peft_model(base, LoraConfig(target_modules=["c_attn"], fan_in_fan_out=True, r=2))
+
+        assert self.finding_codes(model) == set()
 
 
 # Tests for BaseTuner

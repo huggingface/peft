@@ -34,10 +34,10 @@ from .utils import CONFIG_NAME, PeftType, TaskType
 MIN_EXPECTED_CONFIG_KEYS = {"peft_type"}
 
 # The adapter_config.json is written with sorted keys, except for the dicts stored under these keys, whose order has to
-# survive a save/load round trip. For rank_pattern and alpha_pattern, the order matters because when more than one key
-# matches a module, the first one wins. If another config argument needs its order preserved, add it here and extend
-# this comment.
-CONFIG_KEYS_WITH_PRESERVED_ORDER = {"rank_pattern", "alpha_pattern"}
+# survive a save/load round trip. For rank_pattern, alpha_pattern and paca_indices_pattern, the order matters because
+# when more than one key matches a module, the first one wins. If another config argument needs its order preserved,
+# add it here and extend this comment.
+CONFIG_KEYS_WITH_PRESERVED_ORDER = {"rank_pattern", "alpha_pattern", "paca_indices_pattern"}
 
 
 def _check_and_remove_unused_kwargs(cls, kwargs):
@@ -118,6 +118,14 @@ class PeftConfigMixin(PushToHubMixin):
             raise ValueError(
                 f"Invalid task type: '{self.task_type}'. Must be one of the following task types: {', '.join(TaskType)}."
             )
+
+        # `layers_to_transform` is silently ignored when `target_modules` is a str (a regex or "all-linear")
+        if (
+            isinstance(getattr(self, "target_modules", None), str)
+            and getattr(self, "layers_to_transform", None) is not None
+        ):
+            raise ValueError("`layers_to_transform` cannot be used when `target_modules` is a str.")
+
         if self.peft_version is None:
             self.peft_version = self._get_peft_version()
 
@@ -178,8 +186,9 @@ class PeftConfigMixin(PushToHubMixin):
         if auto_mapping_dict is not None:
             output_dict["auto_mapping"] = auto_mapping_dict
 
-        # save it
-        with open(output_path, "w") as writer:
+        # save it; config JSON is UTF-8, pin the encoding so this does not depend on the
+        # locale's preferred encoding (e.g. cp936 on Windows)
+        with open(output_path, "w", encoding="utf-8") as writer:
             writer.write(json.dumps(_sort_keys(output_dict), indent=2))
 
     @classmethod
@@ -301,7 +310,10 @@ class PeftConfigMixin(PushToHubMixin):
             path_json_file (`str`):
                 The path to the json file.
         """
-        with open(path_json_file) as file:
+        # Config JSON files are UTF-8; pin the encoding so reading a config containing
+        # non-ASCII (e.g. a CJK path in `base_model_name_or_path`) does not crash on
+        # Windows locales such as cp936.
+        with open(path_json_file, encoding="utf-8") as file:
             json_object = json.load(file)
 
         # Sanity check that config does not contain a runtime_config

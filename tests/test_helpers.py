@@ -54,7 +54,8 @@ class TestCheckIsPeftModel:
         assert result is False
 
     def test_local_model_valid(self, tmp_path):
-        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        with hub_online_once("gpt2"):
+            model = AutoModelForCausalLM.from_pretrained("gpt2")
         config = LoraConfig()
         model = get_peft_model(model, config)
         model.save_pretrained(tmp_path / "peft-gpt2-valid")
@@ -62,7 +63,8 @@ class TestCheckIsPeftModel:
         assert result is True
 
     def test_local_model_invalid(self, tmp_path):
-        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        with hub_online_once("gpt2"):
+            model = AutoModelForCausalLM.from_pretrained("gpt2")
         model.save_pretrained(tmp_path / "peft-gpt2-invalid")
         result = check_if_peft_model(tmp_path / "peft-gpt2-invalid")
         assert result is False
@@ -75,7 +77,8 @@ class TestCheckIsPeftModel:
         assert result is False
 
     def test_local_model_non_default_name(self, tmp_path):
-        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        with hub_online_once("gpt2"):
+            model = AutoModelForCausalLM.from_pretrained("gpt2")
         config = LoraConfig()
         model = get_peft_model(model, config, adapter_name="other")
         model.save_pretrained(tmp_path / "peft-gpt2-other")
@@ -92,7 +95,8 @@ class TestCheckIsPeftModel:
 class TestScalingAdapters:
     @pytest.fixture(scope="class")
     def tokenizer(self):
-        return AutoTokenizer.from_pretrained("peft-internal-testing/opt-125m")
+        with hub_online_once("peft-internal-testing/opt-125m_tokenizer"):
+            return AutoTokenizer.from_pretrained("peft-internal-testing/opt-125m")
 
     def get_scale_from_modules(self, model):
         layer_to_scale_map = {}
@@ -103,7 +107,8 @@ class TestScalingAdapters:
         return layer_to_scale_map
 
     def test_rescale_adapter_scale(self, tokenizer):
-        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
+        with hub_online_once("peft-internal-testing/opt-125m"):
+            model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         lora_config = LoraConfig(
             r=4,
             lora_alpha=4,
@@ -142,7 +147,8 @@ class TestScalingAdapters:
         assert torch.allclose(logits_before_scaling, logits_after_scaling)
 
     def test_wrong_scaling_datatype(self):
-        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
+        with hub_online_once("peft-internal-testing/opt-125m"):
+            model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         lora_config = LoraConfig(
             r=4,
             lora_alpha=4,
@@ -161,7 +167,8 @@ class TestScalingAdapters:
                 pass
 
     def test_not_lora_model(self):
-        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
+        with hub_online_once("peft-internal-testing/opt-125m"):
+            model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
 
         # we expect a value error here because the model
         # does not have lora layers
@@ -170,7 +177,8 @@ class TestScalingAdapters:
                 pass
 
     def test_scaling_set_to_zero(self, tokenizer):
-        base_model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
+        with hub_online_once("peft-internal-testing/opt-125m"):
+            base_model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         inputs = tokenizer("hello world", return_tensors="pt")
 
         base_model.eval()
@@ -246,14 +254,16 @@ class TestScalingAdapters:
     def test_transformers_pipeline(self, tmp_path, tokenizer):
         # this uses a transformers model that loads the adapter directly
         model_id = "peft-internal-testing/opt-125m"
-        model = AutoModelForCausalLM.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
         config = LoraConfig(init_lora_weights=False)
         model = get_peft_model(model, config)
         model.save_pretrained(tmp_path / "opt-lora")
         del model
 
         # load directly into transformers model
-        model = AutoModelForCausalLM.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
         model.load_adapter(tmp_path / "opt-lora")
 
         inputs = tokenizer("hello world", return_tensors="pt")
@@ -282,7 +292,8 @@ class TestScalingAdapters:
         assert torch.allclose(logits_before_scaling, logits_after_scaling)
 
     def test_multi_adapters(self, tokenizer):
-        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
+        with hub_online_once("peft-internal-testing/opt-125m"):
+            model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         lora_config = LoraConfig(
             r=4,
             lora_alpha=4,
@@ -323,7 +334,8 @@ class TestScalingAdapters:
         assert torch.allclose(logits_before, logits_after)
 
     def test_rank_alpha_pattern(self, tokenizer):
-        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
+        with hub_online_once("peft-internal-testing/opt-125m"):
+            model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         lora_config = LoraConfig(
             r=4,
             lora_alpha=4,
@@ -364,7 +376,8 @@ class TestScalingAdapters:
         assert torch.allclose(logits_before_scaling, logits_after_scaling)
 
     def test_merging_adapter(self, tokenizer):
-        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
+        with hub_online_once("peft-internal-testing/opt-125m"):
+            model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         lora_config = LoraConfig(
             r=4,
             lora_alpha=4,
@@ -516,7 +529,7 @@ class TestDoraCaching:
     def test_dora_caching_linear(self):
         # ensure that the results don't change due to caching
         inputs = torch.arange(10).view(1, -1).to(self.device)
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         config = LoraConfig(init_lora_weights=False, use_dora=True)
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
@@ -525,7 +538,7 @@ class TestDoraCaching:
     def test_dora_caching_embedding(self):
         # ensure that the results don't change due to caching
         inputs = torch.arange(10).view(1, -1).to(self.device)
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         config = LoraConfig(init_lora_weights=False, use_dora=True, target_modules=["model.embed_tokens"])
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)

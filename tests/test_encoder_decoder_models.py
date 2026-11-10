@@ -38,6 +38,7 @@ from peft import (
     MultitaskPromptTuningConfig,
     OFTConfig,
     OSFConfig,
+    PacaConfig,
     PeanutConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
@@ -255,6 +256,14 @@ ALL_CONFIGS = [
         },
     ),
     (
+        PacaConfig,
+        {
+            "r": 2,
+            "task_type": "SEQ_2_SEQ_LM",
+            "target_modules": None,
+        },
+    ),
+    (
         ShiraConfig,
         {
             "r": 1,
@@ -429,6 +438,12 @@ class TestEncoderDecoderModels(PeftCommonTester):
     def test_save_pretrained(self, model_id, config_cls, config_kwargs):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_load_adapter_no_warning(self, model_id, config_cls, config_kwargs, recwarn, tmp_path):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_load_no_warning(model_id, config_cls, config_kwargs, recwarn, tmp_path)
 
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)

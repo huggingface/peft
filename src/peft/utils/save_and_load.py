@@ -24,6 +24,7 @@ import huggingface_hub
 import torch
 from huggingface_hub import file_exists, hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError, LocalEntryNotFoundError
+from packaging.version import parse
 from safetensors.torch import load_file as safe_load_file
 from transformers.utils import http_user_agent
 
@@ -129,20 +130,69 @@ def _get_tp_info(model) -> TpInfo | None:
 
 
 def _filter_state_dict_for_adapter_name(
-    state_dict: dict[str, torch.Tensor], unwanted_adapter_names: list[str]
+    state_dict: dict[str, torch.Tensor],
+    unwanted_adapter_names: list[str],
+    model: torch.nn.Module,
 ) -> dict[str, torch.Tensor]:
-    """Filter the state dict to remove keys that correspond to the unwanted adapter
+    """Filter the state dict to remove keys that correspond to the unwanted adapter.
 
-    Use a negative filter to avoid removing keys that correspond to keys that contain no adapter name at all, e.g. when
-    using modules_to_save.
+    A key is dropped if it ends with an unwanted adapter name, or if the segment immediately after a tuner prefix (e.g.
+    `lora_A`, `lora_B`, `ia3_l`) is an unwanted adapter name. Both checks are needed: the suffix check covers
+    adapter-keyed entries whose container is not a parameter or buffer, thus not part of the structural prefixes (the
+    SHiRA indices live in a plain dict on the layer), while the positional check avoids dropping the selected adapter's
+    tensors when an unwanted adapter's *name* happens to equal a base-model module path segment (e.g. an adapter called
+    "mlp"). Keys outside any tuner prefix are kept unless they end with an unwanted adapter name; auxiliary modules
+    such as `modules_to_save` are resolved per adapter downstream.
     """
-    return {
-        k: v
-        for k, v in state_dict.items()
-        if not any(
-            f".{adapter_name}." in k or k.endswith(f".{adapter_name}") for adapter_name in unwanted_adapter_names
-        )
-    }
+    # avoid circular import
+    from peft.tuners.tuners_utils import _get_tuner_state_dict_key_prefixes
+
+    prefixes = _get_tuner_state_dict_key_prefixes(model)
+    unwanted = set(unwanted_adapter_names)
+
+    filtered_state_dict = {}
+    for key, value in state_dict.items():
+        if any(key.endswith(f".{adapter_name}") for adapter_name in unwanted):
+            continue
+
+        keep = True
+        for prefix in prefixes:
+            prefix = prefix + "."
+            if not key.startswith(prefix):
+                continue
+
+            suffix = key[len(prefix) :]
+            adapter_name = suffix.partition(".")[0]
+            if adapter_name in unwanted:
+                keep = False
+                break
+
+        if keep:
+            filtered_state_dict[key] = value
+
+    return filtered_state_dict
+
+
+def _gather_state_dict_for_save(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """Gather DTensors into full CPU tensors. All participating ranks must call this function."""
+    # Adapted from transformers.distributed.tensor_parallel.gather_state_dict_for_save, without unused TP arguments.
+    # Vendored so FSDP2 saving also works with Transformers versions that predate DTensor TP.
+    # https://github.com/huggingface/transformers/blob/144ecf007b8b4f2910da104c84a79801db6985a6/src/transformers/distributed/tensor_parallel.py#L749-L767
+    from torch.distributed.tensor import DTensor
+
+    # Ordinary state dicts retain their tensors' device, layout and autograd behavior.
+    if not any(isinstance(tensor, DTensor) for tensor in state_dict.values()):
+        return state_dict
+
+    gathered = {}
+    for key, tensor in state_dict.items():
+        if isinstance(tensor, torch.Tensor):
+            if isinstance(tensor, DTensor):
+                tensor = tensor.full_tensor()
+            gathered[key] = tensor.detach().cpu().contiguous()
+        else:
+            gathered[key] = tensor
+    return gathered
 
 
 def get_peft_model_state_dict(
@@ -157,6 +207,10 @@ def get_peft_model_state_dict(
 
     This only includes the PEFT parameters, not the parameters of the base model. Thus the returned `state_dict` is
     generally small compared to the full model size. To retrieve the full `state_dict`, just call `model.state_dict()`.
+
+    If the selected entries contain distributed tensors (e.g. FSDP2 or DTensor TP), all participating ranks must call
+    this function: gathering those entries into full tensors is a collective. Unselected base model weights remain
+    sharded.
 
     Note that the adapter name is removed from the `state_dict`, as this is just an arbitrary name that can be changed
     when loading the adapter. So e.g. if the adapter name is `'default'` and the original key is
@@ -193,7 +247,9 @@ def get_peft_model_state_dict(
     if not config.is_prompt_learning:
         # Prompt learning methods don't support multiple adapters and hence don't have the adapter name in the Parameter
         # name.
-        state_dict_filtered_for_adapter_name = _filter_state_dict_for_adapter_name(state_dict, unwanted_adapter_names)
+        state_dict_filtered_for_adapter_name = _filter_state_dict_for_adapter_name(
+            state_dict, unwanted_adapter_names, model
+        )
         if len(state_dict_filtered_for_adapter_name) > 0:
             # If, after filtering the state dict for the adapter name, we end up with an empty state dict, it means that
             # the adapter weights are not stored with the adapter name as suffix. This can happen e.g. for adaption
@@ -221,12 +277,6 @@ def get_peft_model_state_dict(
         if keys_starting_with_prefix:
             tp_plan = {f"{prefix}{k}": v for k, v in tp_plan.items()}
         state_dict = gather_state_dict_for_save(state_dict, tp_plan, tp_info.device_mesh, tp_info.tp_size)
-    elif is_transformers_dtensor_tp and getattr(model, "_tp_size", None):
-        # DTensor TP integration: the adapter weights are already `DTensor` instances, so they carry their own
-        # device_mesh/placements and can be gathered without needing any `_tp_info`.
-        from transformers.integrations.tensor_parallel import gather_state_dict_for_save
-
-        state_dict = gather_state_dict_for_save(state_dict, {}, None, None)
 
     # TUNER SPECIFIC CODE
     if config.peft_type not in PEFT_TYPE_TO_TUNER_MAPPING:
@@ -342,6 +392,11 @@ def get_peft_model_state_dict(
                     to_return.update({k: v for k, v in state_dict.items() if k.startswith(embedding_prefix)})
     elif save_embedding_layers:
         warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
+
+    if torch.distributed.is_available() and parse(torch.__version__) >= parse("2.5"):
+        # FSDP2 has no TP metadata. Gather only selected entries using each tensor's mesh and placements, so
+        # unselected base model weights remain sharded.
+        to_return = _gather_state_dict_for_save(to_return)
 
     # REMOVE ADAPTER NAME
     # Key formats can be method-specific, so the removal is delegated to the tuner class, see

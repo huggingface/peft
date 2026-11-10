@@ -16,6 +16,7 @@ import inspect
 import json
 import os
 import pickle
+import sys
 import tempfile
 import warnings
 
@@ -48,6 +49,7 @@ from peft import (
     MultitaskPromptTuningConfig,
     OFTConfig,
     OSFConfig,
+    PacaConfig,
     PeanutConfig,
     PeftConfig,
     PeftType,
@@ -122,6 +124,7 @@ ALL_CONFIG_CLASSES = (
     (PeanutConfig, {}),
     (RoadConfig, {}),
     (ShadowConfig, {}),
+    (PacaConfig, {}),
     (ShiraConfig, {}),
     (SupertuningConfig, {}),
     (TinyLoraConfig, {}),
@@ -143,6 +146,14 @@ LAYER_INDEXING_CONFIG_CLASSES = [
     (config_class, mandatory_kwargs)
     for config_class, mandatory_kwargs in ALL_CONFIG_CLASSES
     if {"layers_to_transform", "layers_pattern"} <= set(inspect.signature(config_class).parameters)
+]
+
+
+# Config classes that support selecting layers by index (`layers_to_transform`).
+LAYERS_TO_TRANSFORM_CONFIG_CLASSES = [
+    (config_class, mandatory_kwargs)
+    for config_class, mandatory_kwargs in ALL_CONFIG_CLASSES
+    if hasattr(config_class, "layers_to_transform")
 ]
 
 
@@ -249,6 +260,28 @@ class TestPeftConfig:
 
             config_from_json = config_class.from_json_file(config_path)
             assert config.to_dict() == config_from_json
+
+    @pytest.mark.skipif(
+        not sys.platform.startswith("win"), reason="locale-encoding regression only manifests on Windows"
+    )
+    def test_from_json_file_utf8_non_ascii(self, tmp_path):
+        # Config files are UTF-8; without an explicit encoding, reading them on Windows falls back
+        # to the locale encoding (e.g. cp936), crashing or corrupting literal non-ASCII values
+        # (e.g. a hand-edited config or one written by another tool with ensure_ascii=False).
+        value = "汉 模型 🤗 Ё"
+        config_path = os.path.join(tmp_path, "adapter_config.json")
+        # Write the config with literal (non-escaped) non-ASCII characters.
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump({"base_model_name_or_path": value, "peft_type": "LORA"}, f, ensure_ascii=False)
+
+        loaded = LoraConfig.from_json_file(config_path)
+        assert loaded["base_model_name_or_path"] == value
+
+        # Roundtrip through save_pretrained to lock in the write-side encoding pin as well.
+        roundtrip_dir = os.path.join(tmp_path, "roundtrip")
+        LoraConfig(base_model_name_or_path=value).save_pretrained(roundtrip_dir)
+        reloaded = LoraConfig.from_json_file(os.path.join(roundtrip_dir, "adapter_config.json"))
+        assert reloaded["base_model_name_or_path"] == value
 
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
     def test_to_dict(self, config_class, mandatory_kwargs):
@@ -366,19 +399,15 @@ class TestPeftConfig:
             assert isinstance(config_from_pretrained.target_modules, set)
 
     def test_regex_with_layer_indexing_lora(self):
-        # This test checks that an error is raised if `target_modules` is a regex expression and `layers_to_transform` or
-        # `layers_pattern` are not None
+        # This test checks that an error is raised if `target_modules` is a regex expression and `layers_pattern` is not
+        # None (`layers_to_transform` is covered by `test_config_layers_to_transform_with_str_target_modules_raises`)
 
-        invalid_config1 = {"target_modules": ".*foo", "layers_to_transform": [0]}
-        invalid_config2 = {"target_modules": ".*foo", "layers_pattern": ["bar"]}
+        invalid_config = {"target_modules": ".*foo", "layers_pattern": ["bar"]}
 
         valid_config = {"target_modules": ["foo"], "layers_pattern": ["bar"], "layers_to_transform": [0]}
 
-        with pytest.raises(ValueError, match="`layers_to_transform` cannot be used when `target_modules` is a str."):
-            LoraConfig(**invalid_config1)
-
         with pytest.raises(ValueError, match="`layers_pattern` cannot be used when `target_modules` is a str."):
-            LoraConfig(**invalid_config2)
+            LoraConfig(**invalid_config)
 
         # should run without errors
         LoraConfig(**valid_config)
@@ -579,6 +608,18 @@ class TestPeftConfig:
         assert config.layers_to_transform == 0
         assert config.layers_pattern == "model.layers"
 
+    @pytest.mark.parametrize("target_modules", [r".*\.q_proj", "all-linear"])
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", LAYERS_TO_TRANSFORM_CONFIG_CLASSES)
+    def test_config_layers_to_transform_with_str_target_modules_raises(
+        self, config_class, mandatory_kwargs, target_modules
+    ):
+        # `layers_to_transform` has no effect when `target_modules` is a str (regex or "all-linear"), so it must be
+        # rejected
+        kwargs = {**mandatory_kwargs, "target_modules": target_modules, "layers_to_transform": [0, 1]}
+        msg = "`layers_to_transform` cannot be used when `target_modules` is a str."
+        with pytest.raises(ValueError, match=msg):
+            config_class(**kwargs)
+
     @pytest.mark.parametrize("version", ["0.10", "0.17.0", "1"])
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
     def test_peft_version_is_stored(self, version, config_class, mandatory_kwargs, monkeypatch, tmp_path):
@@ -715,6 +756,15 @@ class TestPeftConfig:
         for key in ("rank_pattern", "alpha_pattern"):
             config_dict[key] = dict(sorted(config_dict[key].items()))
         assert json.dumps(config_dict, indent=2) == json.dumps(config_dict, indent=2, sort_keys=True)
+
+    def test_save_pretrained_keeps_order_of_paca_indices_pattern(self, tmp_path):
+        # as for rank_pattern, the first key of paca_indices_pattern that matches a module wins
+        config = PacaConfig(paca_indices_pattern={"module.foo": [0, 1], "foo": [2]})
+        config.save_pretrained(tmp_path)
+        config_dict = json.loads((tmp_path / "adapter_config.json").read_text())
+
+        assert list(config_dict["paca_indices_pattern"]) == ["module.foo", "foo"]
+        assert list(PacaConfig.from_pretrained(tmp_path).paca_indices_pattern) == ["module.foo", "foo"]
 
 
 class TestLoraNestedConfigRoundTrip:
