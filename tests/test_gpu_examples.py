@@ -3209,7 +3209,6 @@ class TestPiSSA:
         assert not torch.allclose(output_finetuned_pissa, output_converted, atol=tol, rtol=tol)
 
 
-@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
 @pytest.mark.single_gpu_tests
 @require_bitsandbytes
 class TestReplaceLoraWeightsPissa:
@@ -3309,6 +3308,7 @@ class TestReplaceLoraWeightsPissa:
             replace_lora_weights_pissa(model, model_path=model_path)
 
 
+@pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
 @pytest.mark.single_gpu_tests
 @require_bitsandbytes
 class TestOLoRA:
