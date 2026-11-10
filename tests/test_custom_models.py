@@ -4716,6 +4716,72 @@ class TestPeftCustomModel(PeftCommonTester):
         with torch.no_grad():
             torch.testing.assert_close(reloaded(inputs), expected)
 
+    @pytest.mark.parametrize(
+        ("left_selector", "right_selector", "expected_targets"),
+        [
+            pytest.param(
+                ([0, 1], "layers"),
+                ([2, 3], "layers"),
+                {"layers.0.lin0", "layers.1.lin0", "layers.2.lin0", "layers.3.lin0"},
+                id="different-layer-indices",
+            ),
+            pytest.param(
+                (0, "layers"),
+                (0, "other_layers"),
+                {"layers.0.lin0", "other_layers.0.lin0"},
+                id="different-layer-patterns",
+            ),
+        ],
+    )
+    @pytest.mark.parametrize("adapters", [["left", "right"], ["right", "left"]], ids=["forward", "reverse"])
+    def test_add_weighted_adapter_respects_lora_layer_selection(
+        self, left_selector, right_selector, expected_targets, adapters, tmp_path
+    ):
+        torch.manual_seed(12)
+        base_model = nn.Sequential()
+        base_model.add_module("layers", nn.Sequential(*(Block() for _ in range(5))))
+        base_model.add_module("other_layers", nn.Sequential(Block(), Block()))
+        base_model.to(self.torch_device)
+        pristine_model = copy.deepcopy(base_model)
+
+        left = LoraConfig(
+            r=2,
+            target_modules=["lin0"],
+            init_lora_weights=False,
+            layers_to_transform=left_selector[0],
+            layers_pattern=left_selector[1],
+        )
+        right = LoraConfig(
+            r=2,
+            target_modules=["lin0"],
+            init_lora_weights=False,
+            layers_to_transform=right_selector[0],
+            layers_pattern=right_selector[1],
+        )
+        model = get_peft_model(base_model, left, adapter_name="left")
+        model.add_adapter("right", right)
+        model.eval()
+        model.base_model.set_adapter(["left", "right"])
+        inputs = torch.randn(4, 10, device=self.torch_device)
+        with torch.no_grad():
+            expected = model(inputs)
+
+        model.add_weighted_adapter(adapters, [1.0, 1.0], "combined", combination_type="cat")
+        model.set_adapter("combined")
+        actual_targets = {
+            name
+            for name, layer in base_model.named_modules()
+            if isinstance(layer, lora.LoraLayer) and "combined" in layer.lora_A
+        }
+        assert actual_targets == expected_targets
+        with torch.no_grad():
+            torch.testing.assert_close(model(inputs), expected)
+
+        model.save_pretrained(tmp_path, selected_adapters=["combined"], save_embedding_layers=False)
+        reloaded = PeftModel.from_pretrained(pristine_model, tmp_path / "combined")
+        with torch.no_grad():
+            torch.testing.assert_close(reloaded(inputs), expected)
+
     def test_add_weighted_adapter_cat_with_rank_pattern(self):
         # Tests against a bug described in #2512, which resulted from the rank_pattern not being taken into account.
         config0 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 2})
