@@ -3250,6 +3250,8 @@ class TestPeftCustomModel(PeftCommonTester):
         model.save_pretrained(tmp_path, save_embedding_layers=False)
         del model
 
+        # note: don't parametrize over low_cpu_mem_usage because the common part above is relatively slow, so running it
+        # twice would impact CI runtime
         for low_cpu_mem_usage in (False, True):
             model = self.transformers_class.from_pretrained(model_id, dtype=dtype).to(self.torch_device)
             model = PeftModel.from_pretrained(

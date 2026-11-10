@@ -76,6 +76,9 @@ class TestShardedBaseLayerShapes:
         os.environ.update(RANK=str(rank), LOCAL_RANK=str(rank), WORLD_SIZE="2")
         dist.init_process_group("gloo", init_method=f"file://{init_file}", rank=rank, world_size=2)
         try:
+            # Note: Run cases in a loop instead of running separate parametrized tests to save the time for test setup
+            # and teardown, which is signifcant. For this to work, the cases should be able to run without affecting one
+            # another.
             for args in cases:
                 # ensure that rng is reset for each test case
                 with torch.random.fork_rng(devices=[]):
