@@ -14,6 +14,14 @@
 
 """Create a dummy LoRA config from adapter directories or Hub IDs, without loading model weights.
 
+The purpose of this helper function is to create a dummy LoRA config which can be used to initialze a LoRA model before
+hotswapping different LoRA adapters (see https://huggingface.co/docs/peft/main/en/package_reference/hotswap). One issue
+with hotswapping is that the first LoRA adapter that is loaded needs to install LoRA weights on all layers that the
+later, hotswapped LoRAs will target. If these LoRAs target disjunct layers, none of them can serve as the first
+LoRA. This helper function creates a dummy LoRA that targets the union of the layers of all the individual LoRAs. It
+also pre-allocates LoRA weights with a sufficiently large rank.
+
+
 Usage:
 
 ```sh
