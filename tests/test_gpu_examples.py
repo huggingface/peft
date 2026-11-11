@@ -5421,19 +5421,12 @@ class TestUnshardedLoRASaveUnderZeRO3:
     """
 
     @pytest.mark.single_gpu_tests
-    @require_torch_gpu
     def test_zero3_ungathered_save_warns_and_gather_succeeds(self, tmp_path):
         deepspeed = pytest.importorskip("deepspeed")
+        if dist.is_initialized():
+            _teardown_dist()
+        _setup_dist(rank=0, world_size=1, port=29555)
 
-        os.environ.setdefault("MASTER_ADDR", "localhost")
-        os.environ.setdefault("MASTER_PORT", "29555")
-        os.environ.setdefault("LOCAL_RANK", "0")
-        os.environ.setdefault("RANK", "0")
-        os.environ.setdefault("WORLD_SIZE", "1")
-
-        we_initialized_pg = not dist.is_initialized()
-        if we_initialized_pg:
-            init_process_group(world_size=1, rank=0)
         try:
             ds_config = {"train_batch_size": dist.get_world_size(), "zero_optimization": {"stage": 3}}
             with deepspeed.zero.Init(config_dict_or_path=ds_config):
@@ -5452,8 +5445,34 @@ class TestUnshardedLoRASaveUnderZeRO3:
             lora_a = next(v for k, v in sd.items() if "lora_A" in k)
             assert lora_a.ndim == 2 and all(d > 0 for d in lora_a.shape)
         finally:
-            if we_initialized_pg and dist.is_initialized():
-                dist.destroy_process_group()
+            _teardown_dist()
+
+    @pytest.mark.single_gpu_tests
+    @pytest.mark.parametrize("lora_bias", [True, "all", "lora_only"])
+    def test_zero3_gathered_save_doesnt_warn(self, tmp_path, recwarn, lora_bias):
+        deepspeed = pytest.importorskip("deepspeed")
+        if dist.is_initialized():
+            _teardown_dist()
+        _setup_dist(rank=0, world_size=1, port=29555)
+
+        try:
+            ds_config = {"train_batch_size": dist.get_world_size(), "zero_optimization": {"stage": 3}}
+            with deepspeed.zero.Init(config_dict_or_path=ds_config):
+                model = get_peft_model(
+                    SimpleModel(),
+                    LoraConfig(target_modules=["linear_transform"], r=8, lora_bias=lora_bias),
+                )
+            engine, *_ = deepspeed.initialize(model=model, config=ds_config, model_parameters=model.parameters())
+
+            lora_params = [p for n, p in engine.module.named_parameters() if "lora_A" in n or "lora_B" in n]
+            with deepspeed.zero.GatheredParameters(lora_params, modifier_rank=0):
+                engine.module.save_pretrained(tmp_path / "gathered")
+
+            for warning in recwarn.list:
+                assert "not gathered" not in str(warning.message)
+
+        finally:
+            _teardown_dist()
 
 
 class TestBOFT:
@@ -6238,7 +6257,7 @@ class TestHotSwapping:
         # prepare_model_for_compiled_hotswap, as we use the same LoRA shapes. Due to (re-)compilation, the test is
         # relatively slow.
         atol, rtol = 1e-6, 1e-6
-        model_id = "trl-internal-testing/tiny-GptOssForCausalLM"
+        model_id = "peft-internal-testing/tiny-GptOssForCausalLM"
         inputs = torch.arange(10).view(1, -1).to(self.torch_device)
 
         def strong_init(model):
@@ -6579,7 +6598,7 @@ class TestDtypeAutocastBnb:
 
     """
 
-    model_id = "trl-internal-testing/tiny-Qwen2ForCausalLM-2.5"
+    model_id = "peft-internal-testing/tiny-Qwen2ForCausalLM-2.5"
     # no need to check each possible peft type, a selection should be enough
     peft_types_to_test = ["lora", "vera", "lora-target-param"]
 

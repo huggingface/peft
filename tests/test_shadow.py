@@ -47,7 +47,7 @@ from .testing_utils import hub_online_once
 
 
 LLAMA_CAUSAL_MODEL_ID = "peft-internal-testing/tiny-random-LlamaForCausalLM"
-LLAMA_SEQCLS_MODEL_ID = "trl-internal-testing/tiny-LlamaForSequenceClassification-3.2"
+LLAMA_SEQCLS_MODEL_ID = "peft-internal-testing/tiny-LlamaForSequenceClassification-3.2"
 
 
 def make_llama_causal():

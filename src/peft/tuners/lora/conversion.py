@@ -24,6 +24,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME
+from peft.utils.integrations import remove_torch_wrapper_names
 from peft.utils.other import AuxiliaryTrainingWrapper
 
 from .config import LoraConfig
@@ -320,6 +321,7 @@ def convert_to_lora(
             )
 
         lora_A, lora_B, effective_rank = convert_module_to_lora(module, rank=rank, adapter_name=adapter_name)
+        name = remove_torch_wrapper_names(name)
         if effective_rank == 0:
             # This shouldn't really happen, as we ensure that the rank is greater than 0 (int) or, for thresholds
             # (float), at least one SV is included. But better be safe than sorry, as, in principle, it is fine to
@@ -364,9 +366,7 @@ def convert_to_lora(
     model_state_dict = model.state_dict()
     for module_name, module in model.named_modules():
         if isinstance(module, AuxiliaryTrainingWrapper):
-            # FSDP state dicts omit this wrapper prefix, so align the module name before selecting its keys.
-            if module_name.startswith("_fsdp_wrapped_module."):
-                module_name = module_name.removeprefix("_fsdp_wrapped_module.")
+            module_name = remove_torch_wrapper_names(module_name)
             # Each wrapper defines its own adapter-specific serialization contract.
             module_state_dict = {
                 key.removeprefix(f"{module_name}."): value

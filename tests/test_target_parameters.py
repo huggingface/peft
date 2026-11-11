@@ -99,7 +99,7 @@ ALL_CONFIGS = [
     ###########
     # target down_proj
     (
-        "trl-internal-testing/tiny-GptOssForCausalLM",
+        "peft-internal-testing/tiny-GptOssForCausalLM",
         LoraConfig,
         {
             "task_type": TaskType.CAUSAL_LM,
@@ -112,7 +112,7 @@ ALL_CONFIGS = [
     ),
     # target gate_up_proj and down_proj, but not on the same module
     (
-        "trl-internal-testing/tiny-GptOssForCausalLM",
+        "peft-internal-testing/tiny-GptOssForCausalLM",
         LoraConfig,
         {
             "task_type": TaskType.CAUSAL_LM,
@@ -126,7 +126,7 @@ ALL_CONFIGS = [
     ),
     # target down_proj and gate_up_proj on the same module
     (
-        "trl-internal-testing/tiny-GptOssForCausalLM",
+        "peft-internal-testing/tiny-GptOssForCausalLM",
         LoraConfig,
         {
             "task_type": "CAUSAL_LM",
@@ -143,7 +143,7 @@ ALL_CONFIGS = [
     ),
     # target q_proj, v_proj as modules, and down_proj as parameter
     (
-        "trl-internal-testing/tiny-GptOssForCausalLM",
+        "peft-internal-testing/tiny-GptOssForCausalLM",
         LoraConfig,
         {
             "task_type": TaskType.CAUSAL_LM,
@@ -163,7 +163,7 @@ class MyAutoModelForCausalLM(AutoModelForCausalLM):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(*args, **kwargs)
 
-        if args[0] == "trl-internal-testing/tiny-GptOssForCausalLM":
+        if args[0] == "peft-internal-testing/tiny-GptOssForCausalLM":
             # model is bf16, which trips up some tests that require tight tolerances
             with torch.no_grad():
                 model.float()
@@ -580,7 +580,7 @@ class TestTargetParameters:
         # There was an issue with the caching of _LoraParameterProxy not working correctly. This test checks that the
         # results returned from the forward call are all identical to ensure they're not recomputed each time.
         torch.manual_seed(0)
-        model_id = "trl-internal-testing/tiny-GptOssForCausalLM"
+        model_id = "peft-internal-testing/tiny-GptOssForCausalLM"
 
         tensor_storage = []
 
@@ -621,7 +621,7 @@ class TestTargetParameters:
         # For target parameters, the layer type is not known. This is fine, as the in_features and out_features are
         # derived from the targeted parameter shape. But we need to ensure that there is no warning about the unknown
         # layer type.
-        model_id = "trl-internal-testing/tiny-GptOssForCausalLM"
+        model_id = "peft-internal-testing/tiny-GptOssForCausalLM"
         with hub_online_once(model_id):
             model0 = AutoModelForCausalLM.from_pretrained(model_id)
             config = LoraConfig(
