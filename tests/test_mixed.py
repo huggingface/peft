@@ -41,6 +41,8 @@ from peft import (
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
+from .test_custom_models import ModelMha
+
 
 class SimpleNet(nn.Module):
     def __init__(self, bias=True):
@@ -66,6 +68,14 @@ def _param_name_func(testcase_func, param_num, params):
     if name0 != name1:
         return f"{testcase_func.__name__}_{param_num}_{name0}_{name1}"
     return f"{testcase_func.__name__}_{param_num}_{name0}_x2"
+
+
+# fresh configs per test, as get_peft_model mutates them; OFT does not commute with the additive methods
+SAME_LAYER_CONFIG_FACTORIES = {
+    "Lora": lambda: LoraConfig(target_modules=["lin0"], init_lora_weights=False),
+    "OFT": lambda: OFTConfig(target_modules=["lin0"], init_weights=False, r=0, oft_block_size=2),
+    "LoHa": lambda: LoHaConfig(target_modules=["lin0"], init_weights=False),
+}
 
 
 class TestMixedAdapterTypes(unittest.TestCase):
@@ -608,6 +618,60 @@ class TestMixedAdapterTypes(unittest.TestCase):
         output_unloaded = model_unloaded(input)
         assert torch.isfinite(output_unloaded).all()
         assert torch.allclose(output_base, output_unloaded, atol=atol, rtol=rtol)
+
+    @parameterized.expand(
+        ["_".join(names) for r in (2, 3) for names in itertools.permutations(SAME_LAYER_CONFIG_FACTORIES, r=r)]
+    )
+    def test_nested_same_layer_merge_order(self, config_names):
+        # Adapters of different types targeting the same layer are nested, with the innermost adapter being applied
+        # first in the forward pass. Since OFT is not commutative with other adapters, merging must follow the same
+        # order, see #4048.
+        config_names = config_names.split("_")
+        atol = 1e-4
+        rtol = 1e-4
+        input = torch.arange(90).reshape(9, 10).to(self.torch_device)
+        output_base = self._get_model(SimpleNet)(input)
+
+        adapter_names = [f"adapter{i}" for i in range(len(config_names))]
+        peft_model = self._get_model(
+            SimpleNet, SAME_LAYER_CONFIG_FACTORIES[config_names[0]](), adapter_names[0], seed=0
+        )
+        for i, (config_name, adapter_name) in enumerate(zip(config_names[1:], adapter_names[1:]), start=1):
+            torch.manual_seed(i)
+            peft_model.add_adapter(adapter_name, SAME_LAYER_CONFIG_FACTORIES[config_name]())
+        peft_model.set_adapter(adapter_names)
+        output_mixed = peft_model(input)
+        assert not torch.allclose(output_base, output_mixed, atol=atol, rtol=rtol)
+
+        model_copy = copy.deepcopy(peft_model)
+        base_weight = model_copy.base_model.model.lin0.get_base_layer().weight.detach().clone()
+        model_copy.merge_adapter()
+        assert torch.allclose(output_mixed, model_copy(input), atol=atol, rtol=rtol)
+        model_copy.unmerge_adapter()
+        assert torch.allclose(output_mixed, model_copy(input), atol=atol, rtol=rtol)
+        assert torch.allclose(
+            model_copy.base_model.model.lin0.get_base_layer().weight, base_weight, atol=atol, rtol=rtol
+        )
+
+        output_merged = peft_model.merge_and_unload()(input)
+        assert torch.allclose(output_mixed, output_merged, atol=atol, rtol=rtol)
+
+    def test_merge_adapter_mha(self):
+        # The LoRA MultiheadAttention layer also merges its out_proj child, so only nested base_layer chains may be
+        # reordered when merging.
+        atol = 1e-4
+        rtol = 1e-4
+        input = torch.rand(9, 2, 10).to(self.torch_device)
+        peft_model = self._get_model(ModelMha, LoraConfig(target_modules=["mha"], init_lora_weights=False), "adapter0")
+        torch.manual_seed(1)
+        peft_model.add_adapter("adapter1", LoHaConfig(target_modules=["lin0"], init_weights=False))
+        peft_model.set_adapter(["adapter0", "adapter1"])
+        output_mixed = peft_model(input)
+
+        peft_model.merge_adapter()
+        assert torch.allclose(output_mixed, peft_model(input), atol=atol, rtol=rtol)
+        peft_model.unmerge_adapter()
+        assert torch.allclose(output_mixed, peft_model(input), atol=atol, rtol=rtol)
 
     def test_delete_adapter(self):
         atol = 1e-5

@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import warnings
-from itertools import pairwise
 from typing import Any, Optional, Union
 
 import torch
@@ -27,6 +26,7 @@ from peft.tuners.tuners_utils import (
     BaseTunerLayer,
     _check_adapters_not_merged,
     _delete_auxiliary_adapter,
+    onload_layer,
 )
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
@@ -57,6 +57,15 @@ Layers = (
     oft.OFTLayer,
     shira.ShiraLayer,
 )
+
+
+def _get_nested_tuner_layers(module: nn.Module) -> list[nn.Module]:
+    # tuner layers nested via base_layer, innermost first, i.e. in the order in which they are applied in the forward pass
+    layers = []
+    while hasattr(module, "base_layer"):
+        layers.append(module)
+        module = module.base_layer
+    return layers[::-1]
 
 
 class MixedModel(BaseTuner):
@@ -224,6 +233,23 @@ class MixedModel(BaseTuner):
             )
         return peft_config
 
+    def merge_adapter(self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False) -> None:
+        """
+        This method merges the adapter layers into the base model. See `BaseTuner.merge_adapter` for details.
+
+        Nested tuner layers are merged innermost first, like in the forward pass. The inherited `unmerge_adapter`
+        unmerges outermost first, which is the inverse.
+        """
+        self._check_merge_allowed()
+        tuner_layers = [module for module in self.model.modules() if isinstance(module, BaseTunerLayer)]
+        nested = {id(module.base_layer) for module in tuner_layers if hasattr(module, "base_layer")}
+        for module in tuner_layers:
+            if id(module) in nested:
+                continue
+            for layer in _get_nested_tuner_layers(module):
+                with onload_layer(layer):
+                    layer.merge(adapter_names=adapter_names, safe_merge=safe_merge)
+
     def _unload_and_optionally_merge(
         self,
         merge=True,
@@ -234,18 +260,6 @@ class MixedModel(BaseTuner):
         if merge:
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge layers when the model is gptq quantized")
-
-        def merge_recursively(module):
-            # helper function to recursively merge the base_layer of the target
-            path = []
-            layer = module
-            while hasattr(layer, "base_layer"):
-                path.append(layer)
-                layer = layer.base_layer
-            for layer_before, layer_after in pairwise(path):
-                layer_after.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-                layer_before.base_layer = layer_after.base_layer
-            module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
 
         key_list = [key for key, _ in self.model.named_modules() if not any(prefix in key for prefix in PREFIXES)]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
@@ -258,7 +272,8 @@ class MixedModel(BaseTuner):
 
             if hasattr(target, "base_layer"):
                 if merge:
-                    merge_recursively(target)
+                    for layer in _get_nested_tuner_layers(target):
+                        layer.merge(safe_merge=safe_merge, adapter_names=adapter_names)
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
             elif isinstance(target, ModulesToSaveWrapper):
                 # save any additional trainable modules part of `modules_to_save`
