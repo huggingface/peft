@@ -249,9 +249,9 @@ class TestConvArguments:
         return torch.randn(batch_size, in_channels, *spatial_size)
 
     def should_skip(self, config, conv_kwargs):
-        kernel_size = conv_kwargs.get("kernel_size", 3)
-        kernel_is_square = isinstance(kernel_size, int) or len(set(kernel_size)) == 1
-        return config.peft_type in {"HRA", "BOFT"} and not kernel_is_square
+        # BOFT and HRA support non-square kernels since the filter size now uses kh * kw
+        # (BOFT: #4152). Keep this hook for methods that still require square kernels.
+        return False
 
     def get_expected_oft_error(self, config, conv_kwargs):
         if config.peft_type != "OFT":
@@ -437,3 +437,76 @@ class TestConvArguments:
         with torch.inference_mode():
             output_unloaded = model(inputs)
         assert torch.allclose(output_unloaded, output_both, atol=atol, rtol=rtol)
+
+
+class TestBoftNonSquareKernel:
+    """Regression tests for BOFT on Conv2d layers with non-square kernels (#4152)."""
+
+    def _get_model_and_inputs(self):
+        class ModelConv2D(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(4, 16, kernel_size=(3, 2))
+
+            def forward(self, x):
+                return self.conv(x)
+
+        torch.manual_seed(0)
+        model = ModelConv2D()
+        inputs = torch.randn(1, 4, 8, 8)
+        return model, inputs
+
+    def test_boft_non_square_kernel_forward(self):
+        # Before the fix, this raised: RuntimeError: shape '[16, 36]' is invalid for input of size 384
+        from peft import BOFTConfig, get_peft_model
+
+        model, inputs = self._get_model_and_inputs()
+        config = BOFTConfig(target_modules=["conv"], boft_block_size=4)
+        model = get_peft_model(model, config).eval()
+        with torch.inference_mode():
+            output = model(inputs)
+        assert output.shape == (1, 16, 6, 7)
+
+    def test_boft_non_square_kernel_merge_unmerge(self):
+        from peft import BOFTConfig, get_peft_model
+
+        model, inputs = self._get_model_and_inputs()
+        config = BOFTConfig(target_modules=["conv"], boft_block_size=4)
+        model = get_peft_model(model, config).eval()
+
+        model.merge_adapter()
+        with torch.inference_mode():
+            output_merged = model(inputs)
+
+        model.unmerge_adapter()
+        with torch.inference_mode():
+            output_unmerged = model(inputs)
+
+        model.merge_and_unload()
+        with torch.inference_mode():
+            output_unloaded = model(inputs)
+
+        atol, rtol = 1e-5, 1e-5
+        assert torch.allclose(output_merged, output_unmerged, atol=atol, rtol=rtol)
+        assert torch.allclose(output_merged, output_unloaded, atol=atol, rtol=rtol)
+
+    def test_boft_square_kernel_unchanged(self):
+        # Square kernels must keep working exactly as before (identical shapes).
+        from peft import BOFTConfig, get_peft_model
+
+        class ModelConv2D(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(4, 16, kernel_size=(3, 3))
+
+            def forward(self, x):
+                return self.conv(x)
+
+        torch.manual_seed(0)
+        model = ModelConv2D()
+        inputs = torch.randn(1, 4, 8, 8)
+        config = BOFTConfig(target_modules=["conv"], boft_block_size=9)
+        model = get_peft_model(model, config).eval()
+        with torch.inference_mode():
+            output = model(inputs)
+        assert output.shape == (1, 16, 6, 6)
