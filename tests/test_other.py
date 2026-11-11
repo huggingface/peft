@@ -14,6 +14,7 @@
 
 import copy
 from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -45,6 +46,7 @@ from peft.utils.other import (
     ModulesToSaveWrapper,
     _get_module_names_tied_with_embedding,
     _get_no_split_modules,
+    infer_device,
     prepare_model_for_kbit_training,
 )
 
@@ -535,6 +537,48 @@ class TestModulesToSaveUnloadOriginalModule:
             # the trained copy is kept
             assert unloaded.lin1 is trained_lin1
             assert torch.allclose(out_unloaded, out_peft, atol=1e-6, rtol=1e-6)
+
+    @pytest.mark.parametrize(
+        "active_adapter, adapter_names",
+        [
+            ("default", ["other"]),
+            ("default", []),
+            ("other", ["other", "default"]),
+        ],
+    )
+    def test_merge_modules_to_save_partial_selection(self, mlp, active_adapter, adapter_names):
+        # Only "default" has a saved lin1 copy. Export must follow adapter_names rather than the active adapter:
+        # ["other"] and [] restore the original lin1, while ["other", "default"] retains the saved copy.
+        x = torch.randn(4, 8)
+        original_lin1 = mlp.lin1
+        model = get_peft_model(mlp, LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])).eval()
+        model.add_adapter("other", LoraConfig(target_modules=["lin0"]))
+        saved_lin1 = model.base_model.model.lin1.modules_to_save["default"]
+        saved_lin1.reset_parameters()
+
+        expected_module = saved_lin1 if "default" in adapter_names else original_lin1
+        # Both backbone adapters are no-ops, so only the selected saved module affects the expected output.
+        expected = expected_module(model.base_model.model.lin0(x))
+        model.set_adapter(active_adapter)
+
+        merged = model.merge_and_unload(adapter_names=adapter_names)
+
+        assert merged.lin1 is expected_module
+        torch.testing.assert_close(merged(x), expected)
+
+    def test_merge_modules_to_save_ambiguous_selection_leaves_model_unchanged(self, mlp):
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_lora_weights=False)
+        other_config = copy.deepcopy(config)
+        model = get_peft_model(mlp, config).eval()
+        model.add_adapter("other", other_config)
+        state_dict = {key: value.clone() for key, value in model.state_dict().items()}
+
+        with pytest.raises(ValueError, match="Only one adapter"):
+            model.merge_and_unload(adapter_names=["default", "other"])
+
+        assert model.state_dict().keys() == state_dict.keys()
+        for key, value in model.state_dict().items():
+            torch.testing.assert_close(value, state_dict[key])
 
     # Trainable tokens are used either alongside LoRA via trainable_token_indices, or as a standalone PEFT method
     @pytest.mark.parametrize(
@@ -1174,3 +1218,30 @@ class TestTaskTypeModulesToSave:
 
         assert user_list == ["my_head"]
         assert model.peft_config["other"].modules_to_save == ["my_head"] + head_names
+
+
+class TestInferDevice:
+    """Verify `infer_device` checks `torch.accelerator` backends (such as `torch_tpu`) before CPU fallback."""
+
+    def test_infer_device_torch_accelerator_tpu(self, monkeypatch):
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        if hasattr(torch.backends, "mps"):
+            monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
+        monkeypatch.setattr("peft.utils.other.mlu_available", False)
+        monkeypatch.setattr("peft.utils.other.is_xpu_available", lambda: False)
+        monkeypatch.setattr("peft.utils.other.is_npu_available", lambda: False)
+
+        class _FakeAccelerator:
+            @staticmethod
+            def is_available():
+                return True
+
+            @staticmethod
+            def current_accelerator():
+                return SimpleNamespace(type="tpu")
+
+        monkeypatch.setattr(torch, "accelerator", _FakeAccelerator, raising=False)
+        assert infer_device() == "tpu"
+
+        monkeypatch.setattr(_FakeAccelerator, "is_available", staticmethod(lambda: False))
+        assert infer_device() == "cpu"

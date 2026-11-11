@@ -1200,6 +1200,13 @@ To encode general knowledge, GenKnowSub subtracts the average of the provided ge
 [[autodoc]] tuners.lora.config.LoftQConfig
 
 
+### PiSSA
+
+#### replace_lora_weights_pissa
+
+[[autodoc]] utils.loftq_utils.replace_lora_weights_pissa
+
+
 ### Eva
 
 #### EvaConfig

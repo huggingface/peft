@@ -251,6 +251,37 @@ def map_cache_to_layer_device_map(model: Any, cache: transformers.Cache) -> None
             cache.value_cache[idx] = cache.value_cache[idx].to(layer_device)
 
 
+def is_activation_checkpointing(model: nn.Module, *, default: bool) -> bool:
+    """Check if a Transformers model has using activation checkpointing.
+
+    This used to be called `is_gradient_checkpointing` but Transformers deprecated it (will be removed in v6):
+
+    - https://github.com/huggingface/transformers/pull/49248
+    - https://github.com/huggingface/transformers/pull/50310
+    """
+    # TODO: remove once Transformers < v6 is no longer supported.
+    sentinel = object()
+    result = getattr(model, "is_activation_checkpointing", sentinel)
+    if result is sentinel:
+        result = getattr(model, "is_gradient_checkpointing", default)
+    return result
+
+
+def activation_checkpointing_enable(model, *args, **kwargs) -> None:
+    """Enable activation checkpointing on a Transformers model.
+
+    This used to be called `gradient_checkpointing_enable` but Transformers deprecated it (will be removed in v6):
+
+    - https://github.com/huggingface/transformers/pull/49248
+    - https://github.com/huggingface/transformers/pull/50310
+
+    The same renaming applies to `gradient_checkpointing_disable` but it's not used in PEFT.
+    """
+    # TODO: remove once Transformers < v6 is no longer supported.
+    meth = getattr(model, "activation_checkpointing_enable", model.gradient_checkpointing_enable)
+    meth(*args, **kwargs)
+
+
 ##################################
 # START: ADAPTED FROM ACCELERATE #
 ##################################
