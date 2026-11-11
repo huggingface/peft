@@ -140,6 +140,121 @@ def add_lora_tp_hooks_dtensor(tp_module: nn.Module, tp_plan_name: str, device_me
     style.install_forward(tp_module, device_mesh)
 
 
+# These initializations replace the LoRA weights of the tied layer (breaking the tie) and/or write its base weight,
+# which is the base weight of the input embedding, too.
+_INIT_LORA_WEIGHTS_INCOMPATIBLE_WITH_TYING = (
+    "pissa",
+    "olora",
+    "corda",
+    "astra",
+    "loftq",
+    "lora_ga",
+    "orthogonal",
+    "mica",
+    "eva",
+)
+
+
+def _get_tied_lora_adapter(embedding: Embedding, adapter_name: str) -> dict[str, torch.Tensor]:
+    # the lora_A/lora_B weights of the tied layer are transposed views of the LoRA weights of the input embedding
+    return {
+        "lora_A": embedding.lora_embedding_B[adapter_name].t(),
+        "lora_B": embedding.lora_embedding_A[adapter_name].t(),
+    }
+
+
+def _get_tied_lora_layers(model: nn.Module, peft_config: LoraConfig, adapter_name: str) -> list[tuple[str, LoraLayer]]:
+    if not getattr(peft_config, "target_modules_to_tie", None):
+        return []
+    return [
+        (name, module)
+        for name, module in model.named_modules()
+        if isinstance(module, LoraLayer)
+        and adapter_name in module.lora_A
+        and BaseTuner._check_tied_module_exists(peft_config, name)
+    ]
+
+
+@contextmanager
+def _retie_lora_layers(model: nn.Module, peft_config: LoraConfig, adapter_name: str):
+    """
+    Context manager to restore the tying of LoRA weights to the LoRA weights of the input embedding after operations
+    that replace the adapter parameters, like casting them to another dtype. Only layers whose LoRA weights are equal
+    to the embedding LoRA weights when entering the context are re-tied, so that adapters with diverged weights that
+    were deliberately loaded untied stay untied.
+    """
+    tied_layers = _get_tied_lora_layers(model, peft_config, adapter_name)
+    embedding = model.get_input_embeddings() if tied_layers else None
+
+    def is_tied(module):
+        for lora_name, weight in _get_tied_lora_adapter(embedding, adapter_name).items():
+            tied_weight = getattr(module, lora_name)[adapter_name].weight
+            if tied_weight.is_meta:
+                continue
+            if (tied_weight.dtype != weight.dtype) or not torch.equal(tied_weight, weight):
+                return False
+        return True
+
+    tied_layers = [module for _, module in tied_layers if is_tied(module)]
+    yield
+    for module in tied_layers:
+        for lora_name, weight in _get_tied_lora_adapter(embedding, adapter_name).items():
+            lora_module = getattr(module, lora_name)[adapter_name]
+            lora_module.weight = nn.Parameter(weight, requires_grad=lora_module.weight.requires_grad)
+
+
+def _prepare_tied_lora_state_dict_for_load(
+    model: nn.Module, peft_config: LoraConfig, adapter_name: str, state_dict: dict[str, torch.Tensor]
+) -> None:
+    """
+    Check that the checkpoint weights of tied LoRA layers match the (transposed) LoRA weights of the input embedding.
+    If they do, the entries are replaced by views of the embedding weights, so that they stay tied even when the
+    weights are assigned instead of copied (low_cpu_mem_usage=True). If they don't, e.g. because the adapter was
+    trained on a float16/bfloat16 model with a PEFT version that untied the weights when upcasting them, the layer is
+    untied so that the outputs of the trained adapter are reproduced.
+    """
+    tied_layers = _get_tied_lora_layers(model, peft_config, adapter_name)
+    if not tied_layers:
+        return
+
+    embedding = model.get_input_embeddings()
+    embedding_name = next(name for name, module in model.named_modules() if module is embedding)
+    embedding_keys = {
+        "lora_A": f"{embedding_name}.lora_embedding_B.{adapter_name}",
+        "lora_B": f"{embedding_name}.lora_embedding_A.{adapter_name}",
+    }
+    if any(key not in state_dict for key in embedding_keys.values()):
+        return
+
+    def is_close(tensor, other):
+        if tensor.shape != other.shape:
+            return False
+        tol = max(torch.finfo(tensor.dtype).eps, torch.finfo(other.dtype).eps)
+        return torch.allclose(tensor.float(), other.float(), rtol=tol, atol=tol)
+
+    for name, module in tied_layers:
+        keys = {lora_name: f"{name}.{lora_name}.{adapter_name}.weight" for lora_name in embedding_keys}
+        if any(key not in state_dict for key in keys.values()):
+            continue
+
+        if all(is_close(state_dict[keys[n]], state_dict[embedding_keys[n]].t()) for n in keys):
+            for lora_name, key in keys.items():
+                state_dict[key] = state_dict[embedding_keys[lora_name]].t()
+            continue
+
+        warnings.warn(
+            f"The LoRA weights of '{name}' in adapter '{adapter_name}' have diverged from the LoRA weights of the "
+            f"input embedding '{embedding_name}' they should be tied to with `ensure_weight_tying=True`. This can "
+            "happen for adapters trained on a float16 or bfloat16 model with older PEFT versions, which accidentally "
+            "untied the weights when upcasting them. To reproduce the outputs of the trained adapter, the weights are "
+            "loaded untied."
+        )
+        for lora_name in keys:
+            lora_module = getattr(module, lora_name)[adapter_name]
+            weight = lora_module.weight
+            lora_module.weight = nn.Parameter(weight.detach().clone(), requires_grad=weight.requires_grad)
+
+
 class LoraModel(BaseTuner):
     """
     Creates Low Rank Adapter (LoRA) model from a pretrained transformers model.
@@ -269,6 +384,11 @@ class LoraModel(BaseTuner):
                     f"{sorted(other_target_parameters)} for adapter '{adapter_name}'."
                 )
 
+    def _cast_adapter_dtype(self, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
+        # casting replaces the adapter parameters, which would untie the LoRA weights tied to the input embedding
+        with _retie_lora_layers(self.model, self.peft_config[adapter_name], adapter_name):
+            super()._cast_adapter_dtype(adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
+
     def _create_and_replace(
         self,
         lora_config,
@@ -294,11 +414,7 @@ class LoraModel(BaseTuner):
         is_tied = target_name in (getattr(lora_config, "target_modules_to_tie", []) or [])
         tied_adapter = {}
         if is_tied:
-            tied_module = self.model.get_input_embeddings()
-            emb_A = tied_module.lora_embedding_A[adapter_name]
-            emb_B = tied_module.lora_embedding_B[adapter_name]
-
-            tied_adapter = {"lora_A": emb_B.t(), "lora_B": emb_A.t()}
+            tied_adapter = _get_tied_lora_adapter(self.model.get_input_embeddings(), adapter_name)
 
         kwargs = {
             "r": r,
@@ -1146,6 +1262,7 @@ class LoraModel(BaseTuner):
 
         state_dict = {renamed_dora_weights(k): v for k, v in state_dict.items()}
         peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
+        _prepare_tied_lora_state_dict_for_load(model, config, adapter_name, peft_model_state_dict)
 
         # Before PEFT 0.22.0, the out_proj delta weight of MultiheadAttention was applied twice (#3774). To keep the
         # outputs of these adapters unchanged, lora_B is doubled and the version is updated so this happens only once.
@@ -1375,6 +1492,15 @@ class LoraModel(BaseTuner):
             peft_config (LoraConfig) -- The configuration of the Lora model.
             tied_weight_keys (list[str]) -- Contains the layers tied to the embedding layer.
         """
+        init_lora_weights = peft_config.init_lora_weights
+        if isinstance(init_lora_weights, str) and init_lora_weights.lower().startswith(
+            _INIT_LORA_WEIGHTS_INCOMPATIBLE_WITH_TYING
+        ):
+            raise ValueError(
+                f"init_lora_weights='{init_lora_weights}' is not supported with ensure_weight_tying=True when the "
+                "tied layers are targeted, as it would untie the LoRA weights or modify the shared base weight."
+            )
+
         tied_weight_keys = set(tied_weight_keys)
         peft_config.target_modules_to_tie = tied_weight_keys
 
