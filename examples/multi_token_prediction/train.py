@@ -49,6 +49,9 @@ class TrainConfig:
     skip_prefix: bool
     loss_decay: bool
     dense: bool = False
+    use_ce_loss: bool = True
+    use_dcd_loss: bool = False
+    dcd_loss_weight: float = 0.01
 
 
 MTP_MASK_TOKENS = None
@@ -458,6 +461,23 @@ class SamplerModuleRecurrent(torch.nn.Module):
         return logits, rnn_hidden
 
 
+def calculate_dcd_loss(student_logits, teacher_logits, *, dcd_loss_weight: float):
+    """KL(student || teacher) at matched positions (Uno Eq. 9, Discrete Consistency Distillation).
+
+    student_logits: [N, V] draft logits (aLoRA-active rows, differentiable)
+    teacher_logits: [N, V] base-model logits at the anchor positions (detached)
+
+    Student-first KL per Eq. 9 of the Uno paper: it penalizes the draft proposing
+    tokens the teacher assigns ~zero probability -- the verifier-rejection failure
+    mode under sampled decoding. Gradients flow through the student only.
+    """
+    log_s = torch.log_softmax(student_logits.float(), dim=-1)
+    log_t = torch.log_softmax(teacher_logits.detach().float(), dim=-1)
+    p_s = log_s.exp()
+    kl = (p_s * (log_s - log_t)).sum(dim=-1)  # [N]
+    return dcd_loss_weight * kl.mean()
+
+
 def calculate_lc_loss(hidden_states, offsets, *, num_mtp: int, lc_loss_weight: float):
     # We assume that we receive the last layer's hidden states.
     loss = 0
@@ -734,6 +754,7 @@ def train_loop(
                     "train/loss/sampler": output["loss_sampler"],
                     "train/loss/lcm": output["loss_lc"],
                     "train/loss/tv": output["loss_tv"],
+                    "train/loss/dcd": output.get("loss_dcd", 0.0),
                     "train/lr/model": lr_scheduler.get_last_lr()[0],
                     "train/lr/sampler": lr_scheduler.get_last_lr()[1],
                     "train/step": step,
@@ -763,15 +784,20 @@ def train_loop(
                 }
             )
 
-        if step > 0 and train_config.checkpoint_step > 0 and step % train_config.checkpoint_step == 0:
-            save_artifacts(model, sampler, tokenizer, train_config, is_checkpoint=True)
+        if step > start_step and train_config.checkpoint_step > 0 and step % train_config.checkpoint_step == 0:
+            save_artifacts(model, sampler, tokenizer, train_config, is_checkpoint=True,
+                           optimizer=optimizer, scheduler=lr_scheduler, step=step)
 
-    save_artifacts(model, sampler, tokenizer, train_config, is_checkpoint=False)
+    save_artifacts(model, sampler, tokenizer, train_config, is_checkpoint=False,
+                   optimizer=optimizer, scheduler=lr_scheduler, step=train_config.num_steps - 1)
 
 
 def train_step(
     model, tokenizer, sampler, optimizer, iterator_train, lr_scheduler, train_config: TrainConfig, sample, step
 ):
+    if train_config.use_dcd_loss and not train_config.dense:
+        raise AssertionError("DCD loss currently not implemented for non-dense training.")
+
     if train_config.dense:
         return _train_step_dense(
             model=model,
@@ -822,15 +848,18 @@ def _train_step_windows(
     # train step
     optimizer.zero_grad()
     outputs = model(**batch, num_items_in_batch=total_tokens, output_hidden_states=True)
-    loss_mtp = calculate_mtp_loss(
-        outputs.logits,
-        labels,
-        offsets,
-        train_config.use_lc_loss,
-        train_config.use_tv_loss,
-        train_config.num_mtp,
-        train_config.loss_decay,
-    )
+    if train_config.use_ce_loss:
+        loss_mtp = calculate_mtp_loss(
+            outputs.logits,
+            labels,
+            offsets,
+            train_config.use_lc_loss,
+            train_config.use_tv_loss,
+            train_config.num_mtp,
+            train_config.loss_decay,
+        )
+    else:
+        loss_mtp = torch.tensor(0.0)
     if train_config.use_lc_loss:
         loss_lc = calculate_lc_loss(
             outputs.hidden_states[-1],
@@ -960,12 +989,24 @@ def _train_step_dense(model, optimizer, lr_scheduler, train_config: TrainConfig,
 
     # CE loss for the MTP tokens. Semantically this is `calculate_mtp_loss`.
     # We need to make sure that the weights are applied to each mask block independently.
-    if train_config.loss_decay:
-        weights = torch.exp(-(torch.arange(1, k + 1, device=device) - 1) / k).to(logits)
+    if train_config.use_ce_loss:
+        if train_config.loss_decay:
+            weights = torch.exp(-(torch.arange(1, k + 1, device=device) - 1) / k).to(logits)
+        else:
+            weights = torch.ones(k, device=device, dtype=logits.dtype)
+        roles = torch.arange(n_masks, device=device) % k
+        loss_mtp = (F.cross_entropy(logits, labels, reduction="none") * weights[roles]).mean()
     else:
-        weights = torch.ones(k, device=device, dtype=logits.dtype)
-    roles = torch.arange(n_masks, device=device) % k
-    loss_mtp = (F.cross_entropy(logits, labels, reduction="none") * weights[roles]).mean()
+        loss_mtp = torch.tensor(0.0, device=device)
+
+    # teacher logits for DCD/TV: the base model's distribution at the anchor positions,
+    # free from the first forward (gate off -> pure AR behaviour).
+    teacher_logits = out1.logits[0][anchor_idcs].detach()  # [n_masks, V]
+
+    # DCD loss (Uno Eq. 9): KL(student draft || base teacher) at the anchor positions.
+    loss_dcd = torch.tensor(0.0, device=device)
+    if train_config.use_dcd_loss:
+        loss_dcd = calculate_dcd_loss(logits, teacher_logits, dcd_loss_weight=train_config.dcd_loss_weight)
 
     # LC loss for the MTP token hidden states.
     # pairing: row r = i*k + (j-1) anchors to z_{i+j} == the real token at the mask's position.
@@ -978,18 +1019,16 @@ def _train_step_dense(model, optimizer, lr_scheduler, train_config: TrainConfig,
     # TV loss for the MTP token hiddden states. Similar to LC loss. See calculate_tv_loss for details.
     loss_tv = torch.tensor(0.0, device=device)
     if train_config.use_tv_loss:
-        w_lm = model.get_output_embeddings().weight  # frozen, untied
-        logits_anchor = F.linear(z[anchor_idcs].detach(), w_lm)  # [n_masks, V] base logits
         probas_pred = F.softmax(logits.float(), dim=-1)
-        probas_true = F.softmax(logits_anchor.float(), dim=-1)
+        probas_true = F.softmax(teacher_logits.float(), dim=-1)
         loss_tv = train_config.tv_loss_weight * (probas_pred - probas_true).abs().sum(dim=-1).mean()
 
     if step % 100 == 0:
-        grad_norm_stats = gradient_norm_step(optimizer, loss_mtp, loss_lc, loss_tv, torch.tensor(0.0))
+        grad_norm_stats = gradient_norm_step(optimizer, loss_mtp, loss_lc, loss_tv, torch.tensor(0.0), loss_dcd)
     else:
         grad_norm_stats = {}
 
-    loss = loss_mtp + loss_lc + loss_tv
+    loss = loss_mtp + loss_dcd + loss_lc + loss_tv
     loss.backward()
 
     if train_config.max_gradient_norm > 0:
@@ -1003,6 +1042,7 @@ def _train_step_dense(model, optimizer, lr_scheduler, train_config: TrainConfig,
     return {
         "loss": loss.detach().cpu().item(),
         "loss_mtp": loss_mtp.detach().cpu().item(),
+        "loss_dcd": loss_dcd.detach().cpu().item(),
         "loss_lc": loss_lc.detach().cpu().item(),
         "loss_tv": loss_tv.detach().cpu().item(),
         "loss_sampler": 0.0,
@@ -1170,7 +1210,7 @@ def eval_step(model, tokenizer, sampler, train_config: TrainConfig, sample, step
     }
 
 
-def gradient_norm_step(optimizer, loss_mtp, loss_lc, loss_tv, loss_sampler):
+def gradient_norm_step(optimizer, loss_mtp, loss_lc, loss_tv, loss_sampler, loss_dcd=None):
     """Compute the average gradient norm for each loss term so that we can see the impact of each
     loss term and the potential need for individual scaling.
     """
@@ -1183,9 +1223,12 @@ def gradient_norm_step(optimizer, loss_mtp, loss_lc, loss_tv, loss_sampler):
                 grad_norms.append(norms.mean())
         return sum(grad_norms) / len(grad_norms)
 
-    loss_mtp.backward(retain_graph=True)
-    grad_norm_mtp = get_grad_norm(optimizer)
-    optimizer.zero_grad()
+    if loss_mtp > 0:
+        loss_mtp.backward(retain_graph=True)
+        grad_norm_mtp = get_grad_norm(optimizer)
+        optimizer.zero_grad()
+    else:
+        grad_norm_mtp = torch.tensor(0.0)
 
     if loss_lc > 0:
         loss_lc.backward(retain_graph=True)
@@ -1208,11 +1251,19 @@ def gradient_norm_step(optimizer, loss_mtp, loss_lc, loss_tv, loss_sampler):
     else:
         grad_norm_sampler = torch.tensor(0.0)
 
+    if loss_dcd is not None and loss_dcd > 0:
+        loss_dcd.backward(retain_graph=True)
+        grad_norm_dcd = get_grad_norm(optimizer)
+        optimizer.zero_grad()
+    else:
+        grad_norm_dcd = torch.tensor(0.0)
+
     gradnorms = {
         "gradnorm/mtp": grad_norm_mtp.cpu().item(),
         "gradnorm/lc": grad_norm_lc.cpu().item(),
         "gradnorm/tv": grad_norm_tv.cpu().item(),
         "gradnorm/sampler": grad_norm_sampler.cpu().item(),
+        "gradnorm/dcd": grad_norm_dcd.cpu().item(),
     }
 
     return gradnorms
@@ -1312,9 +1363,14 @@ def main():
     parser.add_argument("--sampler_teacher_forcing", action="store_true", default=False)
     parser.add_argument("--sampler_lr", type=float)
     parser.add_argument("--lc_loss_weight", type=float, default=3.0)
-    parser.add_argument("--tv_loss_weight", type=float, default=0.9)
+    parser.add_argument("--tv_loss_weight", type=float, default=1.0)
     parser.add_argument("--use_lc_loss", action="store_true", default=False)
     parser.add_argument("--use_tv_loss", action="store_true", default=False)
+    parser.add_argument("--use_dcd_loss", action="store_true", default=False,
+        help="DCD loss. KL(draft || base) at anchor positions. Currently requires --dense.")
+    parser.add_argument("--dcd_loss_weight", type=float, default=0.01)
+    parser.add_argument("--no_ce_loss", action="store_true", default=False,
+        help="disable the CE loss on MTP tokens (e.g. for the DCD+TV recipe)")
     parser.add_argument("--loss_decay", action="store_true", default=False,
         help="Use exponential decayed weight for each MTP token in the CE loss.")
     parser.add_argument("--dense", action="store_true", default=False,
@@ -1525,6 +1581,9 @@ def main():
         use_tv_loss=args.use_tv_loss,
         loss_decay=args.loss_decay,
         dense=args.dense,
+        use_ce_loss=not args.no_ce_loss,
+        use_dcd_loss=args.use_dcd_loss,
+        dcd_loss_weight=args.dcd_loss_weight,
         log_step=args.log_step,
         eval_step=args.eval_step,
         output_dir=args.output_dir,
