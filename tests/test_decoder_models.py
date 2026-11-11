@@ -1027,7 +1027,7 @@ class TestDecoderModels(PeftCommonTester):
 
     def test_prefix_tuning_qwen3_with_grouped_query_attention(self):
         # See 2881, fixes a bug with handling GQA
-        model_id = "trl-internal-testing/tiny-Qwen3ForCausalLM"
+        model_id = "peft-internal-testing/tiny-Qwen3ForCausalLM"
         with hub_online_once(model_id):
             base_model = AutoModelForCausalLM.from_pretrained(model_id)
             peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM")
