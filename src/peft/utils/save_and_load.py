@@ -32,7 +32,7 @@ from peft.import_utils import is_transformers_dtensor_tp, is_transformers_ge_v5
 from peft.mapping import PEFT_TYPE_TO_TUNER_MAPPING
 
 from .constants import INCLUDE_LINEAR_LAYERS_SHORTHAND
-from .integrations import TpInfo, dtensor_from_local_like
+from .integrations import TpInfo, dtensor_from_local_like, remove_torch_wrapper_names
 from .other import (
     EMBEDDING_LAYER_NAMES,
     SAFETENSORS_WEIGHTS_NAME,
@@ -297,10 +297,7 @@ def get_peft_model_state_dict(
     # ADDITIONAL TRAINING MODULES / MODULES_TO_SAVE
     for name, module in model.named_modules():
         if isinstance(module, AuxiliaryTrainingWrapper):
-            if name.startswith("_fsdp_wrapped_module."):
-                # If FSDP is used, the state_dict is from the unwrapped model, which will result in a key mismatch if we
-                # don't remove the FSDP-specific prefix
-                name = name.removeprefix("_fsdp_wrapped_module.")
+            name = remove_torch_wrapper_names(name)
             # Compute the module-relative state dict to make it easier for the adapter to fetch the appropriate
             # keys that the module thinks need to be saved. We cannot rely on `.state_dict()` internally of the
             # module since accelerators like DeepSpeed require special handling which is done for the model
@@ -331,7 +328,7 @@ def get_peft_model_state_dict(
             # not needed.
             _model = model.get_base_model() if hasattr(model, "get_base_model") else model
             embedding_is_targeted = any(
-                match_target_against_key(config.target_modules, k)
+                match_target_against_key(config.target_modules, remove_torch_wrapper_names(k))
                 for k, _ in _model.named_modules()
                 if any(re.match(rf"(.*\.)?{e}$", k) for e in EMBEDDING_LAYER_NAMES)
             )
@@ -388,7 +385,7 @@ def get_peft_model_state_dict(
             if not embedding_is_targeted or has_valid_embedding_base_layer(layer):
                 embedding_module_name = get_embedding_layer_name(model, layer, embedding_is_targeted)
                 if embedding_module_name:
-                    embedding_prefix = f"{embedding_module_name}."
+                    embedding_prefix = f"{remove_torch_wrapper_names(embedding_module_name)}."
                     to_return.update({k: v for k, v in state_dict.items() if k.startswith(embedding_prefix)})
     elif save_embedding_layers:
         warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
@@ -661,10 +658,7 @@ def set_peft_model_state_dict(
             # `modules_to_save.{adapter_name}.` prefix. This prefix must be restored when loading the model from the
             # saved state dict which is why we fetch a load key map from the wrapper.
             key_map = module.adapter_state_dict_load_map(adapter_name)
-            if name.startswith("_fsdp_wrapped_module."):
-                # If FSDP is used, the state_dict is from the unwrapped model, which will result in a key mismatch if we
-                # don't remove the FSDP-specific prefix
-                name = name.removeprefix("_fsdp_wrapped_module.")
+            name = remove_torch_wrapper_names(name)
             for k in key_map:
                 lookup_key = f"{name}.{k}"
                 store_key = f"{name}.{key_map[k]}"
@@ -892,6 +886,7 @@ def _get_adapter_state_dict_key_prefixes(model) -> set[str]:
 
     adapter_key_prefixes: set[str] = set()
     for module_name, module in model.base_model.model.named_modules():
+        module_name = remove_torch_wrapper_names(module_name)
         if isinstance(module, AuxiliaryTrainingWrapper):
             # Use adapter_state_dict_load_map to get the actual state dict keys owned by
             # each adapter
