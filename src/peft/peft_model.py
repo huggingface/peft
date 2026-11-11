@@ -1103,6 +1103,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 # Under FSDP2, the merged weights live in the sharded parameters. Disabling the adapter layers while
                 # the weights are still merged would forward the merged weights as if they were the base weights, so
                 # unmerge first, which also brings the merge into the shards.
+                warnings.warn(
+                    "The adapter layers are merged and FSDP2 was detected. To disable the adapter layers, the "
+                    "adapters have to be unmerged first, and they will not be merged again when exiting the "
+                    "`disable_adapter` context."
+                )
                 self.unmerge_adapter()
             model_status = self.get_model_status()
             if model_status.enabled == "irregular":

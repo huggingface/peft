@@ -211,8 +211,6 @@ class DoraLinearVariant(LoraVariant):
         dora_factor = transpose(dora_factor.view(-1, 1), module.fan_in_fan_out)
         new_weight = dora_factor * (orig_weight.data + delta_weight)
         new_weight = new_weight.to(orig_dtype)
-        # In-place update so that the change reaches FSDP2's sharded parameters; assigning `.data` would just rebind
-        # the attribute and be lost.
         orig_weight.data.copy_(new_weight)
 
     @staticmethod
@@ -320,8 +318,6 @@ class DoraEmbeddingVariant(DoraLinearVariant):
         dora_factor = dora_factor.view(1, -1)
         new_weight = dora_factor * (orig_weight.data + delta_weight)
         new_weight = new_weight.to(orig_dtype)
-        # In-place update so that the change reaches FSDP2's sharded parameters; assigning `.data` would just rebind
-        # the attribute and be lost.
         orig_weight.data.copy_(new_weight)
 
     @staticmethod
@@ -426,8 +422,6 @@ class _DoraConvNdVariant(LoraVariant):
         dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
         new_weight = dora_factor.view(*module._get_dora_factor_view()) * (orig_weight.data + delta_weight)
         new_weight = new_weight.to(orig_dtype)
-        # In-place update so that the change reaches FSDP2's sharded parameters; assigning `.data` would just rebind
-        # the attribute and be lost.
         orig_weight.data.copy_(new_weight)
 
     @staticmethod

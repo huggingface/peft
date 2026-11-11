@@ -133,8 +133,6 @@ class Linear(nn.Module, IA3Layer):
                                 f"NaNs detected in the merged bias. The adapter {active_adapter} seems to be broken"
                             )
 
-                    # In-place updates so that the change reaches FSDP2's sharded parameters; assigning `.data` would
-                    # just rebind the attribute and be lost.
                     base_layer.weight.data.copy_(output_weight.to(orig_dtype))
                     if output_bias is not None:
                         base_layer.bias.data.copy_(output_bias.to(base_layer.bias.data.dtype))
@@ -164,8 +162,6 @@ class Linear(nn.Module, IA3Layer):
                 # Add tolerace to avoid division by zero
                 ia3_l = transpose(self.ia3_l[active_adapter].data, self.fan_in_fan_out) + 1e-8
                 orig_dtype = base_layer.weight.data.dtype
-                # In-place updates so that the change reaches FSDP2's sharded parameters; assigning `.data` would
-                # just rebind the attribute and be lost.
                 base_layer.weight.data.copy_(torch.div(base_layer.weight.data, ia3_l).to(orig_dtype))
 
                 if not self.is_feedforward and (base_layer.bias is not None):
@@ -291,8 +287,6 @@ class _ConvNd(nn.Module, IA3Layer):
                                 f"NaNs detected in the merged bias. The adapter {active_adapter} seems to be broken"
                             )
 
-                    # In-place updates so that the change reaches FSDP2's sharded parameters; assigning `.data` would
-                    # just rebind the attribute and be lost.
                     base_layer.weight.data.copy_(output_weight.to(orig_dtype))
                     if output_bias is not None:
                         base_layer.bias.data.copy_(output_bias.to(orig_dtype))
@@ -321,8 +315,6 @@ class _ConvNd(nn.Module, IA3Layer):
                 orig_dtype = base_layer.weight.data.dtype
                 # divide by (IA)^3 vector. Add tolerace to avoid division by zero
                 ia3_scaling = self._get_ia3_scaling_for_weight(self.ia3_l[active_adapter].data)
-                # In-place updates so that the change reaches FSDP2's sharded parameters; assigning `.data` would
-                # just rebind the attribute and be lost.
                 base_layer.weight.data.copy_(torch.div(base_layer.weight.data, ia3_scaling + 1e-8).to(orig_dtype))
 
                 if not self.is_feedforward and (base_layer.bias is not None):
