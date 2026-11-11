@@ -17,6 +17,25 @@ import torch
 from .layer import LoraLayer
 
 
+def _calc_intruder_ids(W, W_merged, top_k, threshold_epsilon):
+    U_base, _S_base, _V_base = torch.linalg.svd(W, full_matrices=False)
+    U_merged, S_merged, V_merged = torch.linalg.svd(W_merged, full_matrices=False)
+
+    cos_sim = (U_merged.T @ U_base).abs().max(dim=1).values
+    intruder_idcs = torch.where(cos_sim[:top_k] < threshold_epsilon)[0].tolist()
+    return intruder_idcs, U_merged, S_merged, V_merged
+
+
+def _detect_via_lowrank(W, W_merged, top_k, niter, threshold_epsilon):
+    # calculation of randomized low-rank svd for fast pre-filtering of intruders
+    U_base, _S_base, _V_base = torch.svd_lowrank(W, q=top_k, niter=niter)
+    U_merged, _S_merged, _V_merged = torch.svd_lowrank(W_merged, q=top_k, niter=niter)
+
+    cos_sim = (U_merged.T @ U_base).abs().max(dim=1).values
+    intruder_idcs = torch.where(cos_sim < threshold_epsilon)[0].tolist()
+    return intruder_idcs
+
+
 def reduce_intruder_dimension(
     peft_model,
     old_adapter_name="default",
@@ -25,6 +44,8 @@ def reduce_intruder_dimension(
     threshold_epsilon=0.5,
     mitigation_lambda=0.75,
     logging_sink=print,
+    use_lowrank=False,
+    niter=None,
 ):
     """
     Intruder dimension mitigation based on https://huggingface.co/papers/2410.21228 ("LoRA vs Full Fine-tuning: An
@@ -65,10 +86,20 @@ def reduce_intruder_dimension(
 
         logging_sink (default: print)
             Function that prints information about the mitigation process. Set to None if you don't want any output.
+
+        use_lowrank (default: False)
+            To speed things up: Use a randomized low-rank SVD to pre-filter intruder detection, running the full SVD
+            only on flagged layers. The fewer layers that contain intruders, the bigger the win. Highly biased towards
+            false positives. (in testing: up to 3x faster with few intruders, break-even around 73% of layers, up to
+            ~20% slower when every layer has one).
+
+        niter (default: 320)
+            Only used when `use_lowrank=True` to tune detection rate. Higher is more accurate (less false positives)
+            but slower per layer. Too low over-flags.
+
     """
-    # Note that this function currently doesn't support `compile_kwargs` similar to the LoRA conversion tooling
-    # since there's was no clear way how `torch.compile` can be used to improve performance at the time of
-    # implementation. See discussion: https://github.com/huggingface/peft/pull/2999#discussion_r2717989613
+    # Note torch.compile not implemented, since 98% of time spend on GPU with torch.linalg.svd
+    # which is already optimised through cuSOLVER (LAPACK for CPU)
 
     def no_logging_sink(*args, **kwargs):
         pass
@@ -78,6 +109,11 @@ def reduce_intruder_dimension(
 
     if peft_model.peft_type != "LORA":
         raise ValueError("The provided model is not using LoRA and is therefore not supported.")
+    if niter is not None and not use_lowrank:
+        raise ValueError(
+            "'niter' can only be used in combination with 'use_lowrank=True', "
+            + "either set 'niter=None' or 'use_lowrank=True'."
+        )
 
     peft_model.add_adapter(new_adapter_name, peft_model.peft_config[old_adapter_name])
 
@@ -109,11 +145,16 @@ def reduce_intruder_dimension(
         # compare base weights and adapter weights using cosine similarity.
         # based on this similarity we can find intruder dimensions using threshold_epsilon
         # on the top_k dimensions
-        U_base, _S_base, _V_base = torch.linalg.svd(W, full_matrices=False)
-        U_merged, S_merged, V_merged = torch.linalg.svd(W_merged, full_matrices=False)
 
-        cos_sim = (U_merged.T @ U_base).abs().max(dim=1).values
-        intruder_idcs = torch.where(cos_sim[:top_k] < threshold_epsilon)[0].tolist()
+        if use_lowrank:
+            niter = niter if niter is not None else 320
+            intruder_idcs = _detect_via_lowrank(W, W_merged, top_k, niter, threshold_epsilon)
+            # if intruders detected by lowrank, use full svd to calc U,S
+            # to rule out false positives and use for mitigation calculation
+            if intruder_idcs:
+                intruder_idcs, U_merged, S_merged, V_merged = _calc_intruder_ids(W, W_merged, top_k, threshold_epsilon)
+        else:
+            intruder_idcs, U_merged, S_merged, V_merged = _calc_intruder_ids(W, W_merged, top_k, threshold_epsilon)
 
         if not intruder_idcs:
             logging_sink(f"{layer_name}: No intruders")
