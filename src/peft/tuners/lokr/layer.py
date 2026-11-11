@@ -486,4 +486,4 @@ def make_kron(w1, w2, scale=1.0):
     w2 = w2.contiguous()
     rebuild = torch.kron(w1, w2)
 
-    return rebuild * scale
+    return rebuild.mul_(scale)
