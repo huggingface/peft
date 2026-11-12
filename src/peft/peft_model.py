@@ -42,7 +42,7 @@ from transformers.utils import PushToHubMixin
 
 from peft.tuners.lora.variants import get_alora_offsets_for_forward, get_alora_offsets_for_generate
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, _delete_auxiliary_adapter
-from peft.utils import AuxiliaryTrainingWrapper
+from peft.utils import AuxiliaryTrainingWrapper, is_activation_checkpointing
 from peft.utils.constants import DUMMY_MODEL_CONFIG
 from peft.utils.integrations import get_fsdp_modules, init_empty_weights
 from peft.utils.other import TrainableTokensWrapper, create_attention_mask, set_additional_trainable_modules
@@ -137,6 +137,40 @@ def _add_modules_to_save(peft_config: PeftConfig, module_names: Sequence[str]) -
         peft_config.modules_to_save = existing + [name for name in module_names if name not in existing]
 
 
+def _filter_expected_adapter_keys(keys: list[str], config: PeftConfig) -> list[str]:
+    """Remove keys from a missing/unexpected adapter key list that are expected for structural reasons.
+
+    A key can legitimately be absent from, or extra in, a params-only comparison without indicating a real load
+    problem:
+
+    - VB-LoRA's shared `vblora_vector_bank` and TinyLoRA's layer-level `tinylora_v` are references to a model-level
+      parameter, not independent per-layer state.
+    - `prompt_encoder` itself is not part of the checkpoint.
+    - UniLoRA's `unilora_theta_d` outside its canonical `base_model.unilora_theta_d.` location is a reference, not the
+      owning parameter.
+    - Prompt learning's state is loaded through the prompt encoder ([`~BasePromptEncoder._load_adapter_state_dict`]),
+      not through `model.load_state_dict`, so its keys never resolve through the normal path and would otherwise always
+      show up as unexpected. Every prompt learning variant (plain prompt/prefix tuning, Cartridge,
+      MultitaskPromptTuning's extra `prefix_task_cols`/`prefix_task_rows`) reports this state as flat, top-level keys
+      with no `.` in them, see every `_get_adapter_state_dict` override under `src/peft/tuners/*/model.py` for prompt
+      learning tuners: none of them ever nest a key under a submodule path. That is the general signal used here,
+      rather than hardcoding each variant's key names one by one.
+    """
+
+    def is_expected(k: str) -> bool:
+        if "vblora_vector_bank" in k or "prompt_encoder" in k or ".tinylora_v." in k:
+            return True
+        if (
+            config.peft_type == PeftType.UNILORA
+            and ".unilora_theta_d." in k
+            and not k.startswith("base_model.unilora_theta_d.")
+        ):
+            return True
+        return config.is_prompt_learning and "." not in k
+
+    return [k for k in keys if not is_expected(k)]
+
+
 class PeftModel(PushToHubMixin, torch.nn.Module):
     """
     Base model encompassing various Peft methods.
@@ -201,8 +235,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype
             )
 
-        if getattr(model, "is_gradient_checkpointing", True):
-            model = self.prepare_model_for_gradient_checkpointing(model)
+        if is_activation_checkpointing(model, default=True):
+            self.prepare_model_for_gradient_checkpointing(model)
 
         # the `pretraining_tp` is set for some models to simulate Tensor Parallelism during inference to avoid
         # numerical differences, https://github.com/pytorch/pytorch/issues/76232 - to avoid any unexpected
@@ -269,6 +303,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         This function saves the adapter model and the adapter configuration files to a directory, so that it can be
         reloaded using the [`PeftModel.from_pretrained`] class method, and also used by the [`PeftModel.push_to_hub`]
         method.
+
+        If the selected adapter weights contain distributed tensors (e.g. FSDP2/HSDP), all participating ranks must
+        call this method because gathering the weights is a collective operation. Set `is_main_process=True` only on
+        the rank writing the checkpoint. Calling this method on only one rank can cause the process group to time out.
 
         Args:
             save_directory (`str`):
@@ -447,6 +485,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         ephemeral_gpu_offload: bool = False,
         low_cpu_mem_usage: bool = False,
         key_mapping: Optional[dict[str, str]] = None,
+        strict_adapter_check: Literal["warn", "error", "ignore"] = "warn",
         **kwargs: Any,
     ) -> Self:
         r"""
@@ -492,6 +531,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 Extra mapping of PEFT `state_dict` keys applied before loading the `state_dict`. When this mapping is
                 applied, the PEFT-specific `"base_model.model"` prefix is removed beforehand and the adapter name (e.g.
                 `"default"`) is not inserted yet. Only pass this argument if you know what you're doing.
+            strict_adapter_check (`Literal["warn", "error", "ignore"]`, *optional*, defaults to `"warn"`):
+                What to do if the checkpoint has adapter keys that are missing from, or unexpected for, the model,
+                after accounting for keys that are expected to differ for structural reasons (shared parameters, the
+                prompt encoder path, etc.). `"warn"` emits a warning, `"error"` raises a `RuntimeError` and `"ignore"`
+                does nothing. This is not the same check as `torch.nn.Module.load_state_dict`'s `strict`: PEFT adapters
+                always coexist with a frozen base model, so this only concerns adapter-specific keys, never the base
+                model's own parameters.
             kwargs: (`optional`):
                 Additional keyword arguments passed along to the specific PEFT configuration class. This includes
                 `torch_device` (`str`, *optional*): the device to load the adapter on (forwarded to
@@ -620,48 +666,16 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 low_cpu_mem_usage=low_cpu_mem_usage,
             )
 
-        load_result = model.load_adapter(
+        model.load_adapter(
             model_id,
             adapter_name,
             is_trainable=is_trainable,
             autocast_adapter_dtype=autocast_adapter_dtype,
             low_cpu_mem_usage=low_cpu_mem_usage,
             key_mapping=key_mapping,
+            strict_adapter_check=strict_adapter_check,
             **kwargs,
         )
-
-        # Filter out shared parameters that are duplicated at layer level:
-        # 1. Remove VB-LoRA vector bank, since it's a shared parameter set via the VBLoRAModel
-        # 2. Remove the prompt encoder, as it does not need to be part of the checkpoint
-        # 3. Remove TinyLoRA layer-level tinylora_v references (they share with model-level tinylora_v)
-        def is_shared_parameter(k):
-            # TinyLoRA: layer-level tinylora_v is a reference to model-level, exclude from warning
-            if "vblora_vector_bank" in k or "prompt_encoder" in k or ".tinylora_v." in k:
-                return True
-
-            return (
-                config.peft_type == PeftType.UNILORA
-                and ".unilora_theta_d." in k
-                and not k.startswith("base_model.unilora_theta_d.")
-            )
-
-        missing_keys = [k for k in load_result.missing_keys if not is_shared_parameter(k)]
-        if missing_keys:
-            # Let's warn here since (in contrast to load_adapter) we don't return the load result, so it could be quite
-            # difficult for users to even notice that something might have gone wrong here. As we filter out non PEFT
-            # keys from the missing keys, this gives no false positives.
-
-            # careful: if the wording of the warning is changed, adjust the unit tests accordingly!
-            warn_message = f"Found missing adapter keys while loading the checkpoint: {missing_keys}."
-
-            prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(config.peft_type)
-            if prefix and adapter_name in prefix:
-                warn_message = (
-                    f"Adapter name '{adapter_name}' should not be contained in the prefix '{prefix}'. "
-                    "This could be the potential reason for missing adapter keys. "
-                ) + warn_message
-
-            warnings.warn(warn_message)
 
         return model
 
@@ -736,6 +750,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             raise ValueError("Not supported")
 
         prompt_encoder = prompt_encoder.to(self.device)
+        if config.inference_mode:
+            prompt_encoder.requires_grad_(False)
         self.prompt_encoder.update(torch.nn.ModuleDict({adapter_name: prompt_encoder}))
         self.prompt_tokens[adapter_name] = torch.arange(
             config.num_virtual_tokens * config.num_transformer_submodules
@@ -744,10 +760,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def prepare_model_for_gradient_checkpointing(self, model: PreTrainedModel):
         r"""
         Prepares the model for gradient checkpointing if necessary
+
+        Note: In newer Transformers versions, this is called 'activation checkpointing'.
         """
         self._prepare_model_for_gradient_checkpointing(model)
 
     def _prepare_model_for_gradient_checkpointing(self, model: PreTrainedModel):
+        # Note: In newer Transformers versions, this is called 'activation checkpointing'.
         if not (
             getattr(model, "is_loaded_in_8bit", False)
             or getattr(model, "is_loaded_in_4bit", False)
@@ -1088,18 +1107,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     "This is most likely unintentional. After exiting the disable_adapter context, all adapters "
                     "will be enabled"
                 )
-            try:
-                self.base_model.disable_adapter_layers()
-                self._adapters_disabled = True
-                yield
-            finally:
-                if model_status.enabled is not False:
-                    # model_status.enabled is `True` or `"irregular"`
-                    # with FSDP2, re-enabling has to reach the sharded parameters; it decides the final state, so
-                    # disabling doesn't need to reshard
-                    self._reshard_fsdp_modules()
-                    self.base_model.enable_adapter_layers()
-                self._adapters_disabled = was_disabled
+            # model_status.enabled is `True`, `False` or `"irregular"`
+            reenable = model_status.enabled is not False
+            with self._reenable_on_fsdp_shards(reenable):
+                try:
+                    self.base_model.disable_adapter_layers()
+                    self._adapters_disabled = True
+                    yield
+                finally:
+                    if reenable:
+                        self.base_model.enable_adapter_layers()
+                    self._adapters_disabled = was_disabled
 
     def get_base_model(self) -> torch.nn.Module:
         """
@@ -1523,6 +1541,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         ephemeral_gpu_offload: bool = False,
         low_cpu_mem_usage: bool = False,
         key_mapping: Optional[dict[str, str]] = None,
+        strict_adapter_check: Literal["warn", "error", "ignore"] = "warn",
         **kwargs: Any,
     ):
         """
@@ -1561,10 +1580,22 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 Extra mapping of PEFT `state_dict` keys applied before loading the `state_dict`. When this mapping is
                 applied, the PEFT-specific `"base_model.model"` prefix is removed beforehand and the adapter name (e.g.
                 `"default"`) is not inserted yet. Only pass this argument if you know what you're doing.
+            strict_adapter_check (`Literal["warn", "error", "ignore"]`, *optional*, defaults to `"warn"`):
+                What to do if the checkpoint has adapter keys that are missing from, or unexpected for, the model,
+                after accounting for keys that are expected to differ for structural reasons (shared parameters, the
+                prompt encoder path, etc.). `"warn"` emits a warning, `"error"` raises a `RuntimeError` and `"ignore"`
+                does nothing. This is not the same check as `torch.nn.Module.load_state_dict`'s `strict`: PEFT adapters
+                always coexist with a frozen base model, so this only concerns adapter-specific keys, never the base
+                model's own parameters.
             kwargs: (`optional`):
                 Additional arguments to modify the way the adapter is loaded, e.g. the token for Hugging Face Hub.
         """
         from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING
+
+        if strict_adapter_check not in ("warn", "error", "ignore"):
+            raise ValueError(
+                f"strict_adapter_check must be one of 'warn', 'error' or 'ignore', got {strict_adapter_check!r}."
+            )
 
         hf_hub_download_kwargs, kwargs = self._split_kwargs(kwargs)
         if torch_device is None:
@@ -1616,26 +1647,44 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 low_cpu_mem_usage=low_cpu_mem_usage,
             )
 
-        tuner = self.peft_config[adapter_name].peft_type
+        adapter_config = self.peft_config[adapter_name]
+        tuner = adapter_config.peft_type
         tuner_prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(tuner, "")
         adapter_missing_keys = []
 
         # Filter missing keys specific to the current adapter and tuner prefix.
         for key in load_result.missing_keys:
             if tuner_prefix in key and adapter_name in key:
-                # TinyLoRA: layer-level tinylora_v is a reference to model-level, skip it
-                if ".tinylora_v." in key:
-                    continue
-                if (
-                    tuner == PeftType.UNILORA
-                    and ".unilora_theta_d." in key
-                    and not key.startswith("base_model.unilora_theta_d.")
-                ):
-                    continue
                 adapter_missing_keys.append(key)
+        adapter_missing_keys = _filter_expected_adapter_keys(adapter_missing_keys, adapter_config)
 
         load_result.missing_keys.clear()
         load_result.missing_keys.extend(adapter_missing_keys)
+
+        adapter_unexpected_keys = _filter_expected_adapter_keys(load_result.unexpected_keys, adapter_config)
+        load_result.unexpected_keys.clear()
+        load_result.unexpected_keys.extend(adapter_unexpected_keys)
+
+        if strict_adapter_check != "ignore" and (load_result.missing_keys or load_result.unexpected_keys):
+            problems = []
+            if load_result.missing_keys:
+                problems.append(f"missing adapter keys: {load_result.missing_keys}")
+            if load_result.unexpected_keys:
+                problems.append(f"unexpected adapter keys: {load_result.unexpected_keys}")
+            problems = " and ".join(problems)
+
+            hint = ""
+            prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(tuner)
+            if prefix and adapter_name in prefix:
+                hint = (
+                    f"Adapter name '{adapter_name}' should not be contained in the prefix '{prefix}'. "
+                    "This could be the potential reason for missing adapter keys. "
+                )
+
+            if strict_adapter_check == "error":
+                raise RuntimeError(f"{hint}Error(s) in loading adapter '{adapter_name}' state_dict: found {problems}.")
+            # careful: if the wording of the warning is changed, adjust the unit tests accordingly!
+            warnings.warn(f"{hint}Found {problems} while loading the checkpoint.")
 
         if (
             (getattr(self, "hf_device_map", None) is not None)
@@ -1799,6 +1848,34 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 if not sharded_modules.isdisjoint(merged_modules):
                     continue
             fsdp_module.reshard()
+
+    @contextmanager
+    def _reenable_on_fsdp_shards(self, reenable: bool):
+        """
+        Context manager for `disable_adapter()` that makes re-enabling the adapter layers at its end reach the FSDP2
+        shards.
+
+        The parameters registered on entry are the shards, or unsharded copies with the same `requires_grad`. If they
+        are still registered after re-enabling, with unchanged `requires_grad`, re-enabling already reached the shards.
+        Otherwise, as when a forward inside the context replaced them, the FSDP2 modules are resharded and the adapter
+        layers are enabled again.
+        """
+        check_fsdp_params = reenable and bool(get_fsdp_modules(self))
+        if not check_fsdp_params:
+            yield
+            return
+
+        entry_params = {name: (param, param.requires_grad) for name, param in self.named_parameters()}
+        try:
+            yield
+        finally:
+            params = dict(self.named_parameters())
+            if any(
+                params.get(name) is not param or param.requires_grad != requires_grad
+                for name, (param, requires_grad) in entry_params.items()
+            ):
+                self._reshard_fsdp_modules()
+                self.base_model.enable_adapter_layers()
 
     @property
     def base_model_torch_dtype(self):
@@ -2346,7 +2423,8 @@ class PeftModelForCausalLM(PeftModel):
             # Generate prefix type mask and shift input type mask values to avoid conflicts
             prefix_type_mask = torch.Tensor(cpt_tokens_type_mask).long().view(1, -1)
             prefix_type_mask = prefix_type_mask.repeat(batch_size, 1).to(labels.device)
-            adjusted_input_type_mask = input_type_mask
+            # copy before shifting so the caller-provided mask is not modified in place
+            adjusted_input_type_mask = input_type_mask.clone()
             adjusted_input_type_mask[adjusted_input_type_mask > 0] += prefix_type_mask.max()
             # Concatenate prefix and shifted input type masks
             cpt_type_mask = torch.cat((prefix_type_mask, adjusted_input_type_mask), dim=1)
@@ -2363,9 +2441,7 @@ class PeftModelForCausalLM(PeftModel):
         else:
             # Calculate the loss using the custom CPT loss function
             cpt_embedding = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
-            base_model_output = cpt_embedding.calculate_loss(
-                base_model_output, cpt_labels, cpt_type_mask, self.peft_config["default"]
-            )
+            base_model_output = cpt_embedding.calculate_loss(base_model_output, cpt_labels, cpt_type_mask, peft_config)
             return base_model_output
 
     def generate(self, *args, **kwargs):

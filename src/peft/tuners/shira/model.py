@@ -25,6 +25,7 @@ from peft.utils import (
     get_quantization_kwargs,
     resolve_quantization_backend,
 )
+from peft.utils.integrations import remove_torch_wrapper_names
 
 from .layer import Linear, ShiraLayer
 
@@ -171,11 +172,11 @@ class ShiraModel(BaseTuner):
                     # PermissionError. This results in failed tests, so we are converting indices to float32 before
                     # saving and then converting them back to int when loading. This is happening only for Windows,
                     # not for Linux and Mac-OS.
-                    to_return[f"{name}.shira_indices.{k}"] = (
+                    to_return[f"{remove_torch_wrapper_names(name)}.shira_indices.{k}"] = (
                         v.to(torch.float32) if platform.system() == "Windows" else v
                     )
                     # the above may contain other adapter names, so filter again
-                    to_return = _filter_state_dict_for_adapter_name(to_return, unwanted_adapter_names)
+                    to_return = _filter_state_dict_for_adapter_name(to_return, unwanted_adapter_names, model)
         return to_return
 
     @classmethod
@@ -189,6 +190,7 @@ class ShiraModel(BaseTuner):
             )
         for name, module in model.named_modules():
             if hasattr(module, "shira_indices"):
+                name = remove_torch_wrapper_names(name)
                 # The shira_indices are stored in a plain dict, not as registered buffers, so their checkpoint keys
                 # have no counterpart in the model state_dict and are thus not remapped, i.e. they carry no adapter
                 # name.

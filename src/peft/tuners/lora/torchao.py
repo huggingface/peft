@@ -71,9 +71,9 @@ class TorchaoLoraLinear(Linear):
         self._check_dtype_supported()
 
         base_layer = self.get_base_layer()
-        weight = base_layer.weight
 
         for active_adapter in adapter_names:
+            weight = base_layer.weight
             try:
                 weight = weight.dequantize()
             except NotImplementedError as exc:
@@ -83,12 +83,12 @@ class TorchaoLoraLinear(Linear):
                 )
                 raise NotImplementedError(msg) from exc
 
+            weight += self.get_delta_weight(active_adapter)
             if safe_merge and not torch.isfinite(weight).all():
                 raise ValueError(
                     f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                 )
 
-            weight += self.get_delta_weight(active_adapter)
             # TODO: once (if) torchao supports directly mutating the data, use that instead.
             del base_layer.weight
             base_layer.weight = weight

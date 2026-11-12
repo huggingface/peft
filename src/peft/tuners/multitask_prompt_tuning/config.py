@@ -20,7 +20,7 @@ from peft.tuners.prompt_tuning import PromptTuningConfig
 from peft.utils import PeftType
 
 
-class MultitaskPromptTuningInit(str, enum.Enum):
+class MultitaskPromptTuningInit(str, enum.Enum):  # noqa: UP042
     # initialize prompt with text
     TEXT = "TEXT"
     # initialize prompt with random matrix

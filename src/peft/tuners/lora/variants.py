@@ -995,7 +995,7 @@ class BdLoraLinearVariant(LoraVariant):
             r = module.lora_A[adapter_name].out_features
             base_layer = module.get_base_layer()
             layer = BlockDiagonalLinear(
-                base_layer.in_features,
+                module.in_features,
                 r,
                 nblocks=nblocks,
                 init_zero=False,
@@ -1008,7 +1008,7 @@ class BdLoraLinearVariant(LoraVariant):
             base_layer = module.get_base_layer()
             layer = BlockDiagonalLinear(
                 r,
-                base_layer.out_features,
+                module.out_features,
                 nblocks=nblocks,
                 init_zero=True,
                 dtype=base_layer.weight.dtype,
@@ -1052,7 +1052,8 @@ class BdLoraLinearVariant(LoraVariant):
             weight_A = weight_A.float()
             weight_B = weight_B.float()
 
-        output_tensor = transpose(weight_B @ weight_A, module.fan_in_fan_out) * module.scaling[adapter]
+        output_tensor = transpose(weight_B @ weight_A, module.fan_in_fan_out)
+        output_tensor.mul_(module.scaling[adapter])
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -1502,7 +1503,8 @@ class KasaLinearVariant(LoraVariant):
 
         # (out, r) * (r,) -> scale columns of B by the diagonal, then (out, r) @ (r, in) -> (out, in).
         delta = (weight_B * diag) @ weight_A
-        output_tensor = transpose(delta, module.fan_in_fan_out) * module.scaling[adapter]
+        output_tensor = transpose(delta, module.fan_in_fan_out)
+        output_tensor.mul_(module.scaling[adapter])
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)

@@ -14,8 +14,8 @@
 
 from .constants import ALLOWED_COMPUTE_DTYPES, UPCAST_DTYPES
 from .error import NoMatchingPeftModuleError, PeftError
-from .integrations import map_cache_to_layer_device_map
-from .loftq_utils import replace_lora_weights_loftq
+from .integrations import activation_checkpointing_enable, is_activation_checkpointing, map_cache_to_layer_device_map
+from .loftq_utils import replace_lora_weights_loftq, replace_lora_weights_pissa
 from .other import (
     CONFIG_NAME,
     INCLUDE_LINEAR_LAYERS_SHORTHAND,
@@ -41,6 +41,7 @@ from .other import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_MISS_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_OFT_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_PACA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_PEANUT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_POLY_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
@@ -117,6 +118,7 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_MISS_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_OFT_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_PACA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_PEANUT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_POLY_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
@@ -149,6 +151,7 @@ __all__ = [
     "_prepare_prompt_learning_config",
     "_set_adapter",
     "_set_trainable",
+    "activation_checkpointing_enable",
     "bloom_model_postprocess_past_key_value",
     "cast_mixed_precision_params",
     "detached_copy",
@@ -159,12 +162,14 @@ __all__ = [
     "get_quantization_kwargs",
     "id_tensor_storage",
     "infer_device",
+    "is_activation_checkpointing",
     "load_peft_weights",
     "map_cache_to_layer_device_map",
     "prepare_model_for_kbit_training",
     "quantization_extra_repr",
     "register_peft_method",
     "replace_lora_weights_loftq",
+    "replace_lora_weights_pissa",
     "resolve_quantization_backend",
     "set_additional_trainable_modules",
     "set_base_model_state_dict",

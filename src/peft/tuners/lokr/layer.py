@@ -378,14 +378,7 @@ class Conv2d(LoKrLayer):
         input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()
-        return F.conv2d(
-            input,
-            delta_weight,
-            stride=base_layer.stride,
-            padding=base_layer.padding,
-            dilation=base_layer.dilation,
-            groups=base_layer.groups,
-        )
+        return base_layer._conv_forward(input, delta_weight, bias=None)
 
     def __repr__(self) -> str:
         rep = super().__repr__()
@@ -420,14 +413,7 @@ class Conv1d(LoKrLayer):
         input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()
-        return F.conv1d(
-            input,
-            delta_weight,
-            stride=base_layer.stride,
-            padding=base_layer.padding,
-            dilation=base_layer.dilation,
-            groups=base_layer.groups,
-        )
+        return base_layer._conv_forward(input, delta_weight, bias=None)
 
     def __repr__(self) -> str:
         rep = super().__repr__()
@@ -500,4 +486,4 @@ def make_kron(w1, w2, scale=1.0):
     w2 = w2.contiguous()
     rebuild = torch.kron(w1, w2)
 
-    return rebuild * scale
+    return rebuild.mul_(scale)

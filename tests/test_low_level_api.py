@@ -19,6 +19,7 @@ import pytest
 import torch
 from diffusers import StableDiffusionPipeline
 from torch import nn
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import apply_activation_checkpointing
 from transformers import (
     AutoModel,
     AutoModelForCausalLM,
@@ -162,7 +163,7 @@ class TestInjectAdapterFromStateDict:
     @pytest.mark.parametrize(
         "model_cls_and_id",
         [
-            (AutoModelForCausalLM, "trl-internal-testing/tiny-random-LlamaForCausalLM"),
+            (AutoModelForCausalLM, "peft-internal-testing/tiny-random-LlamaForCausalLM"),
             (AutoModel, "peft-internal-testing/tiny-random-BertModel"),
             (AutoModelForSeq2SeqLM, "peft-internal-testing/tiny-random-BartForConditionalGeneration"),
             (AutoModelForSequenceClassification, "peft-internal-testing/tiny-random-RobertaForSequenceClassification"),
@@ -505,7 +506,7 @@ class TestInjectAdapterFromStateDict:
     def test_inject_from_state_dict_compiled_model(self, compile_initial_model):
         # If we directly inject the adapter into the model from a `state_dict`, if the model is compiled, the
         # keys would not match because they contain the `'_orig_mod.'` prefix from the compilation. See #2957.
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         config = LoraConfig()
 
         with hub_online_once(model_id):
@@ -958,6 +959,27 @@ class TestGetBaseModelStateDict:
         peft_model.add_adapter("adapter2", LoraConfig(r=8, lora_alpha=4, target_modules=["k_proj", "out_proj"]))
 
         assert set(get_base_model_state_dict(peft_model).keys()) == base_model_keys
+
+    def test_activation_checkpointing_wrapper(self):
+        # a checkpoint_wrapper below the root adds a level to the module names that is not part of the state dict keys
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(8, 8)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        peft_model = get_peft_model(nn.Sequential(Block(), nn.Linear(8, 4)), LoraConfig(r=2, target_modules=["lin"]))
+        keys_before = sorted(get_base_model_state_dict(peft_model))
+        assert keys_before == ["0.lin.bias", "0.lin.weight", "1.bias", "1.weight"]
+
+        apply_activation_checkpointing(peft_model, check_fn=lambda module: isinstance(module, Block))
+        assert any("_checkpoint_wrapped_module" in name for name, _ in peft_model.named_modules())  # sanity check
+
+        state_dict = get_base_model_state_dict(peft_model)
+        assert sorted(state_dict) == keys_before
+        set_base_model_state_dict(peft_model, state_dict, strict=True)
 
 
 class TestStateDictFsdpShapeValidation:

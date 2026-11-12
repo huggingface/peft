@@ -28,15 +28,17 @@ from peft.utils.constants import DUMMY_MODEL_CONFIG
 from .config import PeftConfig
 from .peft_model import PeftModel
 from .tuners import MixedModel
-from .utils import _set_adapter, _set_trainable
+from .utils import _set_adapter, _set_trainable, is_activation_checkpointing
 
 
 def _prepare_model_for_gradient_checkpointing(model: nn.Module) -> None:
     r"""
     Prepares the model for gradient checkpointing if necessary
+
+    Note: In newer Transformers versions, this is called 'activation checkpointing'.
     """
     # Note: same as PeftModel._prepare_model_for_gradient_checkpointing
-    if not getattr(model, "is_gradient_checkpointing", True):
+    if not is_activation_checkpointing(model, default=True):
         return model
 
     if not (
@@ -377,9 +379,17 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
                 Additional arguments to modify the way the adapter is loaded, e.g. the token for Hugging Face Hub.
         """
         # the low_cpu_mem_usage option is handled through kwargs
+        requires_grad = {name: param.requires_grad for name, param in self.named_parameters()}
         output = PeftModel.load_adapter(self, model_id, adapter_name, *args, **kwargs)
+        # Ensure requires_grad state is not overridden by newly loaded parameters
+        for name, param in self.named_parameters():
+            if name not in requires_grad:
+                requires_grad[name] = param.requires_grad
         # TODO: not quite clear why this is necessary but tests fail without it
         self.set_adapter(self.active_adapters)
+        # set_adapter changes requires_grad, so restore each parameter's saved requires_grad state.
+        for name, param in self.named_parameters():
+            param.requires_grad_(requires_grad[name])
         return output
 
     def create_or_update_model_card(self, output_dir: str):

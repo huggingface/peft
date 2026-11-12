@@ -88,7 +88,10 @@ class PeanutModel(BaseTuner):
                 config=peanut_config,
             )
 
-        raise NotImplementedError(f"PEANuT does not support target modules of type {type(target_base_layer)} yet.")
+        raise ValueError(
+            f"Target module {target} is not supported. Currently, only the following modules are supported: "
+            "`torch.nn.Linear`."
+        )
 
     @classmethod
     def _remove_adapter_name_from_key(cls, key, adapter_name):

@@ -5,7 +5,7 @@ import re
 import torch
 from torch import nn
 
-from peft.tuners.tuners_utils import BaseTuner
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils.constants import TRANSFORMERS_MODELS_TO_OSF_TARGET_MODULES_MAPPING
 
 from .layer import OSFLayer, dispatch_default
@@ -71,9 +71,12 @@ class OSFModel(BaseTuner):
         *,
         parameter_name: str | None = None,
     ) -> None:
-        # OSF only works on 2D weight matrices
-        if not hasattr(target, "weight") or len(target.weight.shape) != 2:
-            return
+        target_base_layer = target.get_base_layer() if isinstance(target, BaseTunerLayer) else target
+        if not isinstance(target_base_layer, nn.Linear):
+            raise TypeError(
+                f"Target module {target} is not supported. Currently, only the following modules are supported: "
+                "`torch.nn.Linear`."
+            )
 
         # Determine effective rank for this target (supports int or fractional in (0,1])
         def _resolve_rank(value, min_dim: int) -> int:
@@ -105,8 +108,6 @@ class OSFModel(BaseTuner):
             target.update_layer(adapter_name, config=osf_config, **kwargs)
         else:
             new_module = dispatch_default(target, adapter_name, osf_config, **kwargs)
-            if new_module is None:
-                return
             # If adding an additional adapter, keep it frozen initially
             if adapter_name not in self.active_adapters:
                 new_module.requires_grad_(False)

@@ -28,6 +28,10 @@ The functions provided here can be considered "public API" of PEFT and hence are
 [[autodoc]] functional.set_adapter
     - all
 
+## Set the training mode of the specified adapters
+[[autodoc]] functional.set_training
+    - all
+
 ## Set the `requires_grad` attribute of the specified adapters
 [[autodoc]] functional.set_requires_grad
     - all
