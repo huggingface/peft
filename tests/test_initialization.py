@@ -1915,7 +1915,7 @@ class TestLoraInitialization:
         # target_modules=None resolves without error, and (b) be treated as a
         # Mamba-based model so that targeting a Mamba mixer module such as
         # `out_proj` raises (see test_lora_incompatible_mamba_modules above).
-        model_id = "trl-internal-testing/tiny-NemotronHForCausalLM-nano"
+        model_id = "peft-internal-testing/tiny-NemotronHForCausalLM-nano"
         with hub_online_once(model_id):
             # (a) target_modules=None falls back to the nemotron_h defaults
             # (q/k/v/o_proj attention projections), which exist -> does not raise
@@ -4359,7 +4359,7 @@ class TestStrictAdapterCheck:
         # prompt_embeddings, none of them backed by a real model.load_state_dict path. Checking only for the literal
         # key "prompt_embeddings" would wrongly flag them, the general rule is that every prompt learning key loaded
         # this way is a flat, top-level key with no "." in it.
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         config = MultitaskPromptTuningConfig(task_type="CAUSAL_LM", num_virtual_tokens=4, num_tasks=1)
         model = get_peft_model(self._load_base_model(model_id), config)
         model.save_pretrained(tmp_path)
