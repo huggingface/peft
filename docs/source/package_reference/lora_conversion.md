@@ -76,6 +76,13 @@ print(lora_config.rank_pattern)
 
 Using this type of dynamic LoRA rank can be useful if the contribution of the different layers varies a lot. The disadvantage is that it could mean that some layers will have a very high LoRA rank, which can lead to memory spikes. Please test what works best for your use case.
 
+### Exact conversion
+
+For some PEFT methods, the adapter update is itself a low-rank product, in which case the conversion can be exact (lossless), without requiring an SVD:
+
+- [MiSS](https://huggingface.co/docs/peft/package_reference/miss): Exact conversion, choosing the appropriate rank; for the "bat" mode, still uses an approximation with the given rank.
+- [LoHa](https://huggingface.co/docs/peft/package_reference/loha): Via the Khatri-Rao identity, the LoHa delta weight is exactly a rank r² LoRA. The exact conversion is used if the requested rank is an int that is at least r², resulting in a LoRA adapter of rank r²; for lower ranks or float thresholds, the SVD-based approximation is used to honor the requested rank.
+
 ### Compiling the model
 
 For large models, doing the conversion may take some time; for instance each PEFT module has to go through an SVD computation. By passing `compile_kwargs` to [`save_as_lora`] or [`convert_to_lora`], you can apply [`torch.compile`](https://docs.pytorch.org/docs/stable/generated/torch.compile.html) to the conversion function and potentially speed up the process. The `compile_kwargs` are a dict of keyword arguments that are passed to `torch.compile` (empty dict also works). Below is an example:
