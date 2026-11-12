@@ -29,6 +29,10 @@ from .config import HiraConfig
 
 
 class HiraLayer(BaseTunerLayer):
+    # LoRA conversion is not supported: the converter factorizes the additive residual W' - W, but HiRA's update is
+    # multiplicative, W' = W * (1 + Delta_hira), so that residual would be W * Delta_hira and thus depend on the
+    # current base weight. get_delta_weight() returns Delta_hira, which is what merge/unmerge needs, but it is not
+    # the quantity the converter is looking for.
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names: tuple[str, ...] = ("hira_A", "hira_B", "hira_embedding_A", "hira_embedding_B")
     # All names of other parameters that may contain adapter-related parameters
