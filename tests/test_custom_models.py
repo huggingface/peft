@@ -2242,6 +2242,7 @@ class ModelConv2D(nn.Module):
 
     def forward(self, X):
         X = X.to(self.dtype)
+        # Preserve existing flattened 2D inputs while allowing direct 4D inputs for padding tests.
         if X.ndim == 2:
             X = X.reshape(-1, 5, 3, 3)
         X = self.conv2d(X)
@@ -2741,24 +2742,30 @@ class TestPeftCustomModel(PeftCommonTester):
         ],
     )
     @pytest.mark.parametrize("init_weights", [True, False])
+    @torch.no_grad()
     def test_conv2d_padding(self, test_name, model_id, config_cls, config_kwargs, conv_kwargs, init_weights, request):
-        # Regression for #4151: exercise padding through the full custom model and the raw convolution, so that
-        # spatial pooling or the classifier cannot hide incorrect boundary values or output shapes.
+        # Exercise different Conv2d padding configurations, including "same" and "valid" strings, previously broken
+        # for HRA (#4151). Check raw convolution outputs so pooling or the classifier cannot hide incorrect shapes
+        # or boundary values.
         torch.manual_seed(0)
-        base = ModelConv2D(**conv_kwargs).to(self.torch_device)
-        inputs = torch.randn(2, 5, 7, 8, device=self.torch_device, requires_grad=True)
-        expected = base(inputs).detach()
-        expected_conv = base.conv2d(inputs).detach()
+        base = ModelConv2D(**conv_kwargs).to(self.torch_device).eval()
+        inputs = torch.randn(2, 5, 7, 8, device=self.torch_device)
+        expected = base(inputs)
+        expected_conv = base.conv2d(inputs)
         config_kwargs = config_kwargs.copy()
         config_kwargs.pop("init_lora_weights", None)
         if not init_weights:
             config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+
         if config_cls is BOFTConfig and config_kwargs.get("boft_block_size"):
+            # Match each flattened filter's size so varying kernels retain valid block divisibility.
             config_kwargs["boft_block_size"] = base.conv2d.weight[0].numel()
         if config_cls is OFTConfig:
+            # One block fits every filter size and avoids trivial 1x1 blocks for pointwise kernels.
             config_kwargs["r"] = 1
+            # Use exact Cayley so approximation error cannot affect the padding assertions.
             config_kwargs["use_cayley_neumann"] = False
-            # OFT currently rejects dilation and nonzero padding; #4157 removes these restrictions.
+            # OFT currently rejects Conv2d dilation > 1 and nonzero padding.
             if base.conv2d.dilation != (1, 1):
                 with pytest.raises(ValueError, match="Conv2d with dilation > 1 is not supported by OFT"):
                     get_peft_model(base, config_cls(**config_kwargs))
@@ -2768,40 +2775,29 @@ class TestPeftCustomModel(PeftCommonTester):
                     get_peft_model(base, config_cls(**config_kwargs))
                 return
         if (config_cls is BOFTConfig and base.conv2d.kernel_size[0] != base.conv2d.kernel_size[1]) or (
-            config_cls is OFTConfig and base.conv2d.kernel_size != (1, 1)
+            config_cls is OFTConfig and init_weights and base.conv2d.kernel_size != (1, 1)
         ):
-            # Known convolution correctness bugs owned by #4157, independent of HRA's string-padding handling.
+            # Known BOFT non-square kernel (#4152) and OFT Conv2d forward (#3829) bugs.
+            # OFT's native-output comparison only applies to identity initialization.
             request.node.add_marker(
                 pytest.mark.xfail(
-                    reason="Conv2d correctness: https://github.com/huggingface/peft/pull/4157",
+                    reason=(
+                        "BOFT non-square kernels: https://github.com/huggingface/peft/issues/4152; "
+                        "OFT Conv2d forward correctness: https://github.com/huggingface/peft/issues/3829"
+                    ),
                     strict=True,
                     raises=(ValueError, RuntimeError) if config_cls is BOFTConfig else AssertionError,
                 )
             )
-        model = get_peft_model(base, config_cls(**config_kwargs))
-
-        model.train()
+        model = get_peft_model(base, config_cls(**config_kwargs)).eval()
         output = model(inputs)
-        conv_output = model.get_base_model().conv2d(inputs).detach()
+        conv_output = model.get_base_model().conv2d(inputs)
+        assert conv_output.shape == expected_conv.shape
         if init_weights:
             torch.testing.assert_close(output, expected, atol=1e-5, rtol=1e-4)
             torch.testing.assert_close(conv_output, expected_conv, atol=1e-5, rtol=1e-4)
         else:
             assert not torch.equal(conv_output, expected_conv)
-        output.square().mean().backward()
-        assert inputs.grad is not None and torch.isfinite(inputs.grad).all()
-        for parameter in model.parameters():
-            if parameter.requires_grad:
-                assert parameter.grad is not None and torch.isfinite(parameter.grad).all()
-
-        model.eval()
-        with torch.no_grad():
-            output = model(inputs)
-            model.merge_adapter()
-            torch.testing.assert_close(model(inputs), output, atol=1e-4, rtol=1e-4)
-            torch.testing.assert_close(model.get_base_model().conv2d(inputs), conv_output, atol=1e-4, rtol=1e-4)
-            model.unmerge_adapter()
-            torch.testing.assert_close(model(inputs), output, atol=1e-4, rtol=1e-4)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):

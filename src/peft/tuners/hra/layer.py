@@ -450,8 +450,10 @@ class HRAConv2d(nn.Module, HRALayer):
                         left, right, top, bottom = base_layer._reversed_padding_repeated_twice
                         if left == right and top == bottom:
                             padding = (top, left)
-                    # F.unfold supports numeric, symmetric zero padding. Apply asymmetric 'same' padding and
-                    # nonzero padding modes explicitly, using Conv2d's resolved padding for dilation/even kernels.
+                    # F.unfold only supports zero padding, so apply nonzero padding modes with F.pad before unfolding.
+                    # Conv2d stores numeric padding as (height, width), while F.pad expects (left, right, top, bottom),
+                    # stored in _reversed_padding_repeated_twice. The same mechanism handles asymmetric "same" padding,
+                    # which F.unfold cannot accept directly.
                     if base_layer.padding_mode != "zeros" or padding == "same":
                         mode = "constant" if base_layer.padding_mode == "zeros" else base_layer.padding_mode
                         x = F.pad(x, pad=base_layer._reversed_padding_repeated_twice, mode=mode)
