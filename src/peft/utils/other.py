@@ -254,8 +254,9 @@ def prepare_model_for_kbit_training(
         or is_hqq_quantized
         or is_torchao_quantized
     ) and use_gradient_checkpointing:
-        # When having `use_reentrant=False` + actvation checkpointing, there is no need for this hack
-        if activation_checkpointing_kwargs is None or activation_checkpointing_kwargs.get("use_reentrant", True):
+        # Make sure that at least one of the model inputs requires a gradient when gradient checkpointing
+        # and `use_reentrant=True` is used (a requirement by torch.utils.checkpoint).
+        if activation_checkpointing_kwargs is not None and activation_checkpointing_kwargs.get("use_reentrant", False):
             # For backward compatibility
             if hasattr(model, "enable_input_require_grads"):
                 model.enable_input_require_grads()
