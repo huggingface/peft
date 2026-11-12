@@ -24,12 +24,15 @@ import torch
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
 from torch import nn
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import apply_activation_checkpointing
 from transformers import (
     AutoModel,
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
     BitsAndBytesConfig,
+    GPT2Config,
+    GPT2ForSequenceClassification,
 )
 from transformers.pytorch_utils import Conv1D
 
@@ -1998,6 +2001,67 @@ class TestHealthcheck:
             assert healthcheck["model_runtime"]["parameter_devices"] == ["cpu"]
             assert healthcheck["findings"] == []
 
+    # randomly initialized classifier head, since the checkpoint is a causal LM
+    _TASK_HEAD_MODEL_ID = "peft-internal-testing/tiny-random-OPTForCausalLM"
+
+    def _get_model_with_new_task_head(self):
+        with hub_online_once(self._TASK_HEAD_MODEL_ID):
+            return AutoModelForSequenceClassification.from_pretrained(self._TASK_HEAD_MODEL_ID, num_labels=3)
+
+    @staticmethod
+    def finding_codes(model):
+        return {finding["code"] for finding in model.healthcheck()["findings"]}
+
+    def test_new_task_head_without_task_type_is_flagged(self):
+        model = get_peft_model(self._get_model_with_new_task_head(), LoraConfig(target_modules=["q_proj"], r=2))
+
+        model.print_healthcheck()  # does not raise
+        healthcheck = model.healthcheck()
+
+        assert healthcheck["is_ready"] is True  # warning only
+        assert [finding["code"] for finding in healthcheck["findings"]] == ["TASK_HEAD_NOT_SAVED"]
+        assert healthcheck["findings"][0]["severity"] == "warning"
+        assert "'score'" in healthcheck["findings"][0]["message"]
+
+    def test_new_task_head_targeted_by_adapter_is_flagged(self):
+        # only the LoRA weights of the head are saved, not the random base weight
+        config = LoraConfig(target_modules=["q_proj", "score"], r=2)
+        model = get_peft_model(self._get_model_with_new_task_head(), config)
+
+        assert self.finding_codes(model) == {"TASK_HEAD_NOT_SAVED"}
+
+    def test_new_task_head_with_task_type_is_not_flagged(self):
+        config = LoraConfig(target_modules=["q_proj"], r=2, task_type="SEQ_CLS")
+        model = get_peft_model(self._get_model_with_new_task_head(), config)
+
+        assert self.finding_codes(model) == set()
+
+    def test_new_task_head_in_modules_to_save_is_not_flagged(self):
+        config = LoraConfig(target_modules=["q_proj"], r=2, modules_to_save=["score"])
+        model = get_peft_model(self._get_model_with_new_task_head(), config)
+
+        assert self.finding_codes(model) == set()
+
+    def test_pretrained_task_head_is_not_flagged(self):
+        # a classifier checkpoint lists the classification class in `architectures`
+        model_id = "peft-internal-testing/tiny-random-BertForSequenceClassification"
+        with hub_online_once(model_id):
+            base = AutoModelForSequenceClassification.from_pretrained(model_id)
+        assert base.config.architectures == ["BertForSequenceClassification"]
+        model = get_peft_model(base, LoraConfig(target_modules=["query"], r=2))
+
+        assert self.finding_codes(model) == set()
+
+    def test_task_head_without_architectures_is_not_flagged(self):
+        config = GPT2Config(
+            n_layer=1, n_embd=16, n_head=2, vocab_size=50, n_positions=16, pad_token_id=0, num_labels=3
+        )
+        base = GPT2ForSequenceClassification(config)  # created from a config, there is no checkpoint
+        assert not base.config.architectures
+        model = get_peft_model(base, LoraConfig(target_modules=["c_attn"], fan_in_fan_out=True, r=2))
+
+        assert self.finding_codes(model) == set()
+
 
 # Tests for BaseTuner
 class MockModelConfig:
@@ -2784,6 +2848,23 @@ class TestTunerStateDictKeyPrefixes:
         assert "base_model.vera_B" in prefixes
         prefixes = _get_tuner_state_dict_key_prefixes(model, adapter_name="default")
         assert "base_model.vera_A.default" in prefixes
+
+    def test_prefixes_torch_wrapper_names_removed(self):
+        # The state dict keys don't contain the names of torch's wrappers, see #3876. The wrapper name is the last part
+        # of the module name if the wrapper is directly around the tuner layer, whereas a module whose name merely
+        # contains the wrapper name must be left alone.
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.my_checkpoint_wrapped_module = nn.ModuleList([nn.Linear(10, 10)])
+
+        model = get_peft_model(MyModel(), LoraConfig(target_modules=["0"]))
+        prefixes = _get_tuner_state_dict_key_prefixes(model)
+        assert "base_model.model.my_checkpoint_wrapped_module.0.lora_A" in prefixes
+
+        apply_activation_checkpointing(model, check_fn=lambda module: isinstance(module, BaseTunerLayer))
+        assert any(name.endswith("0._checkpoint_wrapped_module") for name, _ in model.named_modules())  # sanity check
+        assert _get_tuner_state_dict_key_prefixes(model) == prefixes
 
     def test_prefixes_auxiliary_modules_not_included(self):
         # auxiliary modules like ModulesToSaveWrapper are handled separately and thus not included

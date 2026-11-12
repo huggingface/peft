@@ -29,10 +29,18 @@ import torch
 import torch.distributed as dist
 from safetensors.torch import load_file as safe_load_file
 from torch import nn
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import apply_activation_checkpointing
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from torch.distributed.tensor import DTensor
-from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
+from transformers import (
+    AutoModelForCausalLM,
+    AutoModelForSequenceClassification,
+    LlamaConfig,
+    LlamaForCausalLM,
+    LlamaModel,
+)
 from transformers.pytorch_utils import Conv1D
 
 from peft import (
@@ -78,9 +86,11 @@ from peft import (
     VeloraConfig,
     VeraConfig,
     WaveFTConfig,
+    get_base_model_state_dict,
     get_peft_model,
     get_peft_model_state_dict,
     inject_adapter_in_model,
+    set_base_model_state_dict,
     set_peft_model_state_dict,
 )
 from peft.tuners import lora
@@ -89,6 +99,7 @@ from peft.tuners.lora.monteclora import MontecloraSampler
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
+from . import testing_common
 from .testing_common import (
     PeftCommonTester,
     _skip_if_merging_not_supported,
@@ -1411,6 +1422,13 @@ ALL_PEFT_CONFIG_CASES = [
     next(row for row in TEST_CASES if row[2] is config_cls) for config_cls in ALL_PEFT_CONFIG_CLASSES
 ]
 
+MODULES_TO_SAVE_TEST_CASES = []
+for config_cls in ALL_PEFT_CONFIG_CLASSES:
+    for case in TEST_CASES:
+        if case[1] == "MLP" and case[2] is config_cls and case[3].get("modules_to_save"):
+            MODULES_TO_SAVE_TEST_CASES.append(case)
+            break
+
 # For this test matrix, each tuple consists of:
 # - test name
 # - tuner method
@@ -2525,6 +2543,14 @@ class TestPeftCustomModel(PeftCommonTester):
 
     transformers_class = MockTransformerWrapper
 
+    @pytest.fixture(autouse=True)
+    def allow_custom_models(self, monkeypatch):
+        # hub_online_once skips non-tiny models on MacOS CI runners unless is_custom_model=True is set. We want the
+        # tests in this test class to run, but the custom models are not recognized as tiny. Therefore, set
+        # is_custom_model explicitly to True. Note that this fixture is only active inside testing_common.py, so any
+        # test in this class that doesn't go through testing_common.py still must set this argument explicitly.
+        monkeypatch.setattr(testing_common, "hub_online_once", partial(hub_online_once, is_custom_model=True))
+
     def prepare_inputs_for_testing(self):
         X = torch.arange(90).view(9, 10).to(self.torch_device)
         return {"X": X}
@@ -2609,6 +2635,11 @@ class TestPeftCustomModel(PeftCommonTester):
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_load_adapter_no_warning(self, test_name, model_id, config_cls, config_kwargs, recwarn, tmp_path):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_load_no_warning(model_id, config_cls, config_kwargs, recwarn, tmp_path)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_save_pretrained_failure(self, test_name, model_id, config_cls, config_kwargs, tmp_path):
         self._test_save_pretrained_failure(model_id, config_cls, config_kwargs, tmp_path)
 
@@ -2681,6 +2712,14 @@ class TestPeftCustomModel(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
+    @pytest.mark.parametrize(
+        "test_name, model_id, config_cls, config_kwargs",
+        MODULES_TO_SAVE_TEST_CASES,
+    )
+    def test_merge_layers_modules_to_save_selection(self, test_name, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_merge_layers_multi(model_id, config_cls, config_kwargs)
+
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
@@ -2707,7 +2746,11 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip("Merging with target_parameters is not supported for all PEFT methods.")
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
 
-        with hub_online_once(model_id):
+        # Explicitly set is_custom_model=True because the test would otherwise be skipped on MacOS CI (the model id is
+        # not detected to be 'tiny' and big models are skipped on MacOS). There is a monkey-patch fixture,
+        # allow_custom_models, which enables this. But the patch is only working inside of testing_common.py, so we need
+        # to set it explicitly here.
+        with hub_online_once(model_id, is_custom_model=True):
             base = self.transformers_class.from_pretrained(model_id)
             config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
             # Best-effort enable dropout for the various PEFT methods to check for deterministic merging.
@@ -4478,7 +4521,8 @@ class TestPeftCustomModel(PeftCommonTester):
         # the default adapter.
         config0 = LoraConfig(task_type=TaskType.SEQ_CLS)
         config1 = LoraConfig(task_type=TaskType.SEQ_CLS)
-        model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
+        with hub_online_once("bert-base-uncased"):
+            model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
         model = get_peft_model(model, config0)
         # sanity check
         assert model.modules_to_save
@@ -4626,7 +4670,8 @@ class TestPeftCustomModel(PeftCommonTester):
         # module is implicitly targeted by modules_to_save twice.
         config0 = LoraConfig(task_type=TaskType.SEQ_CLS)
         config1 = LoraConfig(task_type=TaskType.SEQ_CLS)
-        model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
+        with hub_online_once("bert-base-uncased"):
+            model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
         model = get_peft_model(model, config0)
         model.add_adapter("other", config1)
 
@@ -5100,7 +5145,8 @@ class TestPeftCustomModel(PeftCommonTester):
 
     def test_gpt2_dora_merge_and_unload(self):
         # see https://github.com/huggingface/peft/pull/1588#discussion_r1537914207
-        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        with hub_online_once("gpt2"):
+            model = AutoModelForCausalLM.from_pretrained("gpt2")
         config = LoraConfig(task_type="CAUSAL_LM", use_dora=True)
         model = get_peft_model(model, config)
         # should not raise an error
@@ -5108,7 +5154,8 @@ class TestPeftCustomModel(PeftCommonTester):
 
     def test_gpt2_dora_merge_and_unload_safe_merge(self):
         # see https://github.com/huggingface/peft/pull/1588#discussion_r1537914207
-        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        with hub_online_once("gpt2"):
+            model = AutoModelForCausalLM.from_pretrained("gpt2")
         config = LoraConfig(task_type="CAUSAL_LM", use_dora=True)
         model = get_peft_model(model, config)
         # should not raise an error
@@ -5126,7 +5173,8 @@ class TestPeftCustomModel(PeftCommonTester):
         # Here we test the refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a ModuleDict
         # with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer. Since we want the
         # state_dict format not to change, we ensure that the ".weight" part of the key is removed.
-        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
+        with hub_online_once("peft-internal-testing/opt-125m"):
+            model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         config = LoraConfig(task_type="CAUSAL_LM", use_dora=True)
         model = get_peft_model(model, config)
         state_dict = model.state_dict()
@@ -5144,9 +5192,10 @@ class TestPeftCustomModel(PeftCommonTester):
             assert not any("lora_magnitude_vector.weight" in k for k in state_dict_adapter)
 
             del model
-            loaded = PeftModel.from_pretrained(
-                AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m"), tmp_dirname
-            )
+            with hub_online_once("peft-internal-testing/opt-125m"):
+                loaded = PeftModel.from_pretrained(
+                    AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m"), tmp_dirname
+                )
         finally:
             try:
                 shutil.rmtree(tmp_dirname)
@@ -8454,9 +8503,10 @@ class TestMixedAdapterBatches:
             toc = time.perf_counter()
             logs.append(toc - tic)
 
-        base_model = (
-            AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m").to(self.torch_device).eval()
-        )
+        with hub_online_once("peft-internal-testing/opt-125m"):
+            base_model = (
+                AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m").to(self.torch_device).eval()
+            )
         inputs = {"input_ids": torch.randint(0, 1000, (16, 64)).to(self.torch_device)}
         with timed():
             output_base = base_model(**inputs).logits
@@ -8654,7 +8704,8 @@ class TestDynamicDispatch:
     def test_override_lora_linear(self, custom_lora_cls):
         # in this test, we check if users can override default PEFT behavior by supplying a custom lora class that is
         # being used instead of lora.Linear
-        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
+        with hub_online_once("peft-internal-testing/opt-125m"):
+            model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
         config = LoraConfig(task_type=TaskType.CAUSAL_LM)
         config._register_custom_module({nn.Linear: custom_lora_cls})
         peft_model = get_peft_model(model, config)
@@ -8788,6 +8839,18 @@ class TestDefaultTargetModules:
         assert model.peft_config["default"].target_modules == {"lin0", "lin1"}
 
 
+def get_tiny_llama():
+    config = LlamaConfig(
+        vocab_size=16,
+        hidden_size=8,
+        intermediate_size=16,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+    )
+    return LlamaForCausalLM(config)
+
+
 @pytest.fixture(scope="class")
 def fsdp_process_group():
     # robust and minimal FSDP setup
@@ -8823,8 +8886,90 @@ class TestPeftFsdpStateDict:
         X = torch.arange(90).view(9, 10).to(self.torch_device)
         return {"X": X}
 
+    @pytest.mark.parametrize("bias", ["none", "all", "lora_only"])
+    @pytest.mark.parametrize("adapter_name", ["default", "other"])
+    @pytest.mark.parametrize("pass_state_dict", [False, True])
+    def test_save_load_roundtrip_fsdp_auto_wrapped(self, bias, adapter_name, pass_state_dict):
+        # Nested FSDP wrappers disappear from state dict keys, including trainable bias keys, see #3876.
+        config = LoraConfig(target_modules=["lin0", "lin1"], bias=bias, init_lora_weights=False)
+        model = self.transformers_class.from_pretrained("MLP").to(self.torch_device)
+        model = get_peft_model(model, config, adapter_name=adapter_name).eval()
+        expected_state = {
+            key: value.detach().clone()
+            for key, value in get_peft_model_state_dict(model, adapter_name=adapter_name).items()
+        }
+        model = FSDP(
+            model,
+            use_orig_params=True,
+            device_id=self.torch_device,
+            auto_wrap_policy=partial(transformer_auto_wrap_policy, transformer_layer_cls={MLP}),
+        )
+        inputs = self.prepare_inputs_for_testing()
+        with torch.no_grad():
+            output_before = model(**inputs)
+        if pass_state_dict:
+            state_dict = get_peft_model_state_dict(
+                model.module, state_dict=model.state_dict(), adapter_name=adapter_name
+            )
+        else:
+            state_dict = get_peft_model_state_dict(model, adapter_name=adapter_name)
+        assert state_dict.keys() == expected_state.keys()
+        for key in expected_state:
+            torch.testing.assert_close(state_dict[key], expected_state[key])
+        del model
+
+        # from_pretrained sets the seed, so with init_lora_weights=False this model would start from the same weights
+        config = LoraConfig(target_modules=["lin0", "lin1"], bias=bias)
+        model = self.transformers_class.from_pretrained("MLP").to(self.torch_device)
+        model = get_peft_model(model, config, adapter_name=adapter_name).eval()
+        with torch.no_grad():
+            assert not torch.allclose(model(**inputs), output_before)
+        set_peft_model_state_dict(model, state_dict, adapter_name=adapter_name)
+        with torch.no_grad():
+            torch.testing.assert_close(model(**inputs), output_before)
+
+    @pytest.mark.parametrize(
+        "auto_wrap_policy", [None, partial(transformer_auto_wrap_policy, transformer_layer_cls={LlamaModel})]
+    )
+    @pytest.mark.parametrize("save_embedding_layers", ["auto", True])
+    def test_save_embedding_layers(self, auto_wrap_policy, save_embedding_layers):
+        model = get_tiny_llama().to(self.torch_device)
+        model = get_peft_model(model, LoraConfig(r=2, target_modules=r".*self_attn\.q_proj|model\.embed_tokens"))
+        expected_keys = get_peft_model_state_dict(model, save_embedding_layers=True).keys()
+        assert "base_model.model.model.embed_tokens.base_layer.weight" in expected_keys  # sanity check
+
+        model = FSDP(model, use_orig_params=True, device_id=self.torch_device, auto_wrap_policy=auto_wrap_policy)
+        state_dict = get_peft_model_state_dict(model, save_embedding_layers=save_embedding_layers)
+        assert state_dict.keys() == expected_keys
+
+    def test_base_model_state_dict_fsdp_auto_wrapped(self):
+        # nested FSDP wrappers are not part of the state dict keys, so the adapter keys must still be filtered out
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(8, 8)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        model = get_peft_model(nn.Sequential(Block(), nn.Linear(8, 4)), LoraConfig(r=2, target_modules=["lin"]))
+        expected_keys = sorted(get_base_model_state_dict(model))
+        assert expected_keys == ["0.lin.bias", "0.lin.weight", "1.bias", "1.weight"]
+
+        model = FSDP(
+            model,
+            use_orig_params=True,
+            device_id=self.torch_device,
+            auto_wrap_policy=partial(transformer_auto_wrap_policy, transformer_layer_cls={Block}),
+        )
+        assert any("_fsdp_wrapped_module" in name for name, _ in model.module.named_modules())  # sanity check
+        state_dict = get_base_model_state_dict(model.module)
+        assert sorted(state_dict) == expected_keys
+        set_base_model_state_dict(model.module, state_dict, strict=True)
+
+    @pytest.mark.parametrize("fsdp_version", [pytest.param(1, id="fsdp1"), pytest.param(2, id="fsdp2")])
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
-    def test_save_load_roundtrip_fsdp_wrapped(self, test_name, model_id, config_cls, config_kwargs):
+    def test_save_load_roundtrip_fsdp_wrapped(self, test_name, model_id, config_cls, config_kwargs, fsdp_version):
         # using get_peft_model_state_dict & set_peft_model_state_dict because instead of save_pretrained &
         # from_pretrained because:
         #   1. avoid disk, do everything in memory
@@ -8834,18 +8979,29 @@ class TestPeftFsdpStateDict:
         if (config_cls == DeftConfig) and config_kwargs.get("para"):
             pytest.skip(reason="DEFT with PaRa does not change the base output")
 
+        if fsdp_version == 2 and model_id == "MHA":
+            pytest.skip("FSDP2 cannot map the parameters exposed by LoRA MultiheadAttention")
+
         config_kwargs_init_false = set_init_weights_false(config_cls, config_kwargs)
         config = config_cls(**config_kwargs_init_false)
         torch.manual_seed(0)
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         model = get_peft_model(model, config).eval()
-        model = FSDP(model, use_orig_params=True, device_id=self.torch_device)
+        if fsdp_version == 1:
+            model = FSDP(model, use_orig_params=True, device_id=self.torch_device)
 
         X = self.prepare_inputs_for_testing()
         with torch.no_grad():
             output_before = model(**X)
 
+        if fsdp_version == 2:
+            from torch.distributed.fsdp import fully_shard
+
+            # Save the sharded parameters without requiring every method to support FSDP2 forward hooks.
+            fully_shard(model, mesh=init_device_mesh(self.torch_device, (1,)))
+
         state_dict = get_peft_model_state_dict(model, save_embedding_layers=False)
+        assert not any(isinstance(tensor, DTensor) for tensor in state_dict.values())
         del model
 
         torch.manual_seed(0)
@@ -8917,6 +9073,93 @@ class TestPeftFsdpStateDict:
         with torch.no_grad():
             output_after = model(**X)
         assert torch.allclose(output_after, output_before)
+
+
+class TestPeftCheckpointWrapperStateDict:
+    """
+    Tests with models wrapped by torch's checkpoint_wrapper. Like FSDP, it adds a level to the module names but removes
+    it from the state dict keys, see #3876.
+    """
+
+    transformers_class = MockTransformerWrapper
+    torch_device = infer_device()
+
+    def wrap_base_model(self, model):
+        base_model_cls = type(model.get_base_model())
+        apply_activation_checkpointing(model, check_fn=lambda module: isinstance(module, base_model_cls))
+        assert any("_checkpoint_wrapped_module" in name for name, _ in model.named_modules())  # sanity check
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_save_load_roundtrip(self, test_name, model_id, config_cls, config_kwargs):
+        config = config_cls(**set_init_weights_false(config_cls, config_kwargs))
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config).eval()
+        expected_state = get_peft_model_state_dict(model, save_embedding_layers=False)
+        self.wrap_base_model(model)
+
+        X = torch.arange(90).view(9, 10).to(self.torch_device)
+        with torch.no_grad():
+            output_before = model(X=X)
+
+        state_dict = get_peft_model_state_dict(model, save_embedding_layers=False)
+        assert state_dict.keys() == expected_state.keys()
+        for key in expected_state:
+            torch.testing.assert_close(state_dict[key], expected_state[key])
+
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config_cls(**config_kwargs)).eval()
+        self.wrap_base_model(model)
+        load_result = set_peft_model_state_dict(model, state_dict)
+        assert not load_result.unexpected_keys
+        with torch.no_grad():
+            torch.testing.assert_close(model(X=X), output_before)
+
+    def test_save_pretrained_and_load_adapter(self, tmp_path):
+        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+        model = get_peft_model(MLP().to(self.torch_device), config).eval()
+        self.wrap_base_model(model)
+
+        X = torch.arange(90).view(9, 10).to(self.torch_device)
+        with torch.no_grad():
+            output_before = model(X=X)
+
+        model.save_pretrained(tmp_path)
+        assert sorted(safe_load_file(tmp_path / "adapter_model.safetensors")) == [
+            "base_model.model.lin0.lora_A.weight",
+            "base_model.model.lin0.lora_B.weight",
+        ]
+
+        load_result = model.load_adapter(tmp_path, adapter_name="other")
+        assert not load_result.unexpected_keys
+        model.set_adapter("other")
+        with torch.no_grad():
+            torch.testing.assert_close(model(X=X), output_before)
+
+    @pytest.mark.parametrize("save_embedding_layers", ["auto", True])
+    def test_save_embedding_layers(self, save_embedding_layers):
+        model = get_tiny_llama().to(self.torch_device)
+        model = get_peft_model(model, LoraConfig(r=2, target_modules=r".*self_attn\.q_proj|model\.embed_tokens"))
+        expected_keys = get_peft_model_state_dict(model, save_embedding_layers=True).keys()
+        assert "base_model.model.model.embed_tokens.base_layer.weight" in expected_keys  # sanity check
+
+        apply_activation_checkpointing(model, check_fn=lambda module: isinstance(module, LlamaModel))
+        state_dict = get_peft_model_state_dict(model, save_embedding_layers=save_embedding_layers)
+        assert state_dict.keys() == expected_keys
+
+    def test_get_peft_model_on_wrapped_model(self):
+        # The adapter layers are marked as trainable by matching parameter names, which contain the wrapper name, with
+        # prefixes made for the state dict keys, which don't.
+        base_model = nn.Sequential(MLP())
+        apply_activation_checkpointing(base_model, check_fn=lambda module: isinstance(module, MLP))
+        model = get_peft_model(base_model, LoraConfig(target_modules=["lin0"]))
+        assert sorted(name for name, param in model.named_parameters() if param.requires_grad) == [
+            "base_model.model.0._checkpoint_wrapped_module.lin0.lora_A.default.weight",
+            "base_model.model.0._checkpoint_wrapped_module.lin0.lora_B.default.weight",
+        ]
+        assert sorted(get_peft_model_state_dict(model)) == [
+            "base_model.model.0.lin0.lora_A.weight",
+            "base_model.model.0.lin0.lora_B.weight",
+        ]
 
 
 @pytest.mark.skipif(platform.system() != "Linux", reason="Run FSDP tests only on Linux")
