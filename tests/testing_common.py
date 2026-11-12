@@ -2048,7 +2048,9 @@ class PeftCommonTester:
             if hasattr(model, "generate"):
                 # let's check the scores, not the output ids, since the latter can easily be identical even if the
                 # weights are slightly changed
-                output = model.generate(**input, return_dict_in_generate=True, output_scores=True).scores[0]
+                output = model.generate(
+                    **input, max_new_tokens=1, return_dict_in_generate=True, output_scores=True
+                ).scores[0]
                 # take element 0, as output is a tuple
             else:
                 output = model(**input)

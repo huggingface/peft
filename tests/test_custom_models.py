@@ -3209,7 +3209,6 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
     @pytest.mark.parametrize("autocast_adapter_dtype", [True, False])
-    @pytest.mark.parametrize("low_cpu_mem_usage", [False, True])
     def test_adapter_dtype_autocast(
         self,
         test_name,
@@ -3218,7 +3217,6 @@ class TestPeftCustomModel(PeftCommonTester):
         config_kwargs,
         dtype,
         autocast_adapter_dtype,
-        low_cpu_mem_usage,
         tmp_path,
     ):
         """checks that the dtype of the PEFT adapter corresponds to the expected dtype.
@@ -3262,19 +3260,23 @@ class TestPeftCustomModel(PeftCommonTester):
         model.save_pretrained(tmp_path, save_embedding_layers=False)
         del model
 
-        model = self.transformers_class.from_pretrained(model_id, dtype=dtype).to(self.torch_device)
-        model = PeftModel.from_pretrained(
-            model, tmp_path, autocast_adapter_dtype=autocast_adapter_dtype, low_cpu_mem_usage=low_cpu_mem_usage
-        )
-        if supports_multi_adapter:
-            model.load_adapter(
-                tmp_path / "other",
-                adapter_name="other",
-                autocast_adapter_dtype=autocast_adapter_dtype,
-                low_cpu_mem_usage=low_cpu_mem_usage,
+        # note: don't parametrize over low_cpu_mem_usage because the common part above is relatively slow, so running it
+        # twice would impact CI runtime
+        for low_cpu_mem_usage in (False, True):
+            model = self.transformers_class.from_pretrained(model_id, dtype=dtype).to(self.torch_device)
+            model = PeftModel.from_pretrained(
+                model, tmp_path, autocast_adapter_dtype=autocast_adapter_dtype, low_cpu_mem_usage=low_cpu_mem_usage
             )
-        peft_params = [p for n, p in model.named_parameters() if model.prefix in n]
-        assert all(p.dtype == expected_dtype for p in peft_params)
+            if supports_multi_adapter:
+                model.load_adapter(
+                    tmp_path / "other",
+                    adapter_name="other",
+                    autocast_adapter_dtype=autocast_adapter_dtype,
+                    low_cpu_mem_usage=low_cpu_mem_usage,
+                )
+            peft_params = [p for n, p in model.named_parameters() if model.prefix in n]
+            assert all(p.dtype == expected_dtype for p in peft_params), f"{low_cpu_mem_usage=}"
+            del model
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_only_params_are_updated(self, test_name, model_id, config_cls, config_kwargs):
