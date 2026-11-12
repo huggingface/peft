@@ -14,6 +14,7 @@
 import dataclasses
 import json
 import re
+import warnings
 from copy import deepcopy
 from unittest.mock import Mock
 
@@ -23,6 +24,7 @@ import pytest
 import torch
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
+from safetensors.torch import load_file as safe_load_file
 from torch import nn
 from transformers import (
     AutoModel,
@@ -600,6 +602,63 @@ class TestTargetedModuleNames:
         assert_scale_placement(model.base_model.model.not_fc, feedforward=False)
         assert_scale_placement(model.base_model.model.block.fc, feedforward=True)
         assert_scale_placement(model.base_model.model.block.not_fc, feedforward=False)
+
+    def test_ia3_feedforward_checkpoint_saved_with_endswith_rule_still_loads(self, monkeypatch, tmp_path):
+        # Checkpoints saved while feedforward_modules entries were matched with a plain endswith have the feedforward
+        # layout for modules like "not_fc" when feedforward_modules=["fc"]. They must still load and give the same
+        # outputs, both for square layers (where the shapes are transposed) and non-square layers.
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(8, 8, bias=False)
+                self.not_fc = nn.Linear(8, 8, bias=False)
+                self.other_fc = nn.Linear(8, 4, bias=False)
+
+            def forward(self, x):
+                return self.other_fc(self.not_fc(self.fc(x)))
+
+        def old_check(ia3_config, key):
+            return any(key.endswith(target_key) for target_key in ia3_config.feedforward_modules)
+
+        config = IA3Config(
+            target_modules=["fc", "not_fc", "other_fc"], feedforward_modules=["fc"], init_ia3_weights=False
+        )
+        x = torch.randn(2, 8)
+        with monkeypatch.context() as m:
+            m.setattr(IA3Model, "_check_target_module_feedforward", staticmethod(old_check))
+            torch.manual_seed(0)
+            model = get_peft_model(Model(), config)
+            with torch.no_grad():
+                expected = model(x)
+            model.save_pretrained(tmp_path / "old")
+
+        torch.manual_seed(0)
+        with pytest.warns(UserWarning, match=r"2 modules named \['not_fc', 'other_fc'\] treated as feedforward"):
+            loaded = PeftModel.from_pretrained(Model(), tmp_path / "old")
+        assert loaded.base_model.model.fc.is_feedforward
+        assert loaded.base_model.model.not_fc.is_feedforward
+        assert loaded.base_model.model.other_fc.is_feedforward
+        with torch.no_grad():
+            torch.testing.assert_close(loaded(x), expected)
+
+        # saving again keeps the checkpoint as is
+        loaded.save_pretrained(tmp_path / "resaved")
+        old_sd = safe_load_file(tmp_path / "old" / "adapter_model.safetensors")
+        new_sd = safe_load_file(tmp_path / "resaved" / "adapter_model.safetensors")
+        assert old_sd.keys() == new_sd.keys()
+        for key in old_sd:
+            torch.testing.assert_close(new_sd[key], old_sd[key])
+
+        # adapters created with the current rule load without the fallback
+        torch.manual_seed(0)
+        model = get_peft_model(Model(), config)
+        model.save_pretrained(tmp_path / "new")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            loaded = PeftModel.from_pretrained(Model(), tmp_path / "new")
+        assert loaded.base_model.model.fc.is_feedforward
+        assert not loaded.base_model.model.not_fc.is_feedforward
+        assert not loaded.base_model.model.other_fc.is_feedforward
 
     def test_realistic_example(self):
         model_id = "peft-internal-testing/tiny-random-BloomForCausalLM"

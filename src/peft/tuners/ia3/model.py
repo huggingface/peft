@@ -194,6 +194,48 @@ class IA3Model(BaseTuner):
             is_feedforward = any(_is_valid_match(key, target_key) for target_key in ia3_config.feedforward_modules)
         return is_feedforward
 
+    @classmethod
+    def _remap_adapter_state_dict_for_load(cls, model, config, adapter_name, state_dict):
+        peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
+        if isinstance(config.feedforward_modules, str):
+            return peft_model_state_dict
+
+        # List entries of feedforward_modules used to be matched with a plain endswith, e.g. "fc" also matched
+        # "not_fc". The (IA)³ vectors of such modules were saved in the feedforward layout, (1, in_features), instead
+        # of (out_features, 1). To keep these checkpoints working, a module whose saved vector has the layout of the
+        # old rule is switched back to it. This is only done if the layer holds no other adapter, since is_feedforward
+        # is shared by all adapters of the layer.
+        restored = []
+        for name, module in model.named_modules():
+            if not isinstance(module, IA3Layer) or (list(module.ia3_l.keys()) != [adapter_name]):
+                continue
+            weight = peft_model_state_dict.get(f"{name}.ia3_l.{adapter_name}")
+            key = name.removeprefix("base_model.model.")
+            was_feedforward = any(key.endswith(target_key) for target_key in config.feedforward_modules)
+            if (weight is None) or (was_feedforward == module.is_feedforward):
+                continue
+
+            module.is_feedforward = was_feedforward
+            module.update_layer(adapter_name, config=config)
+            if module.ia3_l[adapter_name].shape == weight.shape:
+                restored.append(key)
+            else:
+                # not the layout of the old rule, restore the layer
+                module.is_feedforward = not was_feedforward
+                module.update_layer(adapter_name, config=config)
+
+        if restored:
+            names = sorted({key.rpartition(".")[-1] for key in restored})
+            warnings.warn(
+                f"Adapter '{adapter_name}' was saved with {len(restored)} modules named {names} treated as "
+                "feedforward modules, because their names end with an entry of "
+                f"feedforward_modules={sorted(config.feedforward_modules)}. Such names only match now if they equal "
+                "an entry or end with `.{entry}`. To keep the behavior of the checkpoint, these modules are still "
+                "treated as feedforward modules. To avoid this warning, add them to feedforward_modules and "
+                "target_modules explicitly."
+            )
+        return peft_model_state_dict
+
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
