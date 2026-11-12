@@ -64,7 +64,7 @@ from .testing_utils import hub_online_once, set_init_weights_false
 PEFT_SEQ_CLS_MODELS_TO_TEST = [
     "peft-internal-testing/tiny-random-BertForSequenceClassification",
     "peft-internal-testing/tiny-random-RobertaForSequenceClassification",
-    "trl-internal-testing/tiny-LlamaForSequenceClassification-3.2",
+    "peft-internal-testing/tiny-LlamaForSequenceClassification-3.2",
 ]
 
 

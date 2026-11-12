@@ -24,7 +24,7 @@ from typing import Any, Optional, Union
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
-from torch import nn, svd_lowrank
+from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_transformers_dtensor_tp, is_transformers_ge_v5_4_0
@@ -41,7 +41,7 @@ from peft.utils.integrations import (
     get_bnb_param_type,
     skip_init_on_device,
 )
-from peft.utils.loftq_utils import loftq_init
+from peft.utils.loftq_utils import _pissa_decomposition, loftq_init
 from peft.utils.other import transpose
 from peft.utils.warning import PeftWarning
 
@@ -49,6 +49,10 @@ from .config import LoraConfig
 
 
 VARIANT_KWARG_KEYS = ["alora_offsets"]
+
+_EMBEDDING_SUPPORTED_TP_PLANS = ["embedding_rowwise", "embedding_colwise"]
+_LINEAR_SUPPORTED_TP_PLANS = ["colwise", "rowwise", "colwise_gather_output"]
+_SUPPORTED_TP_PLANS = _LINEAR_SUPPORTED_TP_PLANS + _EMBEDDING_SUPPORTED_TP_PLANS
 
 
 class LoraVariant:
@@ -395,11 +399,11 @@ class LoraLayer(BaseTunerLayer):
         if device_mesh is None:
             return
 
-        if tp_plan not in ["colwise", "rowwise", "embedding_rowwise", "colwise_gather_output"]:
+        if tp_plan not in _SUPPORTED_TP_PLANS:
             warnings.warn(
                 f'tp_plan "{tp_plan}" found on the base layer is not supported for LoRA weight '
-                'synchronization. Expected one of "colwise", "rowwise", "embedding_rowwise", '
-                '"colwise_gather_output". LoRA weights may not be synchronized across ranks.'
+                f"synchronization. Expected one of: {', '.join(_SUPPORTED_TP_PLANS)}. "
+                "LoRA weights may not be synchronized across ranks."
             )
             return
 
@@ -418,6 +422,9 @@ class LoraLayer(BaseTunerLayer):
         elif tp_plan == "embedding_rowwise" and adapter_name in self.lora_embedding_B:
             self._move_adapter_to_device_of_base_layer(adapter_name)
             dist.broadcast(self.lora_embedding_B[adapter_name].data, src=src, group=pg)
+        elif tp_plan == "embedding_colwise" and adapter_name in self.lora_embedding_A:
+            self._move_adapter_to_device_of_base_layer(adapter_name)
+            dist.broadcast(self.lora_embedding_A[adapter_name].data, src=src, group=pg)
         elif tp_plan == "colwise_gather_output" and adapter_name in self.lora_A:
             # No TP hooks are added to the LoRA layers of such a base layer (e.g. lm_head), so both are
             # replicated
@@ -483,29 +490,11 @@ class LoraLayer(BaseTunerLayer):
                 "Subsequently, re-quantize the residual model to help minimize quantization errors."
             )
         weight = transpose(weight.to(torch.float32), self.fan_in_fan_out)
-        if init_lora_weights == "pissa":
-            # USV^T = W <-> VSU^T = W^T, where W^T = weight.data in R^{out_channel, in_channel},
-            V, S, Uh = torch.linalg.svd(weight.data, full_matrices=False)
-            Vr = V[:, : self.r[adapter_name]]
-            Sr = S[: self.r[adapter_name]]
-            Sr /= self.scaling[adapter_name]
-            Uhr = Uh[: self.r[adapter_name]]
-        elif len(init_lora_weights.split("_niter_")) == 2:
-            Vr, Sr, Ur = svd_lowrank(
-                weight.data, self.r[adapter_name], niter=int(init_lora_weights.split("_niter_")[-1])
-            )
-            Sr /= self.scaling[adapter_name]
-            Uhr = Ur.t()
-        else:
-            raise ValueError(
-                f"init_lora_weights should be 'pissa' or 'pissa_niter_[number of iters]', got {init_lora_weights} instead."
-            )
-
-        lora_A = torch.diag(torch.sqrt(Sr)) @ Uhr
-        lora_B = Vr @ torch.diag(torch.sqrt(Sr))
+        lora_A, lora_B, weight = _pissa_decomposition(
+            weight.data, self.r[adapter_name], self.scaling[adapter_name], init_lora_weights
+        )
         self.lora_A[adapter_name].weight.data = lora_A
         self.lora_B[adapter_name].weight.data = lora_B
-        weight = weight.data - self.scaling[adapter_name] * lora_B @ lora_A
         weight = transpose(weight.to(dtype), self.fan_in_fan_out)
         self.get_base_layer().weight.data = weight
 
@@ -1289,10 +1278,10 @@ class Embedding(nn.Module, LoraLayer):
             if not is_transformers_ge_v5_4_0:
                 raise RuntimeError("Tensor Parallel with LoRA is only supported for transformers v5.4.0 and above. ")
 
-            if tp_plan != "embedding_rowwise":
+            if tp_plan not in _EMBEDDING_SUPPORTED_TP_PLANS:
                 raise ValueError(
-                    f'Unsupported tensor parallel plan {tp_plan} for embedding layers. Only "embedding_rowwise" is '
-                    "supported."
+                    f"Unsupported tensor parallel plan {tp_plan} for embedding layers. "
+                    f"Supported plans: {', '.join(_EMBEDDING_SUPPORTED_TP_PLANS)}."
                 )
 
             from transformers.integrations.tensor_parallel import ALL_PARALLEL_STYLES
@@ -1384,32 +1373,42 @@ class Embedding(nn.Module, LoraLayer):
 
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
-        # If there is tensor parallelism, we register the hooks for `self._embed`.
         if self.tp_layer is not None:
-            holder = LoraEmbeddingATPHolder(self.lora_embedding_A[adapter_name])
+            tp_plan = self.get_base_layer()._hf_tp_plan
+            # Vocabulary TP shards A and hooks the lookup, hidden-dimension TP shards B instead.
+            if tp_plan == "embedding_colwise":
+                from torch.distributed.tensor import Shard, distribute_tensor
 
-            if is_transformers_dtensor_tp:
-                self.tp_layer.shard_param(holder, "weight", self.device_mesh)
-                sharded_weight = nn.Parameter(holder.weight.T, requires_grad=holder.weight.requires_grad)
+                weight = self.lora_embedding_B[adapter_name]
+                self.lora_embedding_B[adapter_name] = nn.Parameter(
+                    distribute_tensor(weight, self.device_mesh, [Shard(0)], src_data_rank=None),
+                    requires_grad=weight.requires_grad,
+                )
+            elif tp_plan == "embedding_rowwise":
+                holder = LoraEmbeddingATPHolder(self.lora_embedding_A[adapter_name])
 
-                def input_fn(inputs):
-                    (x,), _ = self.tp_layer.transform_inputs_pre_forward(holder, inputs, {}, self.device_mesh)
-                    return x
+                if is_transformers_dtensor_tp:
+                    self.tp_layer.shard_param(holder, "weight", self.device_mesh)
+                    sharded_weight = nn.Parameter(holder.weight.T, requires_grad=holder.weight.requires_grad)
 
-                def output_fn(outputs):
-                    return self.tp_layer.transform_output_post_forward(holder, outputs, self.device_mesh)
+                    def input_fn(inputs):
+                        (x,), _ = self.tp_layer.transform_inputs_pre_forward(holder, inputs, {}, self.device_mesh)
+                        return x
 
-                self.lora_embedding_A[adapter_name] = sharded_weight
-            else:
+                    def output_fn(outputs):
+                        return self.tp_layer.transform_output_post_forward(holder, outputs, self.device_mesh)
 
-                def input_fn(inputs):
-                    return self.tp_layer._prepare_input_fn(holder, inputs, self.device_mesh)
+                    self.lora_embedding_A[adapter_name] = sharded_weight
+                else:
 
-                def output_fn(outputs):
-                    return self.tp_layer._prepare_output_fn(holder, outputs, self.device_mesh)
+                    def input_fn(inputs):
+                        return self.tp_layer._prepare_input_fn(holder, inputs, self.device_mesh)
 
-            self.input_fns[adapter_name] = input_fn
-            self.output_fns[adapter_name] = output_fn
+                    def output_fn(outputs):
+                        return self.tp_layer._prepare_output_fn(holder, outputs, self.device_mesh)
+
+                self.input_fns[adapter_name] = input_fn
+                self.output_fns[adapter_name] = output_fn
 
     def mica_init(self, adapter_name):
         """Minor Component Adaptation (MiCA) initialization for embedding layers.
@@ -1555,15 +1554,12 @@ class Embedding(nn.Module, LoraLayer):
             if active_adapter not in self.lora_embedding_A.keys():
                 continue
 
-            embedding_A = self.lora_embedding_A[active_adapter].T
-            embedding_B = self.lora_embedding_B[active_adapter].T
             scaling = self.scaling[active_adapter]
 
             # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
             # layer output
             sub_batch = x[sub_batch_indices_list[i]]
-            after_A = self._embed(sub_batch, embedding_A)
-            adapter_output = (after_A @ embedding_B) * scaling
+            adapter_output = self._embedding_forward(sub_batch, active_adapter) * scaling
 
             # Apply embed_scale to match the base layer's scaling
             if embed_scale is not None:
@@ -1572,6 +1568,29 @@ class Embedding(nn.Module, LoraLayer):
             result[sub_batch_indices_list[i]] += adapter_output
 
         return result
+
+    def _embedding_forward(self, x: torch.Tensor, adapter_name: str) -> torch.Tensor:
+        embedding_A = self.lora_embedding_A[adapter_name].T
+        embedding_B = self.lora_embedding_B[adapter_name].T
+        if getattr(self.get_base_layer(), "_hf_tp_plan", None) == "embedding_colwise":
+            # In the case of column-wise, embedding_A is replicated and embedding_B is sharded.
+            # To be able to compute the output:
+            #   1. Convert the local embedding_A to a DTensor with Replicate placement.
+            #      It does not involve any communication.
+            #   2. Perform the matrix multiplication with embedding_B, which is sharded across devices.
+            #   3. Gather the output slices to get the full output.
+            from torch.distributed.tensor import DTensor, Replicate
+
+            after_A = self._embed(x, embedding_A)
+            after_A = DTensor.from_local(after_A, self.device_mesh, [Replicate()], run_check=False)
+            output = after_A @ embedding_B
+            # Gather output slices after the projection, keeping B sharded throughout the forward.
+            return output.redistribute(placements=[Replicate()]).to_local()
+
+        after_A = self._embed(
+            x, embedding_A, input_fn=self.input_fns.get(adapter_name), output_fn=self.output_fns.get(adapter_name)
+        )
+        return after_A @ embedding_B
 
     def _embed(
         self,
@@ -1622,14 +1641,8 @@ class Embedding(nn.Module, LoraLayer):
                     continue
 
                 if active_adapter not in self.lora_variant:  # vanilla LoRA
-                    embedding_A = self.lora_embedding_A[active_adapter].T
-                    embedding_B = self.lora_embedding_B[active_adapter].T
                     scaling = self.scaling[active_adapter]
-                    # input and output function hooks for TP support.
-                    input_fn = self.input_fns.get(active_adapter, None)
-                    output_fn = self.output_fns.get(active_adapter, None)
-                    after_A = self._embed(x, embedding_A, input_fn=input_fn, output_fn=output_fn)
-                    adapter_output = (after_A @ embedding_B) * scaling
+                    adapter_output = self._embedding_forward(x, active_adapter) * scaling
 
                     # Apply embed_scale to match the base layer's scaling
                     if embed_scale is not None:
