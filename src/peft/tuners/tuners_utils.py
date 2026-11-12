@@ -44,7 +44,7 @@ from peft.utils.constants import (
     SEQ_CLS_HEAD_NAMES,
 )
 from peft.utils.error import NoMatchingPeftModuleError
-from peft.utils.integrations import TpMeshDimRegistry, init_empty_weights
+from peft.utils.integrations import TpMeshDimRegistry, init_empty_weights, remove_torch_wrapper_names
 from peft.utils.other import (
     AuxiliaryTrainingWrapper,
     ModulesToSaveWrapper,
@@ -173,24 +173,25 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     This function covers a broad range of layers, some of which the caller might not support. Therefore, just because
     this function returns a valid result does not imply that the layer type is supported.
     """
-    if isinstance(module, nn.Linear):
+    if isinstance(module, (nn.Linear, nn.Embedding)):
+        if isinstance(module, nn.Embedding):
+            in_features, out_features = module.num_embeddings, module.embedding_dim
+        else:
+            in_features, out_features = module.in_features, module.out_features
         if _torch_supports_distributed and isinstance(module.weight, torch.distributed.tensor.DTensor):
             # Transformers TP initializes full-shaped adapters and shards them with the TP hooks afterwards.
             # Without a Transformers TP plan, only registered TP mesh dimensions use the local shard shape.
-            # All other meshes use the full shape, as FSDP2 gathers the base weight before the projection.
+            # All other meshes use the full shape, as FSDP2 gathers the base weight before the forward.
             has_tp_dim = any(
                 TpMeshDimRegistry.is_registered(name) for name in module.weight.device_mesh.mesh_dim_names or ()
             )
             if has_tp_dim and getattr(module, "_hf_tp_plan", None) is None:
-                out_features, in_features = module.weight.to_local().shape
-            else:
-                in_features, out_features = module.in_features, module.out_features
-        else:
-            in_features, out_features = module.in_features, module.out_features
+                if isinstance(module, nn.Embedding):
+                    in_features, out_features = module.weight.to_local().shape
+                else:
+                    out_features, in_features = module.weight.to_local().shape
     elif isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
         in_features, out_features = module.in_channels, module.out_channels
-    elif isinstance(module, nn.Embedding):
-        in_features, out_features = module.num_embeddings, module.embedding_dim
     elif isinstance(module, Conv1D):
         in_features, out_features = (
             module.weight.ds_shape if hasattr(module.weight, "ds_shape") else module.weight.shape
@@ -521,10 +522,10 @@ class BaseTuner(nn.Module, ABC):
         # parameter names against self.prefix, so that a base model module whose name happens to contain the prefix is
         # not treated as an adapter module.
         adapter_prefixes = _get_tuner_state_dict_key_prefixes(model)
-        adapter_param_names = set(_filter_state_dict_by_key_prefixes(dict(model.named_parameters()), adapter_prefixes))
         aux_module_names = {n for n, m in model.named_modules() if isinstance(m, AuxiliaryTrainingWrapper)}
         for n, p in model.named_parameters():
-            if n in adapter_param_names:
+            # the prefixes are made to match the state_dict keys, which don't contain the torch wrapper names
+            if _is_key_under_prefixes(remove_torch_wrapper_names(n), adapter_prefixes):
                 continue
             if _is_key_under_prefixes(n, aux_module_names):
                 # auxiliary modules like ModulesToSaveWrapper manage the requires_grad state of their parameters
@@ -1631,8 +1632,7 @@ class BaseTuner(nn.Module, ABC):
         bias_state_dict = {}
         if bias.endswith("_only"):  # e.g. 'lora_only'
             for module_name, module in model.named_modules():
-                if module_name.startswith("_fsdp_wrapped_module."):
-                    module_name = module_name.removeprefix("_fsdp_wrapped_module.")
+                module_name = remove_torch_wrapper_names(module_name)
                 if not isinstance(module, BaseTunerLayer):
                     continue
                 # the bias of the targeted module is located on the base layer of the tuner layer
@@ -1847,10 +1847,7 @@ def _get_tuner_state_dict_key_prefixes(model: nn.Module, adapter_name: Optional[
     # layers nested inside of it
     aux_module_names = set()
     for module_name, module in model.named_modules():
-        if module_name.startswith("_fsdp_wrapped_module."):
-            # If FSDP is used, the state_dict is from the unwrapped model, which would result in a key mismatch if we
-            # didn't remove the FSDP-specific prefix
-            module_name = module_name.removeprefix("_fsdp_wrapped_module.")
+        module_name = remove_torch_wrapper_names(module_name)
 
         if isinstance(module, AuxiliaryTrainingWrapper):
             aux_module_names.add(module_name)

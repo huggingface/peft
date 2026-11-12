@@ -663,6 +663,13 @@ class TestDecoderModels(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_load_adapter_no_warning(self, model_id, config_cls, config_kwargs, recwarn, tmp_path):
+        _skip_if_not_conv1d_supported(model_id, config_cls)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_load_no_warning(model_id, config_cls, config_kwargs.copy(), recwarn, tmp_path)
+
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_pickle(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
@@ -1037,7 +1044,7 @@ class TestDecoderModels(PeftCommonTester):
 
     def test_prefix_tuning_qwen3_with_grouped_query_attention(self):
         # See 2881, fixes a bug with handling GQA
-        model_id = "trl-internal-testing/tiny-Qwen3ForCausalLM"
+        model_id = "peft-internal-testing/tiny-Qwen3ForCausalLM"
         with hub_online_once(model_id):
             base_model = AutoModelForCausalLM.from_pretrained(model_id)
             peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM")

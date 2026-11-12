@@ -204,8 +204,6 @@ class ShadowConfig(PeftConfig):
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
 
-        if isinstance(self.target_modules, str) and self.layers_to_transform is not None:
-            raise ValueError("`layers_to_transform` cannot be used when `target_modules` is a str.")
         if isinstance(self.target_modules, str) and self.layers_pattern is not None:
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
         if self.layers_pattern and self.layers_to_transform is None:

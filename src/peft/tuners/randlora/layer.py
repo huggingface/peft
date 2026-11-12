@@ -322,7 +322,7 @@ class Linear(nn.Linear, RandLoraLayer):
         output_tensor = transpose(update, self.fan_in_fan_out)
 
         scaling = self.scaling[adapter]
-        return output_tensor * scaling
+        return output_tensor.mul_(scaling)
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
