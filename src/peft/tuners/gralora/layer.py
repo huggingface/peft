@@ -309,7 +309,8 @@ class Linear(nn.Linear, GraloraLayer):
             delta_weight += weight_B_general @ weight_A_general
 
         # Apply scaling and transpose if needed
-        delta_weight = transpose(delta_weight, self.fan_in_fan_out) * self.scaling[adapter]
+        delta_weight = transpose(delta_weight, self.fan_in_fan_out)
+        delta_weight.mul_(self.scaling[adapter])
 
         # Cast back if needed
         if cast_to_fp32:

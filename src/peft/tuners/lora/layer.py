@@ -1166,7 +1166,8 @@ class Linear(nn.Module, LoraLayer):
             weight_A = weight_A.float()
             weight_B = weight_B.float()
 
-        output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
+        output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out)
+        output_tensor.mul_(self.scaling[adapter])
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -1525,7 +1526,8 @@ class Embedding(nn.Module, LoraLayer):
             weight_A = weight_A.float()
             weight_B = weight_B.float()
 
-        output_tensor = transpose(weight_B @ weight_A, True) * self.scaling[adapter]
+        output_tensor = transpose(weight_B @ weight_A, True)
+        output_tensor.mul_(self.scaling[adapter])
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -1913,16 +1915,13 @@ class _ConvNd(nn.Module, LoraLayer):
         # https://github.com/bmaltais/kohya_ss/blob/feb6728762a8f463d15ba936d189d4c3abfaa1ab/networks/lora.py#L117
         if self.get_base_layer().weight.shape[2:] == (1, 1):
             # conv2d 1x1
-            output_tensor = (weight_B.squeeze(3).squeeze(2) @ weight_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(
-                3
-            ) * self.scaling[adapter]
+            output_tensor = (weight_B.squeeze(3).squeeze(2) @ weight_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(3)
         else:
             output_tensor = self.conv_fn(weight_A.transpose(0, 1), weight_B)
 
-            if self.get_base_layer().groups > 1:
-                output_tensor = output_tensor * self.scaling[adapter]
-            else:
-                output_tensor = output_tensor.transpose(0, 1) * self.scaling[adapter]
+            if self.get_base_layer().groups == 1:
+                output_tensor = output_tensor.transpose(0, 1)
+        output_tensor.mul_(self.scaling[adapter])
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -2325,7 +2324,8 @@ class MultiheadAttention(nn.Module, LoraLayer):
             weight_A = weight_A.float()
             weight_B = weight_B.float()
 
-        output_tensor = (weight_B @ weight_A) * self.scaling[adapter]
+        output_tensor = weight_B @ weight_A
+        output_tensor.mul_(self.scaling[adapter])
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -2717,10 +2717,11 @@ class ParamWrapper(nn.Module, LoraLayer):
             weight_B = weight_B.reshape(weight_B.shape[0], -1, self.num_experts)
             # fan_in_fan_out must be False, so no transpose call here
             if not self._did_swap_in_out_features:
-                delta_weight = torch.einsum("o r e, e r i -> e i o", weight_B, weight_A) * self.scaling[adapter_name]
+                delta_weight = torch.einsum("o r e, e r i -> e i o", weight_B, weight_A)
             else:
                 # for some MoE layers, the order is (experts, out_features, in_features)
-                delta_weight = torch.einsum("o r e, e r i -> e o i", weight_B, weight_A) * self.scaling[adapter_name]
+                delta_weight = torch.einsum("o r e, e r i -> e o i", weight_B, weight_A)
+            delta_weight.mul_(self.scaling[adapter_name])
 
         param = self.get_param()
         if param.dtype in ALLOWED_COMPUTE_DTYPES:

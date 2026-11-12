@@ -190,7 +190,7 @@ class Linear(nn.Module, SupertuningLayer):
         alpha = self.supertuning_lora_alpha[adapter_name]
         A = self.supertuning_lora_A[adapter_name].weight
         B = self.supertuning_lora_B[adapter_name].weight
-        return ((alpha / r) * (B @ A)).to(dtype)
+        return (B @ A).mul_(alpha / r).to(dtype)
 
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         """Return the dense `[out_features, in_features]` delta for a given adapter (sparse + optional LoRA).
