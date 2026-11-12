@@ -2797,6 +2797,14 @@ class TestPeftCustomModel(PeftCommonTester):
         self._test_safe_merge_broken_adapter_leaves_base_layer_unchanged(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_merge_into_parametrized_base_layer_raises(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        if model_id == "MHA":
+            pytest.skip("LoRA on MultiheadAttention manages out_proj itself, which fails with a parametrization.")
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_merge_into_parametrized_base_layer_raises(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_safe_merge_non_finite_bias_leaves_base_layer_unchanged(
         self, test_name, model_id, config_cls, config_kwargs
     ):
