@@ -282,6 +282,18 @@ CASES = [
     Case("hira", HiraConfig, {"task_type": "CAUSAL_LM"}),
     Case("hra", HRAConfig, {"task_type": "CAUSAL_LM"}),
     Case("ia3", IA3Config, {"task_type": "CAUSAL_LM"}),
+    Case(
+        "ia3_feedforward_suffix",
+        IA3Config,
+        {"task_type": "SEQ_2_SEQ_LM", "target_modules": ["k", "v", "o", "wo"], "feedforward_modules": ["o"]},
+        model_id=MODEL_T5,
+        model_cls="AutoModelForSeq2SeqLM",
+        inputs=dict(INPUTS_SEQ2SEQ),
+        notes=(
+            "feedforward_modules entries used to be matched with endswith, so 'wo' was saved as a feedforward module, "
+            "see 4118"
+        ),
+    ),
     Case("lily", LilyConfig, {"target_modules": ["q_proj", "v_proj"], "r": 8, "stride_A": 1, "num_B": 2}),
     Case(
         "ln_tuning",
