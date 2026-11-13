@@ -38,6 +38,7 @@ from transformers.pytorch_utils import Conv1D
 from peft import (
     AdaLoraConfig,
     AdaptionPromptConfig,
+    BayesianLoraConfig,
     BOFTConfig,
     HRAConfig,
     IA3Config,
@@ -1435,6 +1436,62 @@ class PeftGPUCommonTests(unittest.TestCase):
         # sanity check
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, LoraLinear8bitLt)
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear8bitLt)
+
+    @parameterized.expand(["4bit", "8bit"])
+    @require_non_cpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_bnb_bayesian_lora(self, quant):
+        # Bayesian-LoRA must not silently fall back to plain LoRA on bnb-quantized layers: check that the layers get
+        # the variant, that training yields a KL term and gradients, and that merging uses the point estimate.
+        torch.manual_seed(0)
+        if quant == "4bit":
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True, bnb_4bit_use_double_quant=False, bnb_4bit_compute_dtype=torch.float32
+            )
+            layer_cls, atol, rtol = LoraLinear4bit, 1e-5, 1e-3
+        else:
+            quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+            layer_cls, atol, rtol = LoraLinear8bitLt, 1e-3, 1
+        model = AutoModelForCausalLM.from_pretrained(
+            "trl-internal-testing/tiny-random-LlamaForCausalLM",
+            quantization_config=quantization_config,
+            dtype=torch.float32,
+        ).eval()
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        with torch.inference_mode():
+            out_base = F.softmax(model(random_input).logits, dim=-1)
+
+        # a large prior_sd makes the adapter effect measurable despite quantization
+        config = LoraConfig(r=8, init_lora_weights=False, bayesian_lora_config=BayesianLoraConfig(prior_sd=30.0))
+        model = get_peft_model(model, config)
+        layers = [module for module in model.modules() if isinstance(module, layer_cls)]
+        assert layers
+        assert all("default" in layer.lora_bayesian_A and "default" in layer.lora_bayesian_B for layer in layers)
+
+        model.train()
+        loss = model(random_input).logits.mean()
+        kl = model.base_model._get_bayesian_lora_loss()
+        assert isinstance(kl, torch.Tensor) and kl.item() > 0
+        (loss + kl).backward()
+        assert all(layer.lora_bayesian_A["default"].inducing_mean.grad is not None for layer in layers)
+        model.zero_grad()
+
+        model.eval()
+        with torch.inference_mode():
+            out_bayes = F.softmax(model(random_input).logits, dim=-1)
+            model.merge_adapter()
+            out_merged = F.softmax(model(random_input).logits, dim=-1)
+            model.unmerge_adapter()
+            out_unmerged = F.softmax(model(random_input).logits, dim=-1)
+            model = model.merge_and_unload()
+            out_unloaded = F.softmax(model(random_input).logits, dim=-1)
+
+        # sanity check that the adapter changes the results (strict tolerance, the 8bit tolerance below is very loose)
+        assert not torch.allclose(out_base, out_bayes, atol=1e-5, rtol=1e-3)
+        assert torch.allclose(out_bayes, out_merged, atol=atol, rtol=rtol)
+        assert torch.allclose(out_bayes, out_unmerged, atol=atol, rtol=rtol)
+        assert torch.allclose(out_bayes, out_unloaded, atol=atol, rtol=rtol)
 
     @require_non_cpu
     @pytest.mark.single_gpu_tests
