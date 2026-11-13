@@ -128,12 +128,6 @@ class TestResnet:
         # see 1732
         torch.manual_seed(0)
         model = AutoModelForImageClassification.from_pretrained(self.model_id)
-        uses_nonzero_padding = any(
-            m.padding not in (0, (0, 0)) for name, m in model.named_modules() if name.endswith(".convolution")
-        )
-        if isinstance(config, OFTConfig) and uses_nonzero_padding:
-            pytest.skip("OFT does not work (yet) with non-zero padding, skipping this test.")
-
         model = get_peft_model(model, config)
 
         # record outputs before training
@@ -243,35 +237,16 @@ class TestConvArguments:
 
         kernel_size = pair(kernel_size)
         dilation = pair(dilation)
-        # An unpadded kernel must fit in the input for OFT's rotation. Padding and stride can still change the output.
-        spatial_size = tuple(d * (k - 1) + 1 for k, d in zip(kernel_size, dilation))
+        # Make the input larger than the dilated kernel, so that the output has more than one spatial position and
+        # neighbouring kernel windows overlap.
+        spatial_size = tuple(d * (k - 1) + 1 + 4 for k, d in zip(kernel_size, dilation))
 
         return torch.randn(batch_size, in_channels, *spatial_size)
-
-    def should_skip(self, config, conv_kwargs):
-        kernel_size = conv_kwargs.get("kernel_size", 3)
-        kernel_is_square = isinstance(kernel_size, int) or len(set(kernel_size)) == 1
-        return config.peft_type in {"HRA", "BOFT"} and not kernel_is_square
-
-    def get_expected_oft_error(self, config, conv_kwargs):
-        if config.peft_type != "OFT":
-            return None
-        if conv_kwargs.get("dilation", 1) not in (1, (1, 1)):
-            return "Conv2d with dilation > 1 is not supported by OFT"
-        kernel_size = conv_kwargs.get("kernel_size", 3)
-        if not isinstance(kernel_size, int) and kernel_size[0] != kernel_size[1]:
-            return "Conv2d with non-square kernels is not supported by OFT"
-        if conv_kwargs.get("padding", 0) not in (0, (0, 0), "valid"):
-            return "Conv2d with non-zero padding is not supported by OFT"
-        return None
 
     @pytest.mark.parametrize("config", CONFIGS.values(), ids=CONFIGS.keys())
     @pytest.mark.parametrize("conv_kwargs", conv_kwargs)
     def test_base_output_preserved_in_forward(self, config, conv_kwargs):
         # Compare raw convolution outputs so that shape errors and missing convolution arguments are visible.
-        if self.should_skip(config, conv_kwargs):
-            pytest.skip("This method assumes square convolution kernels throughout its weight handling")
-
         torch.manual_seed(0)
         model = self.get_conv_model(**conv_kwargs)
 
@@ -281,12 +256,6 @@ class TestConvArguments:
 
         config = copy.deepcopy(config)
         config.target_modules = {"convolution"}
-
-        expected_error = self.get_expected_oft_error(config, conv_kwargs)
-        if expected_error:
-            with pytest.raises(ValueError, match=expected_error):
-                model = get_peft_model(model, config).eval()
-            return
 
         model = get_peft_model(model, config).eval()
         with torch.inference_mode():
@@ -299,9 +268,6 @@ class TestConvArguments:
     @pytest.mark.parametrize("conv_kwargs", conv_kwargs)
     def test_base_output_preserved_after_merging(self, config, conv_kwargs):
         # Same test as test_base_output_preserved_in_forward, but after merging the PEFT model into the base model.
-        if self.should_skip(config, conv_kwargs):
-            pytest.skip("This method assumes square convolution kernels throughout its weight handling")
-
         torch.manual_seed(0)
         model = self.get_conv_model(**conv_kwargs)
 
@@ -311,12 +277,6 @@ class TestConvArguments:
 
         config = copy.deepcopy(config)
         config.target_modules = {"convolution"}
-
-        expected_error = self.get_expected_oft_error(config, conv_kwargs)
-        if expected_error:
-            with pytest.raises(ValueError, match=expected_error):
-                model = get_peft_model(model, config).eval()
-            return
 
         model = get_peft_model(model, config).eval()
         model.merge_adapter()
@@ -331,9 +291,6 @@ class TestConvArguments:
     @pytest.mark.parametrize("conv_kwargs", conv_kwargs)
     def test_unmerged_and_merged_forward_same_result(self, config, conv_kwargs):
         # merging should not change the result
-        if self.should_skip(config, conv_kwargs):
-            pytest.skip("This method assumes square convolution kernels throughout its weight handling")
-
         torch.manual_seed(0)
         model = self.get_conv_model(**conv_kwargs)
 
@@ -347,12 +304,11 @@ class TestConvArguments:
         config.init_weights = False
         config.init_lora_weights = False
         config.init_ia3_weights = False
-
-        expected_error = self.get_expected_oft_error(config, conv_kwargs)
-        if expected_error:
-            with pytest.raises(ValueError, match=expected_error):
-                model = get_peft_model(model, config).eval()
-            return
+        if isinstance(config, OFTConfig):
+            # With random weights in a block this large, the Cayley-Neumann approximation is far from orthogonal and
+            # unmerging, which inverts it, can lose precision beyond the tolerance below (seen with dilation (1, 2)).
+            # The exact Cayley transform is orthogonal, so unmerging is precise.
+            config.use_cayley_neumann = False
 
         model = get_peft_model(model, config).eval()
         with torch.inference_mode():
@@ -381,8 +337,6 @@ class TestConvArguments:
     @pytest.mark.parametrize("conv_kwargs", conv_kwargs)
     def test_multi_adapter_unmerged_and_merged_forward_same_result(self, config, conv_kwargs):
         # same as test_unmerged_and_merged_forward_same_result but with multiple adapters
-        if self.should_skip(config, conv_kwargs):
-            pytest.skip("This method assumes square convolution kernels throughout its weight handling")
         if isinstance(config, AdaLoraConfig):
             pytest.skip("AdaLoRA does not support multiple adapters, skipping this test")
 
@@ -397,12 +351,11 @@ class TestConvArguments:
         config.init_weights = False
         config.init_lora_weights = False
         config.init_ia3_weights = False
-
-        expected_error = self.get_expected_oft_error(config, conv_kwargs)
-        if expected_error:
-            with pytest.raises(ValueError, match=expected_error):
-                model = get_peft_model(model, config).eval()
-            return
+        if isinstance(config, OFTConfig):
+            # With random weights in a block this large, the Cayley-Neumann approximation is far from orthogonal and
+            # unmerging, which inverts it, can lose precision beyond the tolerance below (seen with dilation (1, 2)).
+            # The exact Cayley transform is orthogonal, so unmerging is precise.
+            config.use_cayley_neumann = False
 
         model = get_peft_model(model, copy.deepcopy(config)).eval()
         with torch.inference_mode():

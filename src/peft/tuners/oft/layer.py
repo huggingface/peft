@@ -80,7 +80,6 @@ class OFTRotationModule(nn.Module):
         coft=False,
         eps=6e-5,
         block_share=False,
-        kernel_size=(0, 0),
         use_cayley_neumann=True,
         num_cayley_neumann_terms=5,
     ):
@@ -93,8 +92,6 @@ class OFTRotationModule(nn.Module):
         self.coft = coft
         self.eps = eps
         self.block_share = block_share
-        # Conv2d specific parameters
-        self.kernel_size = kernel_size
         self.use_cayley_neumann = use_cayley_neumann
         self.num_cayley_neumann_terms = num_cayley_neumann_terms
         # Create indices for upper triangle (excluding diagonal)
@@ -185,63 +182,6 @@ class OFTRotationModule(nn.Module):
 
         return A
 
-    def _unfold(self, x):
-        """
-        Unfold with stride=1, padding=0 to preserve spatial dimensions. Only use kernel_size from base layer to define
-        patch size.
-        """
-        batch_size, _, in_height, in_width = x.shape
-
-        if isinstance(self.kernel_size, int):
-            kernel_height, kernel_width = self.kernel_size, self.kernel_size
-        else:
-            kernel_height, kernel_width = self.kernel_size
-
-        stride_h = stride_w = 1
-        pad_h = pad_w = 0
-
-        # output dimensions
-        out_height = (in_height + 2 * pad_h - kernel_height) // stride_h + 1
-        out_width = (in_width + 2 * pad_w - kernel_width) // stride_w + 1
-
-        # Reshape input from [B, C, H, W] to [B, C, H_out, W_out, K_H, K_W]
-        x_unfolded = x.unfold(2, kernel_height, stride_h).unfold(3, kernel_width, stride_w)
-        x_unfolded = x_unfolded.permute(0, 2, 3, 1, 4, 5).contiguous()
-        x_unfolded = x_unfolded.view(batch_size * out_height * out_width, -1)
-
-        return x_unfolded
-
-    def _fold(self, x_unfolded, orig_shape):
-        """
-        Fold back to preserve spatial dimensions.
-        """
-        batch_size, in_channels, in_height, in_width = orig_shape
-
-        if isinstance(self.kernel_size, int):
-            kernel_height, kernel_width = self.kernel_size, self.kernel_size
-        else:
-            kernel_height, kernel_width = self.kernel_size
-
-        # With stride=1, padding=0:
-        out_height = in_height - kernel_height + 1
-        out_width = in_width - kernel_width + 1
-
-        # Reshape: [B*H_out*W_out, C*K_H*K_W] -> [B, H_out, W_out, C, K_H, K_W]
-        x_reshaped = x_unfolded.view(batch_size, out_height, out_width, in_channels, kernel_height, kernel_width)
-
-        # Permute to: [B, C, H_out, W_out, K_H, K_W]
-        x_reshaped = x_reshaped.permute(0, 3, 1, 2, 4, 5).contiguous()
-
-        # Use F.fold to reconstruct 4D tensor
-        x_folded = F.fold(
-            x_reshaped.view(batch_size, in_channels * kernel_height * kernel_width, out_height * out_width),
-            output_size=(in_height, in_width),
-            kernel_size=(kernel_height, kernel_width),
-            stride=(1, 1),
-        )
-
-        return x_folded
-
     def forward(self, x):
         # This module doesn't need to implement the orthogonal transform
         # It's primarily a container for the parameter
@@ -261,13 +201,8 @@ class OFTRotationModule(nn.Module):
             self.weight, self.block_size, self.use_cayley_neumann, self.num_cayley_neumann_terms
         )
 
-        # Unfold the input for Conv2d layer. Linear and Embedding layers have no kernel_size; their 4d inputs, e.g.
-        # (batch, height, width, channels), are rotated along the last dimension like any other input.
-        is_conv2d_input = len(orig_shape) == 4 and self.kernel_size != (0, 0)
-        if is_conv2d_input:
-            x = self._unfold(x)
-
-        folded_shape = x.shape
+        # Inputs are rotated along the last dimension, including 4d inputs of Linear and Embedding layers, e.g.
+        # (batch, height, width, channels). Conv2d layers rotate their weight instead, see `Conv2d.forward`.
         rank = self.in_features // self.block_size if self.block_share else self.r
         batch_dims = x.shape[:-1]
         x_reshaped = x.reshape(*batch_dims, rank, self.block_size)
@@ -278,10 +213,7 @@ class OFTRotationModule(nn.Module):
         else:
             x_rotated_reshaped = torch.einsum("...rk,rkc->...rc", x_reshaped, orth_rotate)
 
-        x_rotated = x_rotated_reshaped.reshape(*folded_shape)
-
-        if is_conv2d_input:
-            x_rotated = self._fold(x_rotated, orig_shape)
+        x_rotated = x_rotated_reshaped.reshape(*orig_shape)
 
         return x_rotated.to(required_dtype)
 
@@ -305,6 +237,24 @@ class OFTRotationModule(nn.Module):
 
         rank = self.r if not self.block_share else self.in_features // self.block_size
         return self._block_diagonal(orth_rotate, rank)
+
+    def rotate(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Multiply `x` of shape (in_features, n) from the left with the rotation of `get_weight`, block by block.
+
+        This avoids building the dense (in_features, in_features) rotation matrix.
+        """
+        if self.coft:
+            with torch.no_grad():
+                self.weight.copy_(self._project_batch(self.weight, eps=self.eps))
+
+        orth_rotate = self._cayley_batch(
+            self.weight, self.block_size, self.use_cayley_neumann, self.num_cayley_neumann_terms
+        )
+        rank = self.in_features // self.block_size if self.block_share else self.r
+        if self.block_share:
+            orth_rotate = orth_rotate.expand(rank, -1, -1)
+        return torch.bmm(orth_rotate, x.reshape(rank, self.block_size, -1)).reshape(x.shape)
 
 
 class OFTLayer(BaseTunerLayer):
@@ -725,14 +675,15 @@ class Conv2d(nn.Module, OFTLayer):
 
         # layer information from the base layer
         base_layer = self.get_base_layer()
-        if any(dilation > 1 for dilation in base_layer.dilation):
-            raise ValueError("Conv2d with dilation > 1 is not supported by OFT.")
-        if base_layer.kernel_size[0] != base_layer.kernel_size[1]:
-            raise ValueError("Conv2d with non-square kernels is not supported by OFT.")
-        if base_layer.padding not in ((0, 0), "valid"):
-            raise ValueError("Conv2d with non-zero padding is not supported by OFT.")
+        if base_layer.groups > 1:
+            # The rotation acts on all in_features * kernel_height * kernel_width inputs of a filter, but a grouped
+            # weight only holds in_features // groups of them.
+            raise NotImplementedError(
+                f"OFT does not support {type(base_layer).__name__} layers with groups > 1 "
+                f"(got groups={base_layer.groups})."
+            )
 
-        conv_filter_dim = self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
+        conv_filter_dim = self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[1]
 
         if r == 0 and oft_block_size != 0:
             if conv_filter_dim % oft_block_size != 0 or oft_block_size > conv_filter_dim:
@@ -763,7 +714,6 @@ class Conv2d(nn.Module, OFTLayer):
             coft=coft,
             eps=eps,
             block_share=block_share,
-            kernel_size=base_layer.kernel_size,
             use_cayley_neumann=use_cayley_neumann,
             num_cayley_neumann_terms=num_cayley_neumann_terms,
         )
@@ -797,9 +747,8 @@ class Conv2d(nn.Module, OFTLayer):
             # no adapter to merge
             return
 
-        # `forward` rotates the input as x @ R1 @ R2 @ ..., so the equivalent weight update is
-        # W @ R2.T @ R1.T @ ... . As each iteration applies W @ R.T, the adapters have to be merged in
-        # reverse order to reproduce the same composition.
+        # The unmerged forward rotates the weight as W @ R2.T @ R1.T @ ... for adapters R1, R2, ... . As each
+        # iteration applies W @ R.T, the adapters are merged in reverse order to reproduce the same composition.
         for active_adapter in reversed(adapter_names):
             if active_adapter in self.oft_R.keys():
                 base_layer = self.get_base_layer()
@@ -809,16 +758,13 @@ class Conv2d(nn.Module, OFTLayer):
                     # quantized layers need dequantize -> modify -> re-quantize.
                     orig_weight = self.get_base_weight()
                     orig_dtype = orig_weight.dtype
+                    weight_shape = orig_weight.shape
 
-                    orig_weight = orig_weight.view(
-                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
-                    )
+                    orig_weight = orig_weight.view(self.out_features, -1)
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = torch.mm(oft_mat, orig_weight.to(oft_mat.dtype))
                     orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = orig_weight.view(
-                        self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
-                    )
+                    orig_weight = orig_weight.view(weight_shape)
 
                     if safe_merge:
                         # Note that safe_merge will be slower than the normal merge
@@ -833,9 +779,7 @@ class Conv2d(nn.Module, OFTLayer):
                     # Non-quantized unsafe merge: write the result directly into the
                     # existing weight storage to avoid the extra copy that
                     # set_base_weight would create via .contiguous().
-                    weight = base_layer.weight.data.view(
-                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
-                    )
+                    weight = base_layer.weight.data.view(self.out_features, -1)
                     result = torch.mm(oft_mat, weight.t().to(oft_mat.dtype))
                     weight.copy_(result.t())
 
@@ -849,7 +793,6 @@ class Conv2d(nn.Module, OFTLayer):
             warnings.warn("Already unmerged. Nothing to do.")
             return
 
-        base_layer = self.get_base_layer()
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.oft_R.keys():
@@ -861,19 +804,12 @@ class Conv2d(nn.Module, OFTLayer):
 
                 orig_weight = self.get_base_weight()
                 orig_dtype = orig_weight.dtype
-                orig_weight = orig_weight.view(
-                    self.out_features,
-                    self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0],
-                )
+                weight_shape = orig_weight.shape
+                orig_weight = orig_weight.view(self.out_features, -1)
                 orig_weight = torch.transpose(orig_weight, 0, 1)
                 orig_weight = torch.mm(torch.linalg.inv(oft_mat).to(previous_dtype), orig_weight.to(previous_dtype))
                 orig_weight = torch.transpose(orig_weight, 0, 1)
-                orig_weight = orig_weight.view(
-                    self.out_features,
-                    self.in_features,
-                    base_layer.kernel_size[0],
-                    base_layer.kernel_size[0],
-                )
+                orig_weight = orig_weight.view(weight_shape)
 
                 self.set_base_weight(orig_weight.to(orig_dtype))
 
@@ -915,15 +851,22 @@ class Conv2d(nn.Module, OFTLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            for active_adapter in self.active_adapters:
+            # Rotating the weight is the same as rotating every input patch that the convolution sees. The adapters
+            # are applied in the same order as in `merge`.
+            base_layer = self.get_base_layer()
+            orig_weight = self.get_base_weight()
+            rotated_weight = orig_weight.view(self.out_features, -1).t()
+            for active_adapter in reversed(self.active_adapters):
                 if active_adapter not in self.oft_R.keys():
                     continue
 
                 oft_R = self.oft_R[active_adapter]
-                x = self._cast_input_dtype(x, oft_R.weight.dtype)
-                x = oft_R(x)
+                rotated_weight = oft_R.rotate(rotated_weight.to(oft_R.weight.dtype))
 
-            result = self.base_layer(x.to(previous_dtype), *args, **kwargs)
+            # Run the convolution in the dtype of the base layer, as the merged layer does.
+            rotated_weight = rotated_weight.t().reshape(orig_weight.shape).to(orig_weight.dtype)
+            x = self._cast_input_dtype(x, orig_weight.dtype)
+            result = base_layer._conv_forward(x, rotated_weight, bias=base_layer.bias)
 
         result = result.to(previous_dtype)
         return result
