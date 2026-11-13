@@ -36,7 +36,7 @@ torchrun --standalone --nproc_per_node=2 train.py configs/fsdp2_config.json
 
 On GPUs without BF16 support, set `"bf16": false` and `"fp16": true` in the JSON file.
 
-If your PEFT version predates the [adapter export fix](https://github.com/huggingface/peft/pull/4108), keep `activation_checkpointing` set to `false` to avoid empty adapter exports.
+With PEFT versions earlier than v0.22, keep `activation_checkpointing` set to `false` to avoid empty adapter exports. PEFT v0.22 includes the [adapter export fix](https://github.com/huggingface/peft/pull/4108).
 
 ### Save and resume
 
