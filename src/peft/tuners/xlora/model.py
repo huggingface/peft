@@ -309,6 +309,10 @@ class XLoraModel(BaseTuner):
 
         self.eval()
 
+    def supports_multiple_active_adapters(self, adapter_names: list[str]) -> bool:
+        # The classifier manages the LoRA experts; multiple X-LoRA classifiers cannot be composed.
+        return len(adapter_names) <= 1
+
     def _maybe_freeze_all_adapters(self):
         if not self.xlora_config.use_trainable_adapters:
             # Only the LoRA experts are frozen. The match is on ".lora_" and not on "lora_", as the latter also matches

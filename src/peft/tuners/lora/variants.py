@@ -723,7 +723,7 @@ def is_alora_relevant_in_batch(model: nn.Module, adapter_names: Optional[list[st
     Helper function to determine if the current batch has any aLoRA adapters.
     """
     is_alora_relevant = False
-    if getattr(model.active_peft_config, "alora_invocation_tokens", None):
+    if model.active_adapters and getattr(model.peft_config[model.active_adapter], "alora_invocation_tokens", None):
         is_alora_relevant = True
     elif adapter_names:
         for name in adapter_names:

@@ -47,7 +47,6 @@ from peft.utils.error import NoMatchingPeftModuleError
 from peft.utils.integrations import TpMeshDimRegistry, init_empty_weights, remove_torch_wrapper_names
 from peft.utils.other import (
     AuxiliaryTrainingWrapper,
-    ModulesToSaveWrapper,
     _get_module_names_tied_with_embedding,
     _set_adapter,
     _set_layer_requires_grad,
@@ -727,7 +726,7 @@ class BaseTuner(nn.Module, ABC):
             if adapter_names:
                 # Reject ambiguous saved-module selections before merging or unloading any layers.
                 for module in self.model.modules():
-                    if isinstance(module, ModulesToSaveWrapper):
+                    if isinstance(module, AuxiliaryTrainingWrapper):
                         module.check_set_adapter(adapter_names)
 
         # visit all modules except those inside tuner layers (e.g. lora_A), note that the tuner layers themselves must
@@ -1425,6 +1424,13 @@ class BaseTuner(nn.Module, ABC):
             if isinstance(module, BaseTunerLayer):
                 with onload_layer(module):
                     module.unmerge()
+
+    def supports_multiple_active_adapters(self, adapter_names: list[str]) -> bool:
+        """Whether this PEFT method supports using the given adapters together in a forward pass.
+
+        Auxiliary training modules can impose additional restrictions, checked when activating the adapters.
+        """
+        return True
 
     def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
         """Set the active adapter(s).
@@ -2789,7 +2795,10 @@ def set_adapter(
 def _delete_auxiliary_adapter(model, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
     for module in model.modules():
         if isinstance(module, AuxiliaryTrainingWrapper):
-            module.delete_adapter(adapter_name, new_active_adapters=new_active_adapters)
+            module_active_adapters = (
+                [name for name in new_active_adapters if name in module._adapters] if new_active_adapters else None
+            )
+            module.delete_adapter(adapter_name, new_active_adapters=module_active_adapters)
 
 
 def _check_adapters_not_merged(model: nn.Module, adapter_names: str | Sequence[str]) -> None:

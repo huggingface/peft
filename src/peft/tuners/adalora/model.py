@@ -115,6 +115,32 @@ class AdaLoraModel(LoraModel):
                 "you want to train."
             )
 
+    def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
+        # In theory, AdaLoRA should reject addition of more than one adapter with inference_mode=False. However, a user
+        # could add an adapter with inference_mode=True and later change the attribute to False. Thus, still check here
+        # that we never activate more than one adapter without inference_mode.
+        adapter_names = [adapter_name] if isinstance(adapter_name, str) else adapter_name
+        trainable_adapters = [not self.peft_config[name].inference_mode for name in adapter_names]
+        if sum(trainable_adapters) > 1:
+            raise ValueError(
+                "Trying to set multiple active adapters with inference_mode=False for "
+                f"{self.__class__.__name__} but at most one active adapter with inference_mode=False is allowed"
+            )
+
+        super().set_adapter(adapter_name, inference_mode=inference_mode)
+        self._freeze_inference_adapters()
+
+    def delete_adapter(self, adapter_name: str) -> None:
+        super().delete_adapter(adapter_name)
+        self._freeze_inference_adapters()
+
+    def _freeze_inference_adapters(self) -> None:
+        # AdaLoRA's rank allocator supports only the adapter configured for training.
+        if len(self.active_adapters) > 1:
+            for name in self.active_adapters:
+                if self.peft_config[name].inference_mode:
+                    self.set_requires_grad(name, requires_grad=False)
+
     def _create_and_replace(
         self,
         lora_config,
