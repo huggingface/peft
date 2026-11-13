@@ -18,6 +18,7 @@ import warnings
 from dataclasses import replace
 
 import torch
+from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
@@ -28,6 +29,7 @@ from peft.utils import (
     ModulesToSaveWrapper,
     _freeze_adapter,
     _get_submodules,
+    _is_valid_match,
 )
 
 from .layer import Conv2d, Conv3d, IA3Layer, Linear
@@ -189,8 +191,62 @@ class IA3Model(BaseTuner):
         if isinstance(ia3_config.feedforward_modules, str):
             is_feedforward = bool(re.fullmatch(ia3_config.feedforward_modules, key))
         else:
-            is_feedforward = any(key.endswith(target_key) for target_key in ia3_config.feedforward_modules)
+            # Same rule as target_modules: exact name or a "."-separated suffix, so "fc" does not match "not_fc".
+            is_feedforward = any(_is_valid_match(key, target_key) for target_key in ia3_config.feedforward_modules)
         return is_feedforward
+
+    @classmethod
+    def _remap_adapter_state_dict_for_load(cls, model, config, adapter_name, state_dict):
+        peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
+        if isinstance(config.feedforward_modules, str):
+            return peft_model_state_dict
+
+        # List entries of feedforward_modules used to be matched with a plain endswith, e.g. "fc" also matched
+        # "not_fc". The (IA)³ vectors of such modules were saved in the feedforward layout, (1, in_features), instead
+        # of (out_features, 1). To keep these checkpoints working, a module that is only selected by the old rule and
+        # whose saved vector has the feedforward layout is switched back to it. This is only done if the layer holds
+        # no other adapter, since is_feedforward is shared by all adapters of the layer.
+        restored = []
+        for name, module in model.named_modules():
+            if not isinstance(module, IA3Layer) or (list(module.ia3_l.keys()) != [adapter_name]):
+                continue
+            weight = peft_model_state_dict.get(f"{name}.ia3_l.{adapter_name}")
+            if weight is None:
+                continue
+
+            key = name.removeprefix("base_model.model.")
+            matches_old_rule = any(key.endswith(target_key) for target_key in config.feedforward_modules)
+            # checked over all entries, as another entry may still match with the new rule, e.g. "myblock.fc" with
+            # feedforward_modules=["block.fc", "fc"]
+            matches_new_rule = any(_is_valid_match(key, target_key) for target_key in config.feedforward_modules)
+            if not matches_old_rule or matches_new_rule:
+                continue
+
+            # feedforward layout, see IA3Layer.update_layer
+            feedforward_shape = (1, module.in_features) + (1,) * (getattr(module, "_kernel_dim", 2) - 2)
+            if tuple(weight.shape) != feedforward_shape:
+                continue
+
+            # Replace the vector in place instead of calling update_layer again; its values are loaded from the
+            # checkpoint afterwards.
+            module.is_feedforward = True
+            current = module.ia3_l[adapter_name]
+            module.ia3_l[adapter_name] = nn.Parameter(
+                current.new_ones(feedforward_shape), requires_grad=current.requires_grad
+            )
+            restored.append(key)
+
+        if restored:
+            names = sorted({key.rpartition(".")[-1] for key in restored})
+            warnings.warn(
+                f"Adapter '{adapter_name}' was saved with {len(restored)} modules named {names} treated as "
+                "feedforward modules, because their names end with an entry of "
+                f"feedforward_modules={sorted(config.feedforward_modules)}. Such names only match now if they equal "
+                "an entry or end with `.{entry}`. To keep the behavior of the checkpoint, these modules are still "
+                "treated as feedforward modules. To avoid this warning, add them to feedforward_modules and "
+                "target_modules explicitly."
+            )
+        return peft_model_state_dict
 
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
