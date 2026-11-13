@@ -479,6 +479,14 @@ class BaseTuner(nn.Module, ABC):
         """
         return check_target_module_exists(peft_config, key)
 
+    def _get_weighted_adapter_layers(self, adapters: list[str]) -> dict[str, BaseTunerLayer]:
+        """Find layers that actually contain at least one source adapter."""
+        return {
+            key: module
+            for key, module in self.model.named_modules()
+            if isinstance(module, self.tuner_layer_cls) and not module._get_available_adapters().isdisjoint(adapters)
+        }
+
     @abstractmethod
     def _create_and_replace(
         self,
