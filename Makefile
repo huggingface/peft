@@ -20,7 +20,8 @@ style:
 	doc-builder style src/peft tests docs/source --max_len 119
 
 test:
-	python -m pytest -n 3 tests/ $(if $(IS_GITHUB_CI),--report-log "ci_tests.log",)
+	python -m pytest tests/test_custom_models.py -n3 $(if $(IS_GITHUB_CI),--report-log "ci_tests.log",)
+	python -m pytest tests/ -k "exact_merge" $(if $(IS_GITHUB_CI),--report-log "ci_tests.log",)
 
 # Run serially on macOS to limit memory usage.
 test_macos:

@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 import torch
 
 from peft.tuners.tuners_utils import (
@@ -104,3 +106,6 @@ class PeanutModel(BaseTuner):
                 if marker in key:
                     return key.replace(marker, f".{container}.")
         return super()._remove_adapter_name_from_key(key, adapter_name)
+
+    def _check_exact_merge_allowed(self, adapter_names: Optional[list[str]] = None) -> None:
+        """PEANuT merge-unmerge roundtrips are always exact"""

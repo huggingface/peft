@@ -672,16 +672,27 @@ class LoraModel(BaseTuner):
         for handle in hook_handles:
             handle.remove()
 
-    def _check_merge_allowed(self):
+    def _check_merge_allowed(self, adapter_names: Optional[list[str]], exact: bool = False):
         """Verify that the configuration supports merging.
 
         Currently gptq quantization and replicated layers do not support merging.
         """
-        super()._check_merge_allowed()
+        super()._check_merge_allowed(adapter_names=adapter_names, exact=exact)
         if getattr(self.model, "quantization_method", None) == "gptq":
             raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
         if self.peft_config.get("layer_replication"):
             raise ValueError("Cannot merge LORA layers when base model layers are replicated")
+
+    def _check_exact_merge_allowed(self, adapter_names: Optional[list[str]] = None) -> None:
+        if isinstance(adapter_names, str):
+            adapter_names = [adapter_names]
+        elif adapter_names is None:
+            adapter_names = self.active_adapters
+
+        configs = [self.peft_config[name] for name in adapter_names]
+        for module in self.modules():
+            if isinstance(module, LoraLayer):
+                module._check_exact_merge_allowed(adapter_names=adapter_names, configs=configs)
 
     def _prepare_adapter_config(self, peft_config, model_config):
         if peft_config.target_modules is None:

@@ -159,6 +159,11 @@ class LoraLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
+        # FIXME
+        self._base_layer_weight_copy = []
+        self._base_layer_bias_copy = []
+        self._is_exact_merging = False
+
     def delete_adapter(self, adapter_name: str) -> None:
         super().delete_adapter(adapter_name)
         self.lora_variant.pop(adapter_name, None)
@@ -952,6 +957,11 @@ class LoraLayer(BaseTunerLayer):
                 msg = "Cannot pass `adapter_names` when DoRA is enabled."
                 raise ValueError(msg)
 
+    def _check_exact_merge_allowed(self, adapter_names: list[str], configs: list[LoraConfig]) -> None:
+        raise ValueError(
+            f"Layer of type {type(self).__name__} does not support exact merging, please use `exact=False`."
+        )
+
     def _mixed_batch_forward(
         self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
     ) -> torch.Tensor:
@@ -1051,7 +1061,35 @@ class Linear(nn.Module, LoraLayer):
             ("kasa_config",): variants.KasaLinearVariant,
         }
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+    def _check_exact_merge_allowed(self, adapter_names: list[str], configs: list[LoraConfig]) -> None:
+        if self.merged:
+            raise ValueError(
+                "This model does not support exact merging because there are already merged adapters: "
+                f"{self.merged_adapters}. Exact merging/unmerging is only possible when no adapters are merged yet."
+            )
+
+        for config in configs:
+            variant = self.resolve_lora_variant(config=config)
+            if variant is not None:
+                # very defensive check, some LoRA variants would probably work
+                raise ValueError(
+                    "This model does not support exact merging because the following LoRA variant is used: "
+                    f"{type(variant).__name__}."
+                )
+
+    def is_exact_merging(self) -> bool:
+        # Whether this layer has an exact merge going on
+        return self._is_exact_merging
+
+    def _snapshot_base_weight(self, base_layer):
+        # FIXME
+        self._is_exact_merging = True
+        if not self._base_layer_weight_copy:
+            self._base_layer_weight_copy.append(self.get_base_layer().weight.data.clone())
+        if base_layer.bias is not None:
+            self._base_layer_bias_copy.append(self.get_base_layer().bias.data.clone())
+
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None, exact: bool = False) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -1063,11 +1101,19 @@ class Linear(nn.Module, LoraLayer):
             adapter_names (`list[str]`, *optional*):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
+            exact (`bool`, *optional*)
+                Whether to allow exact unmerging. A merge-unmerge roundtrip is not exact, especially for lower dtypes,
+                it can result in changes to the base weight. Pass `exact=True` (default is `False`) to allow exact
+                unmerging. This comes at the cost of higher memory usage and some extra compute. The extra memory
+                required is less than the memory required for a full copy of the base weights.
         """
         adapter_names = check_adapters_to_merge(self, adapter_names)
         if not adapter_names:
             # no adapter to merge
             return
+
+        if exact:
+            self._snapshot_base_weight(self.get_base_layer())
 
         for active_adapter in adapter_names:
             if active_adapter in self.lora_A.keys():
@@ -1120,6 +1166,13 @@ class Linear(nn.Module, LoraLayer):
 
                 self.merged_adapters.append(active_adapter)
 
+    def _restore_base_weight(self, base_layer) -> None:
+        base_layer.weight.data = self._base_layer_weight_copy.pop()
+        self._base_layer_weight_copy.clear()
+        if self._base_layer_bias_copy:
+            base_layer.bias.data = self._base_layer_bias_copy.pop()
+        self._base_layer_bias_copy.clear()
+
     def unmerge(self) -> None:
         """
         This method unmerges all merged adapter layers from the base weights.
@@ -1128,6 +1181,14 @@ class Linear(nn.Module, LoraLayer):
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
+
+        # FIXME
+        if self.is_exact_merging():
+            self._restore_base_weight(self.get_base_layer())
+            self._is_exact_merging = False
+            self.merged_adapters.clear()
+            return
+
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_A.keys():

@@ -679,11 +679,14 @@ class BaseTuner(nn.Module, ABC):
         """
         cast_adapter_dtype(self.model, adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
 
-    def _check_merge_allowed(self):
+    def _check_merge_allowed(self, adapter_names: Optional[list[str]] = None, exact: bool = False):
         """Helper method to check whether the adapter can be merged.
 
         Raise a ValueError if it is not possible to merge the adapter with the given configuration.
         """
+        if exact:
+            self._check_exact_merge_allowed(adapter_names=adapter_names)
+
         example_code = textwrap.dedent(
             """
             ```python
@@ -715,6 +718,20 @@ class BaseTuner(nn.Module, ABC):
                 + example_code
             )
 
+        for module in self.modules():
+            if not isinstance(module, BaseTunerLayer) or not module.is_exact_merging():
+                continue
+
+            raise ValueError(
+                "This model does not support exact merging because there are already merged adapters: "
+                f"{module.merged_adapters}. Exact merging/unmerging is only possible when no adapters are merged yet."
+            )
+
+    def _check_exact_merge_allowed(self, adapter_names: Optional[list[str]] = None) -> None:
+        raise ValueError(
+            f"PEFT method of type {type(self).__name__} does not support exact merging, please pass `exact=False`."
+        )
+
     def _unload_and_optionally_merge(
         self,
         merge: bool = True,
@@ -723,7 +740,7 @@ class BaseTuner(nn.Module, ABC):
         adapter_names: Optional[list[str]] = None,
     ) -> None:
         if merge:
-            self._check_merge_allowed()
+            self._check_merge_allowed(adapter_names)
             if adapter_names:
                 # Reject ambiguous saved-module selections before merging or unloading any layers.
                 for module in self.model.modules():
@@ -1382,7 +1399,9 @@ class BaseTuner(nn.Module, ABC):
                 if not any(p.device == meta for p in module.parameters()):
                     module.to(weight.device)
 
-    def merge_adapter(self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False) -> None:
+    def merge_adapter(
+        self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False, exact: bool = False
+    ) -> None:
         """
         This method merges the adapter layers into the base model.
 
@@ -1403,6 +1422,7 @@ class BaseTuner(nn.Module, ABC):
                 If `True`, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
+            exact FIXME
         """
         # TODO: update docstring about the interaction of active/merged adapters for PEFT v1.0
         # Note: The order of arguments here is:
@@ -1411,11 +1431,15 @@ class BaseTuner(nn.Module, ABC):
         #   safe_merge, adapter_names
         # This is not so nice but this method here started with only adapter_names, thus putting safe_merge first would
         # be a backwards incompatible change.
-        self._check_merge_allowed()
+        self._check_merge_allowed(adapter_names, exact=exact)
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
                 with onload_layer(module):
-                    module.merge(adapter_names=adapter_names, safe_merge=safe_merge)
+                    # don't pass exact argument unconditionally, as the layer may not support it
+                    if exact:
+                        module.merge(adapter_names=adapter_names, safe_merge=safe_merge, exact=exact)
+                    else:
+                        module.merge(adapter_names=adapter_names, safe_merge=safe_merge)
 
     def unmerge_adapter(self):
         """
@@ -2034,11 +2058,15 @@ class BaseTunerLayer(ABC):
         base_layer = self.get_base_layer()
         return base_layer.bias
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None, exact: bool = False) -> None:
         raise NotImplementedError
 
     def unmerge(self) -> None:
         raise NotImplementedError
+
+    def is_exact_merging(self) -> bool:
+        # Whether this layer has an exact merge going on
+        return False
 
     @property
     def merged(self) -> bool:
@@ -2781,8 +2809,24 @@ def set_adapter(
     for module in model.modules():
         if isinstance(module, layer_cls):
             if module.merged:
-                warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
-                module.unmerge()
+                # If the module's active adapters are already the same as the adapters to be set, skip the
+                # unmerge. There can be set_adapter calls in situations that don't really require it, like as a
+                # housekeeping step during add_adapter. We should still call module.set_adapter though because it deals
+                # with other states like inference_mode.
+                active_adapters_have_changed = True
+                if (
+                    isinstance(adapter_name, str)
+                    and module.active_adapters
+                    and (module.active_adapters[0] == adapter_name)
+                ):
+                    active_adapters_have_changed = False
+                elif module.active_adapters == adapter_name:
+                    # Note that we assume that the order of the adapters matter.
+                    active_adapters_have_changed = False
+
+                if active_adapters_have_changed:
+                    warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
+                    module.unmerge()
             module.set_adapter(adapter_name, inference_mode=inference_mode)
 
 
