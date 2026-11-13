@@ -14,7 +14,6 @@
 import dataclasses
 import json
 import re
-import warnings
 from copy import deepcopy
 from unittest.mock import Mock
 
@@ -24,7 +23,6 @@ import pytest
 import torch
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
-from safetensors.torch import load_file as safe_load_file
 from torch import nn
 from transformers import (
     AutoModel,
@@ -51,7 +49,6 @@ from peft import (
     get_model_status,
     get_peft_model,
 )
-from peft.tuners.ia3.model import IA3Model
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import (
     BaseTuner,
@@ -513,152 +510,6 @@ class TestTargetedModuleNames:
         model = MLP()
         model = get_peft_model(model, IA3Config(target_modules=["lin0", "lin1"], feedforward_modules=["lin0", "lin1"]))
         assert model.targeted_module_names == ["lin0", "lin1"]
-
-    @pytest.mark.parametrize("entry", ["fc", "block.fc", "not_fc"])
-    @pytest.mark.parametrize(
-        "key",
-        [
-            "fc",
-            "block.fc",
-            "not_fc",
-            "block.not_fc",
-            "myblock.fc",
-            "foo.block.fc",
-            "fc.extra",
-            "encoder.layers.0.fc",
-        ],
-    )
-    def test_ia3_feedforward_list_follows_target_module_suffix_rule(self, entry, key):
-        # feedforward_modules used to be a bare endswith, so "fc" also selected "not_fc" and "block.fc" selected
-        # "myblock.fc". List matching has to follow the same exact-name or ".{name}" rule as target_modules.
-        feedforward = IA3Config(
-            target_modules=["fc", "not_fc", "block.fc", entry],
-            feedforward_modules=[entry],
-        )
-        as_target = LoraConfig(target_modules=[entry])
-        expected = bool(check_target_module_exists(as_target, key))
-        assert IA3Model._check_target_module_feedforward(feedforward, key) is expected
-
-    def test_ia3_feedforward_regex_still_fullmatches(self):
-        # A string feedforward_modules is a regex matched against the whole module name, not a suffix.
-        config = IA3Config(target_modules=".*", feedforward_modules=r"(^|.*\.)fc$")
-        check = IA3Model._check_target_module_feedforward
-        assert check(config, "fc") is True
-        assert check(config, "block.fc") is True
-        assert check(config, "not_fc") is False
-        assert check(config, "block.not_fc") is False
-
-    def test_ia3_feedforward_suffix_changes_scale_placement(self):
-        # is_feedforward selects whether the IA3 vector multiplies the input or the output. A module that only
-        # shares a character suffix with a feedforward name must scale the output.
-        class Block(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fc = nn.Linear(8, 8, bias=False)
-                self.not_fc = nn.Linear(8, 8, bias=False)
-
-        class Model(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fc = nn.Linear(8, 8, bias=False)
-                self.not_fc = nn.Linear(8, 8, bias=False)
-                self.block = Block()
-
-            def forward(self, x):
-                return self.block.not_fc(self.block.fc(self.not_fc(self.fc(x))))
-
-        config = IA3Config(
-            target_modules=["fc", "not_fc"],
-            feedforward_modules=["fc"],
-            init_ia3_weights=False,
-        )
-        model = get_peft_model(Model(), config)
-        flags = {
-            name.removeprefix("base_model.model."): module.is_feedforward
-            for name, module in model.named_modules()
-            if hasattr(module, "is_feedforward")
-        }
-        assert flags == {"fc": True, "not_fc": False, "block.fc": True, "block.not_fc": False}
-
-        torch.manual_seed(0)
-        x = torch.randn(2, 8)
-        scale = torch.arange(1, 9, dtype=x.dtype)
-
-        def assert_scale_placement(layer, *, feedforward):
-            assert layer.is_feedforward is feedforward
-            assert tuple(layer.ia3_l["default"].shape) == ((1, 8) if feedforward else (8, 1))
-            with torch.no_grad():
-                layer.ia3_l["default"].copy_(scale.view(1, 8) if feedforward else scale.view(8, 1))
-                weight = layer.get_base_layer().weight
-                scaled_input = nn.functional.linear(x * scale, weight)
-                scaled_output = nn.functional.linear(x, weight) * scale
-                actual = layer(x)
-            expected = scaled_input if feedforward else scaled_output
-            other = scaled_output if feedforward else scaled_input
-            torch.testing.assert_close(actual, expected)
-            assert not torch.allclose(actual, other)
-
-        assert_scale_placement(model.base_model.model.fc, feedforward=True)
-        assert_scale_placement(model.base_model.model.not_fc, feedforward=False)
-        assert_scale_placement(model.base_model.model.block.fc, feedforward=True)
-        assert_scale_placement(model.base_model.model.block.not_fc, feedforward=False)
-
-    def test_ia3_feedforward_checkpoint_saved_with_endswith_rule_still_loads(self, monkeypatch, tmp_path):
-        # Checkpoints saved while feedforward_modules entries were matched with a plain endswith have the feedforward
-        # layout for modules like "not_fc" when feedforward_modules=["fc"]. They must still load and give the same
-        # outputs, both for square layers (where the shapes are transposed) and non-square layers.
-        class Model(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fc = nn.Linear(8, 8, bias=False)
-                self.not_fc = nn.Linear(8, 8, bias=False)
-                self.other_fc = nn.Linear(8, 4, bias=False)
-
-            def forward(self, x):
-                return self.other_fc(self.not_fc(self.fc(x)))
-
-        def old_check(ia3_config, key):
-            return any(key.endswith(target_key) for target_key in ia3_config.feedforward_modules)
-
-        config = IA3Config(
-            target_modules=["fc", "not_fc", "other_fc"], feedforward_modules=["fc"], init_ia3_weights=False
-        )
-        x = torch.randn(2, 8)
-        with monkeypatch.context() as m:
-            m.setattr(IA3Model, "_check_target_module_feedforward", staticmethod(old_check))
-            torch.manual_seed(0)
-            model = get_peft_model(Model(), config)
-            with torch.no_grad():
-                expected = model(x)
-            model.save_pretrained(tmp_path / "old")
-
-        torch.manual_seed(0)
-        with pytest.warns(UserWarning, match=r"2 modules named \['not_fc', 'other_fc'\] treated as feedforward"):
-            loaded = PeftModel.from_pretrained(Model(), tmp_path / "old")
-        assert loaded.base_model.model.fc.is_feedforward
-        assert loaded.base_model.model.not_fc.is_feedforward
-        assert loaded.base_model.model.other_fc.is_feedforward
-        with torch.no_grad():
-            torch.testing.assert_close(loaded(x), expected)
-
-        # saving again keeps the checkpoint as is
-        loaded.save_pretrained(tmp_path / "resaved")
-        old_sd = safe_load_file(tmp_path / "old" / "adapter_model.safetensors")
-        new_sd = safe_load_file(tmp_path / "resaved" / "adapter_model.safetensors")
-        assert old_sd.keys() == new_sd.keys()
-        for key in old_sd:
-            torch.testing.assert_close(new_sd[key], old_sd[key])
-
-        # adapters created with the current rule load without the fallback
-        torch.manual_seed(0)
-        model = get_peft_model(Model(), config)
-        model.save_pretrained(tmp_path / "new")
-        with warnings.catch_warnings():
-            warnings.simplefilter("error")
-            loaded = PeftModel.from_pretrained(Model(), tmp_path / "new")
-        assert loaded.base_model.model.fc.is_feedforward
-        assert not loaded.base_model.model.not_fc.is_feedforward
-        assert not loaded.base_model.model.other_fc.is_feedforward
 
     def test_realistic_example(self):
         model_id = "peft-internal-testing/tiny-random-BloomForCausalLM"

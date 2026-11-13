@@ -90,6 +90,7 @@ from peft import (
 )
 from peft.import_utils import is_torchao_available
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
+from peft.tuners.ia3.layer import IA3Layer
 from peft.tuners.lokr.layer import LoKrLayer
 from peft.tuners.lora.astra import preprocess_astra
 from peft.tuners.lora.config import AstraConfig, CordaConfig, LoraGAConfig
@@ -3645,6 +3646,66 @@ class TestHraInitialization:
             output_merged = model(x)
 
         assert torch.allclose(output, output_merged, atol=1e-5, rtol=1e-5)
+
+
+class TestIA3Initialization:
+    """Test class to check the initialization of (IA)³ adapters."""
+
+    torch_device = infer_device()
+
+    def get_model(self):
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(8, 8)
+                self.not_fc = nn.Linear(8, 8)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(8, 8)
+                self.not_fc = nn.Linear(8, 8)
+                self.block = Block()
+                self.myblock = Block()
+
+        return Model().to(self.torch_device)
+
+    @pytest.mark.parametrize(
+        "feedforward_modules, expected",
+        [
+            (["fc"], {"fc", "block.fc", "myblock.fc"}),
+            (["not_fc"], {"not_fc", "block.not_fc", "myblock.not_fc"}),
+            (["block.fc"], {"block.fc"}),
+            (["block.fc", "fc"], {"fc", "block.fc", "myblock.fc"}),
+            ([], set()),
+        ],
+    )
+    def test_feedforward_modules_list_matches_like_target_modules(self, feedforward_modules, expected):
+        # List entries of feedforward_modules follow the same rule as target_modules: the module name equals the
+        # entry or ends with ".{entry}". Previously, a plain endswith was used, so that "fc" also matched "not_fc" and
+        # "block.fc" also matched "myblock.fc".
+        config = IA3Config(
+            target_modules=["fc", "not_fc", *feedforward_modules], feedforward_modules=feedforward_modules
+        )
+        model = get_peft_model(self.get_model(), config)
+        is_feedforward = {
+            name.removeprefix("base_model.model."): module.is_feedforward
+            for name, module in model.named_modules()
+            if isinstance(module, IA3Layer)
+        }
+        assert len(is_feedforward) == 6
+        assert {name for name, value in is_feedforward.items() if value} == expected
+
+    def test_feedforward_modules_regex_uses_fullmatch(self):
+        # A str feedforward_modules is a regex that has to match the whole module name
+        config = IA3Config(target_modules=["fc", "not_fc"], feedforward_modules=r"(.*\.)?fc")
+        model = get_peft_model(self.get_model(), config)
+        is_feedforward = {
+            name.removeprefix("base_model.model."): module.is_feedforward
+            for name, module in model.named_modules()
+            if isinstance(module, IA3Layer)
+        }
+        assert {name for name, value in is_feedforward.items() if value} == {"fc", "block.fc", "myblock.fc"}
 
 
 class TestPacaInitialization:
