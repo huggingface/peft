@@ -2601,7 +2601,7 @@ def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list
     Helper function to check which adapters should be merged.
 
     Only return those adapters that are not already merged. Give a warning if some or all of the adapters are already
-    merged.
+    merged. Raise an error if the base layer is parametrized, since the merged weights would be silently discarded.
 
     """
     if adapter_names is None:
@@ -2620,6 +2620,16 @@ def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list
             )
         else:
             warnings.warn("All adapters are already merged, nothing to do.")
+
+    if adapter_names:
+        base_layer = module.get_base_layer()
+        if nn.utils.parametrize.is_parametrized(base_layer):
+            raise ValueError(
+                f"Cannot merge adapters into a parametrized base layer of type {type(base_layer).__name__}: the "
+                "merged weights would be silently lost because a parametrized weight is recomputed on every access. "
+                "Remove the parametrization first, e.g. with "
+                "`torch.nn.utils.parametrize.remove_parametrizations(layer, 'weight', leave_parametrized=True)`."
+            )
 
     return adapter_names
 

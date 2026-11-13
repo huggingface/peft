@@ -1059,6 +1059,37 @@ class PeftCommonTester:
             model.merge_adapter(safe_merge=True)
         self._assert_base_layer_unchanged(layer, orig_weight, orig_bias)
 
+    def _test_merge_into_parametrized_base_layer_raises(self, model_id, config_cls, config_kwargs):
+        # With a parametrized weight, merging would write into a tensor that the parametrization recomputes on every
+        # access, so the base layer would silently stay unchanged. Merging must raise instead.
+        if issubclass(config_cls, LNTuningConfig):
+            pytest.skip("LN tuning swaps the layer on merge, so there is no merged tensor to write.")
+
+        class NeutralParametrization(torch.nn.Module):
+            # leaves the values unchanged but, like real parametrizations, returns a new tensor
+            def forward(self, weight):
+                return weight * 1.0
+
+        torch.manual_seed(0)
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(**config_kwargs)
+            model = get_peft_model(model.to(self.torch_device), config)
+
+        layers = self._get_mergeable_tuner_layers(model)
+        if not layers:
+            pytest.skip("No mergeable tuner layers in this model.")
+
+        layer = layers[0]
+        base_layer = layer.get_base_layer()
+        torch.nn.utils.parametrize.register_parametrization(base_layer, "weight", NeutralParametrization())
+        orig_weight = base_layer.weight.detach().clone()
+        orig_bias = base_layer.bias.detach().clone() if getattr(base_layer, "bias", None) is not None else None
+
+        with pytest.raises(ValueError, match="parametriz"):
+            model.merge_adapter()
+        self._assert_base_layer_unchanged(layer, orig_weight, orig_bias)
+
     def _test_safe_merge_non_finite_bias_leaves_base_layer_unchanged(self, model_id, config_cls, config_kwargs):
         # A non-finite merged bias must be caught before the merged weight is written. The bias is poisoned in the
         # base layer so the weight stays finite and passes its own check first, which is exactly the situation where
