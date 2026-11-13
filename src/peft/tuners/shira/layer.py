@@ -49,6 +49,7 @@ def _warn_once_about_module_hooks(shira_layer):
 
 
 class ShiraLayer(BaseTunerLayer):
+    # LoRA conversion is not supported: the delta weight is sparse, which does not work with SVD.
     # List all names of layers that may contain trainable adapter weights
     adapter_layer_names = ("shira_weight",)
     # All names of other adapter-related parameters
@@ -257,10 +258,6 @@ class Linear(nn.Module, ShiraLayer):
             result = F.linear(x, new_weight, bias=self.base_layer.bias)
 
         return result
-
-    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
-        # delta weight is sparse, which does not work with SVD
-        return False
 
     def __repr__(self) -> str:
         rep = super().__repr__()

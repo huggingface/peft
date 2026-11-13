@@ -389,6 +389,11 @@ class Linear(nn.Module, PacaLayer):
         # the delta weight is non-zero in r columns only, so a LoRA adapter of rank r represents it exactly
         return True
 
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        # PaCA is additive: W' = W + Delta, so the additive delta is just the delta weight. It already has the dtype of
+        # the adapter weights (`paca_delta`), which is the dtype the converted LoRA adapter will use.
+        return self.get_delta_weight(adapter_name)
+
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "paca." + rep

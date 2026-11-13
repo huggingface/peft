@@ -29,6 +29,10 @@ from .config import HiraConfig
 
 
 class HiraLayer(BaseTunerLayer):
+    # LoRA conversion is not supported: the converter factorizes the additive residual W' - W, but HiRA's update is
+    # multiplicative, W' = W * (1 + Delta_hira), so that residual would be W * Delta_hira and thus depend on the
+    # current base weight. get_delta_weight() returns Delta_hira, which is what merge/unmerge needs, but it is not
+    # the quantity the converter is looking for.
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names: tuple[str, ...] = ("hira_A", "hira_B", "hira_embedding_A", "hira_embedding_B")
     # All names of other parameters that may contain adapter-related parameters
@@ -271,15 +275,6 @@ class Linear(nn.Module, HiraLayer):
             result = result.to(torch_result_dtype)
 
         return result
-
-    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
-        # The generic LoRA conversion path only works for additive adapters, i.e. adapters that can be written as
-        # W' = W + Delta and expose that additive residual via get_delta_weight(). HiRA is different: its effective
-        # update is multiplicative, W' = W * (1 + Delta_hira), so the actual additive residual would be
-        # W * Delta_hira and depends on the current base weight. Returning Delta_hira from get_delta_weight() is
-        # sufficient for HiRA merge/unmerge, but it is not the quantity that the generic LoRA converter factorizes.
-        # Mark conversion as unsupported to avoid producing a LoRA adapter that does not preserve HiRA behavior.
-        return False
 
     def __repr__(self) -> str:
         rep = super().__repr__()
