@@ -91,6 +91,17 @@ Disadvantages of half precision adapter:
 
 Note that for most use cases, overall runtime and memory cost will be determined by the size of the base model and by the dataset, while the dtype of the PEFT adapter will only have a small impact.
 
+### LoRA weight tying with float16 or bfloat16 models
+
+When targeting tied layers like `embed_tokens` and `lm_head` with `ensure_weight_tying=True` (see the [weight tying section](../package_reference/lora#weight-tying)), the LoRA weights of `lm_head` are views of the LoRA weights of `embed_tokens`. With PEFT <= v0.21, upcasting the adapter weights of a float16 or bfloat16 model to float32 (the default, see above) silently untied these weights, so both layers were trained separately. Since PEFT v0.22, the weights stay tied.
+
+If you load an adapter that was trained this way, PEFT warns that the LoRA weights of `lm_head` "have diverged" from those of `embed_tokens`. To reproduce the outputs of the trained adapter, these weights are then loaded untied. If you need them to be tied, train the adapter again with a recent PEFT version.
+
+Please note the following limitations of LoRA weight tying:
+
+- Since the LoRA weights of `lm_head` are views of the LoRA weights of `embed_tokens`, they are separate `nn.Parameter`s that share the same storage. Optimizers that keep a state per parameter, like Adam or AdamW, therefore keep two states for the same weights and update them twice per step. As a result, training is not exactly equivalent to training a single tied weight. Optimizers without state, like plain SGD, are not affected.
+- Only `init_lora_weights=True`, `False`, `"gaussian"`, and `"nora"` are supported. Other initialization methods would untie the LoRA weights or modify the shared base weight, so they raise an error.
+
 ## Training runs but the model does not improve
 
 If training appears healthy (the loss goes down, checkpoints are saved without errors) but the resulting model performs no better than the base model, check whether the trainable parameters actually changed during training:

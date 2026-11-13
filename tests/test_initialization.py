@@ -36,7 +36,6 @@ from transformers import (
     DistilBertConfig,
     DistilBertForSequenceClassification,
     LlamaConfig,
-    LlamaForCausalLM,
     LlamaForSequenceClassification,
 )
 from transformers.pytorch_utils import Conv1D
@@ -7506,19 +7505,12 @@ class TestWeightTying:
         assert embed_lora_A.data_ptr() == lm_lora_B.data_ptr()
         assert embed_lora_B.data_ptr() == lm_lora_A.data_ptr()
 
-    def get_tied_llama(self, dtype=torch.float32):
-        # tiny Llama with tied input and output embeddings, created locally to avoid Hub access
-        torch.manual_seed(0)
-        config = LlamaConfig(
-            vocab_size=64,
-            hidden_size=16,
-            intermediate_size=32,
-            num_hidden_layers=1,
-            num_attention_heads=2,
-            num_key_value_heads=2,
-            tie_word_embeddings=True,
-        )
-        return LlamaForCausalLM(config).to(device=self.torch_device, dtype=dtype).eval()
+    def get_tied_model(self, dtype=torch.float32):
+        # tiny OPT model whose lm_head is tied to embed_tokens
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id, dtype=dtype)
+        return model.to(self.torch_device).eval()
 
     def get_lora_tied_pairs(self, model, adapter_name="default"):
         emb = model.get_input_embeddings()
@@ -7539,7 +7531,7 @@ class TestWeightTying:
     def test_weight_tying_lora_survives_adapter_dtype_cast(self, dtype, autocast_adapter_dtype):
         # Upcasting the adapter weights of a float16/bfloat16 model must not untie the lm_head LoRA weights from the
         # embedding LoRA weights, see #3929
-        model = self.get_tied_llama(dtype)
+        model = self.get_tied_model(dtype)
         config = LoraConfig(
             target_modules=["embed_tokens", "lm_head"], ensure_weight_tying=True, init_lora_weights=False
         )
@@ -7555,30 +7547,28 @@ class TestWeightTying:
         optimizer.step()
         self.assert_lora_tied(model, expected_dtype)
 
-    @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @pytest.mark.parametrize("low_cpu_mem_usage", [False, True])
-    def test_weight_tying_lora_save_load(self, tmp_path, dtype, low_cpu_mem_usage):
+    def test_weight_tying_lora_save_load(self, tmp_path, recwarn, dtype, low_cpu_mem_usage):
         config = LoraConfig(
             target_modules=["embed_tokens", "lm_head"], ensure_weight_tying=True, init_lora_weights=False
         )
-        model = get_peft_model(self.get_tied_llama(dtype), config)
+        model = get_peft_model(self.get_tied_model(dtype), config)
         input_ids = torch.arange(10, device=self.torch_device).view(1, -1)
         with torch.inference_mode():
             logits = model(input_ids).logits
         model.save_pretrained(tmp_path)
 
-        with warnings.catch_warnings(record=True) as recorded:
-            warnings.simplefilter("always")
-            loaded = PeftModel.from_pretrained(
-                self.get_tied_llama(dtype), tmp_path, is_trainable=True, low_cpu_mem_usage=low_cpu_mem_usage
-            )
-        assert not any("diverged" in str(w.message) for w in recorded)
+        loaded = PeftModel.from_pretrained(
+            self.get_tied_model(dtype), tmp_path, is_trainable=True, low_cpu_mem_usage=low_cpu_mem_usage
+        )
+        assert not any("diverged" in str(w.message) for w in recwarn)
         self.assert_lora_tied(loaded, torch.float32)
         with torch.inference_mode():
             logits_loaded = loaded(input_ids).logits
         torch.testing.assert_close(logits_loaded, logits)
 
-    @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @pytest.mark.parametrize("low_cpu_mem_usage", [False, True])
     def test_weight_tying_lora_load_diverged_checkpoint(self, tmp_path, dtype, low_cpu_mem_usage):
         # Before #3929 was fixed, training with ensure_weight_tying=True on a float16/bfloat16 model untied the LoRA
@@ -7587,7 +7577,7 @@ class TestWeightTying:
         config = LoraConfig(
             target_modules=["embed_tokens", "lm_head"], ensure_weight_tying=True, init_lora_weights=False
         )
-        model = get_peft_model(self.get_tied_llama(dtype), config)
+        model = get_peft_model(self.get_tied_model(dtype), config)
         head = model.base_model.model.lm_head
         # simulate such a checkpoint by untying and perturbing the lm_head LoRA weights
         for lora_layer in (head.lora_A["default"], head.lora_B["default"]):
@@ -7600,7 +7590,7 @@ class TestWeightTying:
 
         with pytest.warns(UserWarning, match="have diverged"):
             loaded = PeftModel.from_pretrained(
-                self.get_tied_llama(dtype), tmp_path, is_trainable=True, low_cpu_mem_usage=low_cpu_mem_usage
+                self.get_tied_model(dtype), tmp_path, is_trainable=True, low_cpu_mem_usage=low_cpu_mem_usage
             )
         for source, target in self.get_lora_tied_pairs(loaded):
             assert source.data_ptr() != target.data_ptr()
@@ -7615,7 +7605,7 @@ class TestWeightTying:
     @pytest.mark.parametrize("init_lora_weights", ["pissa", "pissa_niter_2", "olora", "orthogonal", "mica"])
     def test_weight_tying_lora_incompatible_init_raises(self, init_lora_weights):
         # These initializations replace the tied LoRA weights (and some also the tied base weight) of lm_head
-        model = self.get_tied_llama()
+        model = self.get_tied_model()
         config = LoraConfig(
             target_modules=["embed_tokens", "lm_head"], ensure_weight_tying=True, init_lora_weights=init_lora_weights
         )
@@ -7625,7 +7615,7 @@ class TestWeightTying:
 
     @pytest.mark.parametrize("init_lora_weights", [True, False, "gaussian", "nora"])
     def test_weight_tying_lora_compatible_init(self, init_lora_weights):
-        model = self.get_tied_llama()
+        model = self.get_tied_model()
         config = LoraConfig(
             target_modules=["embed_tokens", "lm_head"], ensure_weight_tying=True, init_lora_weights=init_lora_weights
         )
