@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 import torch
 from torch import nn
@@ -154,6 +154,11 @@ class AdamssModel(BaseTuner):
 
         return new_module
 
+    def on_peft_optimizer_step(self, global_step: int, **kwargs: Any) -> None:
+        """Update ASA importance scores and masks after an optimizer update, before clearing gradients."""
+        if self.training:
+            self.update_and_allocate(global_step)
+
     def update_and_allocate(self, global_step: int) -> None:
         """
         Update importance scores and apply ASA masking (if enabled).
@@ -164,17 +169,22 @@ class AdamssModel(BaseTuner):
         1. Accumulates importance scores via EMA every step during the warmup period.
         2. At mask intervals, applies global top-K masking and resets importance.
 
-        This is the single entry point for ASA – using the :class:`AdamssAsaCallback` with HuggingFace ``Trainer``
-        simply delegates to this method. For custom training loops, call this directly instead of the callback.
+        [`PeftModel.on_peft_optimizer_step`] delegates to this method. With Transformers `Trainer`, use
+        [`helpers.PeftTrainerMixin`] to perform the update automatically.
 
         Args:
             global_step (`int`): The current training step.
 
-        Example::
+        Example:
 
-            for step, batch in enumerate(dataloader):
-                loss = model(**batch).loss loss.backward() optimizer.step() model.base_model.update_and_allocate(step)
-                optimizer.zero_grad()
+        ```python
+        for step, batch in enumerate(dataloader):
+            loss = model(**batch).loss
+            loss.backward()
+            optimizer.step()
+            peft_model.on_peft_optimizer_step(step)
+            optimizer.zero_grad()
+        ```
         """
         for adapter_name in self.active_adapters:
             config = self.peft_config[adapter_name]

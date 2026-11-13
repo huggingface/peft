@@ -19,7 +19,7 @@ update with a learnable diagonal of singular values (`lora_diag`) inserted betwe
 
 The KaSA paper trains with two auxiliary regularizers (an L2 penalty on the singular values and an orthogonal
 regularization on the adapter factors). PEFT cannot inject them into the training loop automatically, so this example
-subclasses the trainer and adds the model's `_get_kasa_loss()` to the task loss.
+uses PeftTrainerMixin to add the auxiliary loss to the task loss.
 """
 
 from dataclasses import dataclass, field
@@ -31,6 +31,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, HfArgumentParser
 from trl import SFTConfig, SFTTrainer
 
 from peft import KasaConfig, LoraConfig, get_peft_model
+from peft.helpers import PeftTrainerMixin
 
 
 @dataclass
@@ -50,15 +51,8 @@ class ScriptArguments(SFTConfig):
     dataset_text_field: str = field(default="text")
 
 
-class KasaSFTTrainer(SFTTrainer):
+class KasaSFTTrainer(PeftTrainerMixin, SFTTrainer):
     """SFTTrainer that adds the KaSA auxiliary regularization to the task loss."""
-
-    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-        result = super().compute_loss(model, inputs, return_outputs=return_outputs, **kwargs)
-        if return_outputs:
-            loss, outputs = result
-            return loss + model._get_kasa_loss(), outputs
-        return result + model._get_kasa_loss()
 
 
 def train():

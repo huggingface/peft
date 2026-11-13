@@ -91,8 +91,8 @@ class AdamssLayer(BaseTunerLayer):
         """
         Update importance scores using current gradients.
 
-        Called by [`AdamssModel.update_and_allocate`] (which is in turn called by [`AdamssAsaCallback`] when using
-        HuggingFace `Trainer`).
+        Called by [`AdamssModel.update_and_allocate`] through [`PeftModel.on_peft_optimizer_step`], or automatically
+        through [`helpers.PeftTrainerMixin`] when using HuggingFace `Trainer`.
 
         Args:
             adapter_name: Name of the adapter to update importance for.

@@ -55,7 +55,7 @@ from utils import (
 )
 
 from data import get_train_valid_test_datasets, get_wiki_small
-from peft import AdaLoraConfig, AdamssConfig, PeftConfig, initialize_kv_prefix_from_text
+from peft import PeftConfig, initialize_kv_prefix_from_text
 from peft.utils import CONFIG_NAME, infer_device
 from peft.utils.healthcheck import format_healthcheck
 
@@ -146,6 +146,10 @@ class DummyGradScaler:
     def update(self):
         pass
 
+    def get_scale(self):
+        # A constant scale indicates that optimizer updates are never skipped.
+        return 1.0
+
 
 def train(
     *,
@@ -163,9 +167,7 @@ def train(
     query_template: str,
     lr_scheduler_arg: Optional[Literal["cosine"]],
     use_amp: bool,
-    is_adalora: bool,
     init_kv_cache_prefix: Optional[str],
-    is_adamss: bool,
 ) -> TrainResult:
     accelerator_memory_allocated_log = []
     accelerator_memory_reserved_log = []
@@ -288,16 +290,21 @@ def train(
             with autocast_ctx():
                 outputs = model(**batch, num_items_in_batch=num_items_in_batch)
                 loss = outputs.loss
+            if not is_full_fine_tune:
+                loss = loss + model.get_peft_loss()
             grad_scaler.scale(loss).backward()
             if grad_norm_clip:
                 grad_scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_norm_clip)
+            loss_scale_before_step = grad_scaler.get_scale()
             grad_scaler.step(optimizer)
             grad_scaler.update()
-            lr_scheduler.step()
-
-            if is_adalora or is_adamss:
-                model.base_model.update_and_allocate(step)
+            # A decreased scale signals overflow and a skipped optimizer update. Skip scheduler and PEFT updates too.
+            optimizer_step_was_skipped = grad_scaler.get_scale() < loss_scale_before_step
+            if not optimizer_step_was_skipped:
+                lr_scheduler.step()
+                if not is_full_fine_tune:
+                    model.on_peft_optimizer_step(step)
 
             losses.append(loss.item())
             pbar.set_postfix({"loss": loss.item()})
@@ -493,9 +500,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool, bucket_name
         query_template=train_config.query_template,
         lr_scheduler_arg=train_config.lr_scheduler,
         use_amp=train_config.use_amp,
-        is_adalora=isinstance(peft_config, AdaLoraConfig),
         init_kv_cache_prefix=train_config.init_kv_cache_prefix,
-        is_adamss=isinstance(peft_config, AdamssConfig),
     )
 
     if train_result.status == TrainStatus.FAILED:

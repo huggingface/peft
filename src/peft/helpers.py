@@ -12,7 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""PEFT helper functions and classes.
+
+These helpers are intended for the end uesr and not for internal usage in PEFT (for this, use utils). Do not import
+anything from here into the global PEFT namespace (peft.__init__).
+
+"""
+
 import inspect
+import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager
 from copy import deepcopy
@@ -23,6 +31,7 @@ from typing import Any, Optional, Union
 import torch
 from torch import nn
 from tqdm.auto import tqdm
+from transformers import TrainerCallback
 
 from .peft_model import PeftConfig, PeftModel
 from .tuners.lora import LoraLayer, LoraModel, dora
@@ -259,8 +268,122 @@ def disable_input_dtype_casting(model: nn.Module, active: bool = True):
                 module.cast_input_dtype_enabled = original_values[name]
 
 
+class _PeftTrainingCallback(TrainerCallback):
+    def __init__(self, accelerator):
+        self.accelerator = accelerator
+
+    def on_optimizer_step(self, args, state, control, **kwargs):
+        # see:
+        # https://github.com/huggingface/accelerate/blob/8c83b448d19f6356d4facd65c1d4763bf9fa51b2/src/accelerate/accelerator.py#L4290-L4298
+        # https://github.com/huggingface/transformers/blob/6b6792ff3b1a434913dc59659d4461acc9c3a51a/src/transformers/trainer.py#L1921-L1924
+        if not self.accelerator.optimizer_step_was_skipped:
+            model = self.accelerator.unwrap_model(kwargs["model"])
+            model.on_peft_optimizer_step(state.global_step)
+
+
+class PeftTrainerMixin:
+    """
+    Add PEFT auxiliary losses and optimizer-step updates to a Transformers Trainer.
+
+    Place this mixin before `Trainer` (or a compatible subclass such as `SFTTrainer`) in the inheritance list. It adds
+    [`PeftModel.get_peft_loss`] in `compute_loss` and registers a callback for [`PeftModel.on_peft_optimizer_step`].
+    Updates run after successful optimizer updates, with unscaled gradients still available. AMP overflow skips the
+    PEFT update while preserving the Trainer's step numbering.
+
+    When using this mixn, there is not additional need to register method-specific update callbacks or add the same
+    auxiliary losses separately.
+
+    Requires a Transformers version providing `TrainerCallback.on_optimizer_step`. The mixin uses the Trainer's
+    gradient accumulation normalization, including losses already normalized across accumulated batches.
+
+    Example:
+        ```python
+        from peft.helpers import PeftTrainerMixin
+        from transformers import Trainer
+
+
+        class PeftTrainer(PeftTrainerMixin, Trainer):
+            pass
+
+
+        trainer = PeftTrainer(model=peft_model, args=training_args, train_dataset=train_dataset)
+        trainer.train()
+        ```
+    """
+
+    def __init__(self, *args, **kwargs):
+        # from ._trainer import _PeftTrainingCallback
+
+        if not hasattr(TrainerCallback, "on_optimizer_step"):
+            raise ValueError(
+                "PeftTrainerMixin requires a newer Transformers version with on_optimizer_step callbacks."
+            )
+        super().__init__(*args, **kwargs)
+
+        from .tuners.adamss.asa_callback import AdamssAsaCallback
+
+        # prevent double accounting
+        for callback in list(self.callback_handler.callbacks):
+            if isinstance(callback, AdamssAsaCallback):
+                warnings.warn(
+                    "PeftTrainerMixin already handles optimizer-step updates; reomoving AdamssAsaCallback.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
+                self.remove_callback(callback)
+
+        self.add_callback(_PeftTrainingCallback(self.accelerator))
+
+    def add_callback(self, callback):
+        from .tuners.adamss.asa_callback import AdamssAsaCallback
+
+        callback_cls = callback if isinstance(callback, type) else type(callback)
+        if issubclass(callback_cls, AdamssAsaCallback):
+            warnings.warn(
+                "PeftTrainerMixin already handles optimizer-step updates; ignoring AdamssAsaCallback.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            return
+        return super().add_callback(callback)
+
+    def compute_loss(
+        self, model: nn.Module, inputs: dict[str, Any], return_outputs: bool = False, **kwargs: Any
+    ) -> Union[torch.Tensor, tuple[torch.Tensor, Any]]:
+        result = super().compute_loss(model, inputs, return_outputs=return_outputs, **kwargs)
+        task_loss, outputs = result if return_outputs else (result, None)
+        peft_model = self.accelerator.unwrap_model(model)
+        peft_loss = peft_model.get_peft_loss()
+
+        # see:
+        # https://github.com/huggingface/transformers/blob/6b6792ff3b1a434913dc59659d4461acc9c3a51a/src/transformers/trainer.py#L373-L375
+        # https://github.com/huggingface/transformers/blob/6b6792ff3b1a434913dc59659d4461acc9c3a51a/docs/source/en/grad_accumulation.md?plain=1#L60
+        loss_is_scaled_for_ga = getattr(self, "loss_is_scaled_for_ga", None)
+        if loss_is_scaled_for_ga is None:
+            # None means we need to infer ourselves
+            model_normalizes_loss = getattr(self, "model_accepts_loss_kwargs", False) and (
+                kwargs.get("num_items_in_batch") is not None
+            )
+            trainer_uses_custom_loss = getattr(self, "compute_loss_func", None) is not None
+            loss_is_scaled_for_ga = model_normalizes_loss or trainer_uses_custom_loss
+
+        if loss_is_scaled_for_ga:
+            # Trainer leaves a loss normalized over the accumulated batch unchanged. Give each microbatch's PEFT
+            # loss its share of the update, including a shorter accumulation group at the end of an epoch. See:
+            # https://github.com/huggingface/transformers/blob/6b6792ff3b1a434913dc59659d4461acc9c3a51a/src/transformers/trainer.py#L1858-L1860
+            grad_acc_steps = getattr(
+                self, "current_gradient_accumulation_steps", self.args.gradient_accumulation_steps
+            )
+            peft_loss = peft_loss / grad_acc_steps
+
+        loss = task_loss + peft_loss
+        return (loss, outputs) if return_outputs else loss
+
+
 class MontecloraTrainerMixin:
     """
+    Deprecated in favor of [`helpers.PeftTrainerMixin`].
+
     Mixin class for adding Monteclora variational loss to the Trainer's compute_loss method.
 
     This mixin can be used with any Trainer class (e.g., Trainer, SFTTrainer) to add support for Monteclora's
@@ -297,6 +420,15 @@ class MontecloraTrainerMixin:
         trainer.train()
         ```
     """
+
+    def __init__(self, *args, **kwargs):
+        # TODO remove MontecloraTrainerMixin and this warning after Oct 2027
+        warnings.warn(
+            "MontecloraTrainerMixin is deprecated. Use peft.helpers.PeftTrainerMixin instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        super().__init__(*args, **kwargs)
 
     def compute_loss(
         self, model: nn.Module, inputs: dict[str, Any], return_outputs: bool = False, **kwargs: Any
