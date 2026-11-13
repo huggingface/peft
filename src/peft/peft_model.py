@@ -766,6 +766,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
     def _prepare_model_for_gradient_checkpointing(self, model: PreTrainedModel):
         # Note: In newer Transformers versions, this is called 'activation checkpointing'.
+        # TODO: Skip this workaround for use_reentrant=False if Transformers exposes a public API to check it.
         if not (
             getattr(model, "is_loaded_in_8bit", False)
             or getattr(model, "is_loaded_in_4bit", False)
