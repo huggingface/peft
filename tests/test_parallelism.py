@@ -25,6 +25,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import transformers
 from safetensors.torch import load_file as safe_load_file
+from torch import nn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.parallel import ColwiseParallel, RowwiseParallel, parallelize_module
@@ -383,6 +384,30 @@ class TestShardedBaseLayerShapes:
             for embedding_plan in ("embedding_rowwise", "embedding_colwise")
         ]
         self._spawn(tmp_path, self.transformers_tp_replicated_weights_match, cases)
+
+    @staticmethod
+    def fully_shard_lora_mha_preserves_parameter_identity():
+        # LoRA MHA's _restore_weights() recreated parameters even when they were already registered, meaning that
+        # separate module traversals could return different parameter objects. FSDP2 tracks those objects by identity,
+        # and replacing them could prevent it from matching its tracked parameters to the module tree.
+        from torch.distributed.fsdp import fully_shard
+
+        mesh = init_device_mesh("cpu", (2,))
+        model = nn.Sequential(nn.MultiheadAttention(8, 2))
+        model = get_peft_model(model, LoraConfig(target_modules=["0"]))
+
+        # FSDP2 matches parameters across traversals; restoring registered MHA weights must preserve their identities.
+        fully_shard(model, mesh=mesh)
+        sharded_params = dict(model.named_parameters())
+        assert all(isinstance(param, DTensor) for param in sharded_params.values())
+
+        model.state_dict()
+        params_after = dict(model.named_parameters())
+        assert params_after.keys() == sharded_params.keys()
+        assert all(param is sharded_params[name] for name, param in params_after.items())
+
+    def test_fully_shard_lora_mha_preserves_parameter_identity(self, tmp_path):
+        self._spawn(tmp_path, self.fully_shard_lora_mha_preserves_parameter_identity)
 
 
 def test_tp_mesh_dim_registry(monkeypatch):
