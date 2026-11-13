@@ -25,6 +25,7 @@ from torch import nn
 from transformers import AutoConfig, AutoModel, PretrainedConfig
 from transformers.utils import cached_file
 
+from peft.import_utils import get_transformers_cache_name
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import TaskType
 
@@ -166,7 +167,7 @@ class _TokenShadowBackbone(nn.Module):
         hidden = self.proj_in(inputs_embeds)
         for block in self.blocks:
             hidden = hidden + block(hidden)
-        return type("TokenShadowOutput", (), {"last_hidden_state": hidden, "past_key_values": None})()
+        return type("TokenShadowOutput", (), {"last_hidden_state": hidden, get_transformers_cache_name(): None})()
 
 
 def _set_config_attr(config: Any, names: tuple[str, ...], value: int) -> None:
@@ -533,8 +534,7 @@ class ShadowModel(BaseTuner):
         self._boundary_hook_handles.append(
             self.model.register_forward_pre_hook(self._seed_shadow_pre_hook, with_kwargs=True)
         )
-        # Re-pack base + shadow pasts into a `ShadowCache` on the way out (generation threads this object as
-        # `past_key_values`).
+        # Re-pack base + shadow pasts into a `ShadowCache` on the way out for the next generation step.
         self._boundary_hook_handles.append(
             self.model.register_forward_hook(self._pack_shadow_cache_hook, with_kwargs=True)
         )
@@ -568,11 +568,12 @@ class ShadowModel(BaseTuner):
         self._should_pack_shadow_cache = False
         self._deferred_shadow_seed = False
 
-        past = kwargs.get("past_key_values")
+        cache_name = get_transformers_cache_name()
+        past = kwargs.get(cache_name)
         base_past, shadow_past = self._unpack_past_key_values(past)
         # Always rewrite kwargs when a ShadowCache was supplied -- the base model cannot consume it.
         if isinstance(past, ShadowCache):
-            kwargs = {**kwargs, "past_key_values": base_past}
+            kwargs = {**kwargs, cache_name: base_past}
 
         if not self._shadow_path_active():
             return args, kwargs
@@ -621,8 +622,9 @@ class ShadowModel(BaseTuner):
         shadow_past = self._shadow_past_out
         self._shadow_past_out = None
 
-        if hasattr(output, "past_key_values"):
-            output.past_key_values = ShadowCache(base=output.past_key_values, shadow=shadow_past)
+        cache_name = get_transformers_cache_name()
+        if hasattr(output, cache_name):
+            setattr(output, cache_name, ShadowCache(base=getattr(output, cache_name), shadow=shadow_past))
             return output
         return output
 
@@ -656,7 +658,7 @@ class ShadowModel(BaseTuner):
             raise ValueError(
                 f"Shadow state sequence shape {tuple(self._seed_shadow_state.shape[:-1])} does not match base hidden "
                 f"states {tuple(hidden.shape[:-1])}. When using a KV cache, both the base model and the shadow "
-                "backbone must see the same new-token length (pass a `ShadowCache` as `past_key_values`)."
+                f"backbone must see the same new-token length (pass a `ShadowCache` as `{get_transformers_cache_name()}`)."
             )
         carrier = ShadowCarrier(hidden, self._seed_shadow_state)
         if args:
@@ -689,7 +691,7 @@ class ShadowModel(BaseTuner):
             "attention_mask": attention_mask,
             "use_cache": use_cache,
             "return_dict": True,
-            "past_key_values": past_key_values,
+            get_transformers_cache_name(): past_key_values,
         }
         if position_ids is not None:
             kwargs["position_ids"] = position_ids
@@ -710,7 +712,7 @@ class ShadowModel(BaseTuner):
         if not hasattr(out, "last_hidden_state"):
             raise TypeError("The shadow backbone did not return a `last_hidden_state`; architecture is unsupported.")
         shadow_state = self.shadow_projection[adapter_name](out.last_hidden_state)
-        return shadow_state, getattr(out, "past_key_values", None)
+        return shadow_state, getattr(out, get_transformers_cache_name(), None)
 
     # ------------------------------------------------------------------------------------------ trainability
 

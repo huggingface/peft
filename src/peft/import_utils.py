@@ -49,6 +49,20 @@ except ImportError:
 
 
 @lru_cache
+def get_transformers_cache_name() -> str:
+    """Return the cache argument and output field name used by Transformers.
+
+    Note that for the longest time, the argument was called `past_key_values` but it was deprecated in
+    https://github.com/huggingface/transformers/pull/50585 and is henceforth called `cache`. Therefore, the name is not
+    hard-coded.
+    """
+    # TODO: Remove the old name once support for Transformers < 5.24.0 is dropped.
+    if packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.24.0.dev0"):
+        return "cache"
+    return "past_key_values"
+
+
+@lru_cache
 def is_bnb_available() -> bool:
     return importlib.util.find_spec("bitsandbytes") is not None
 

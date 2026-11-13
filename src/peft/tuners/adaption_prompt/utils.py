@@ -17,6 +17,8 @@ from typing import Optional
 import torch
 from torch import nn
 
+from peft.import_utils import get_transformers_cache_name
+
 
 def llama_rotate_half(x: torch.Tensor) -> torch.Tensor:
     """
@@ -66,7 +68,7 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
     """
     hidden_states = kwargs.get("hidden_states")
     position_ids = kwargs.get("position_ids")
-    past_key_value = kwargs.get("past_key_value")
+    past_key_value = kwargs.get(get_transformers_cache_name(), kwargs.get("past_key_value"))
     bsz, q_len, _ = hidden_states.size()
     num_heads = model.config.num_attention_heads
     query_states = model.q_proj(hidden_states).view(bsz, q_len, num_heads, model.head_dim).transpose(1, 2)
