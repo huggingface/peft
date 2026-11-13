@@ -19,6 +19,7 @@ from torch import nn
 from transformers import Cache, GenerationConfig, GenerationMixin, PreTrainedModel
 from transformers.modeling_outputs import CausalLMOutputWithPast, SequenceClassifierOutput
 
+from peft.import_utils import get_transformers_cache_name
 from peft.tuners.tuners_utils import BaseTunerLayer
 
 from .config import ShadowConfig
@@ -492,4 +493,10 @@ class DetachedShadowModel(PreTrainedModel, GenerationMixin):
             loss = torch.nn.functional.cross_entropy(
                 shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1), ignore_index=-100
             )
-        return CausalLMOutputWithPast(loss=loss, logits=logits, past_key_values=getattr(out, "past_key_values", None))
+
+        cache_name = get_transformers_cache_name()
+        return CausalLMOutputWithPast(
+            loss=loss,
+            logits=logits,
+            **{cache_name: getattr(out, cache_name, None)},
+        )

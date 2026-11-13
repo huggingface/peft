@@ -15,9 +15,10 @@ import pytest
 import torch
 from transformers import AutoModelForQuestionAnswering, AutoModelForTokenClassification
 
-from peft import BOFTConfig, IA3Config, LoraConfig, VeraConfig
+from peft import BOFTConfig, IA3Config, LoraConfig, PrefixTuningConfig, VeraConfig, get_peft_model
 
 from .testing_common import PeftCommonTester
+from .testing_utils import hub_online_once
 
 
 # Note: models from peft-internal-testing are just the safetensors versions of hf-internal-testing. The auto classes
@@ -81,3 +82,27 @@ class TestQuestionAnsweringModels(PeftCommonTester):
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_add_adapter_no_autocast_adapter_dtype(self, model_id, config_cls, config_kwargs, dtype):
         self._test_add_adapter_no_autocast_adapter_dtype(model_id, config_cls, config_kwargs.copy(), dtype=dtype)
+
+
+class TestPrefixTuning:
+    @pytest.mark.parametrize("model_id", PEFT_TOKEN_CLS_MODELS_TO_TEST)
+    @pytest.mark.parametrize(
+        "model_cls,task_type",
+        [(AutoModelForTokenClassification, "TOKEN_CLS"), (AutoModelForQuestionAnswering, "QUESTION_ANS")],
+    )
+    def test_prefix_tuning_forward_with_labels(self, model_id, model_cls, task_type):
+        # These heads delegate cache handling to their backbone; exercises PEFT's prefix-tuning signature checks in
+        # _prefix_tuning_forward
+        with hub_online_once(model_id):
+            base_model = model_cls.from_pretrained(model_id, num_labels=2, ignore_mismatched_sizes=True)
+            config = PrefixTuningConfig(task_type=task_type, num_virtual_tokens=4)
+            model = get_peft_model(base_model, config)
+            input_ids = torch.tensor([[2, 3, 4]])
+            if task_type == "TOKEN_CLS":
+                labels = {"labels": torch.tensor([[0, 1, 0]])}
+            else:
+                labels = {"start_positions": torch.tensor([0]), "end_positions": torch.tensor([1])}
+
+            outputs = model(input_ids=input_ids, attention_mask=torch.ones_like(input_ids), **labels)
+            assert outputs.loss is not None
+            assert torch.isfinite(outputs.loss)

@@ -37,6 +37,7 @@ from safetensors.torch import storage_ptr, storage_size
 from transformers import PreTrainedModel
 
 from ..import_utils import (
+    get_transformers_cache_name,
     is_gptqmodel_available,
     is_torch_tpu_available,
     is_transformers_ge_v5,
@@ -1830,7 +1831,7 @@ def create_attention_mask(
                 config=model.config,
                 inputs_embeds=dummy_embeds,
                 attention_mask=attention_mask,
-                past_key_values=past_key_values,
+                **{get_transformers_cache_name(): past_key_values},
                 token_type_ids=token_type_ids,
                 position_ids=position_ids,
             )

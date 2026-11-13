@@ -44,11 +44,16 @@ from peft.tuners.lora.variants import get_alora_offsets_for_forward, get_alora_o
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, _delete_auxiliary_adapter
 from peft.utils import AuxiliaryTrainingWrapper, is_activation_checkpointing
 from peft.utils.constants import DUMMY_MODEL_CONFIG
-from peft.utils.integrations import get_fsdp_modules, init_empty_weights
-from peft.utils.other import TrainableTokensWrapper, create_attention_mask, set_additional_trainable_modules
+from peft.utils.integrations import check_cache_in_signature, get_fsdp_modules, init_empty_weights
+from peft.utils.other import (
+    TrainableTokensWrapper,
+    create_attention_mask,
+    set_additional_trainable_modules,
+)
 
 from . import __version__
 from .config import PeftConfig
+from .import_utils import get_transformers_cache_name
 from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_PREFIX_MAPPING, PEFT_TYPE_TO_TUNER_MAPPING
 from .utils import (
     SAFETENSORS_WEIGHTS_NAME,
@@ -2195,7 +2200,6 @@ class PeftModelForSequenceClassification(PeftModel):
     ):
         batch_size = _get_batch_size(input_ids, inputs_embeds)
         past_key_values = self.get_prompt(batch_size)
-        fwd_params = list(inspect.signature(self.base_model.forward).parameters.keys())
         kwargs.update(
             {
                 "input_ids": input_ids,
@@ -2204,15 +2208,14 @@ class PeftModelForSequenceClassification(PeftModel):
                 "output_attentions": output_attentions,
                 "output_hidden_states": output_hidden_states,
                 "return_dict": return_dict,
-                "past_key_values": past_key_values,
+                get_transformers_cache_name(): past_key_values,
             }
         )
-        if "past_key_values" in fwd_params:
+        if check_cache_in_signature(self.base_model.forward):
             return self.base_model(labels=labels, **kwargs)
         else:
             transformer_backbone_name = self.base_model.get_submodule(self.transformer_backbone_name)
-            fwd_params = list(inspect.signature(transformer_backbone_name.forward).parameters.keys())
-            if "past_key_values" not in fwd_params:
+            if not check_cache_in_signature(transformer_backbone_name.forward):
                 raise ValueError("Model does not support past key values which are required for prefix tuning.")
             outputs = transformer_backbone_name(**kwargs)
             pooled_output = outputs[1] if len(outputs) > 1 else outputs[0]
@@ -2372,7 +2375,7 @@ class PeftModelForCausalLM(PeftModel):
                 max_cache_len = input_ids.shape[1] + peft_config.num_virtual_tokens
             else:
                 max_cache_len = inputs_embeds.shape[1] + peft_config.num_virtual_tokens
-            kwargs["past_key_values"] = self.get_prompt(batch_size, max_cache_len=max_cache_len)
+            kwargs[get_transformers_cache_name()] = self.get_prompt(batch_size, max_cache_len=max_cache_len)
             return self.base_model(input_ids=input_ids, inputs_embeds=inputs_embeds, **kwargs)
         elif peft_config.peft_type == PeftType.CPT:
             return self._cpt_forward(input_ids, inputs_embeds, peft_config, task_ids, batch_size, **kwargs)
@@ -2469,6 +2472,7 @@ class PeftModelForCausalLM(PeftModel):
     def prepare_inputs_for_generation(self, *args, task_ids: Optional[torch.Tensor] = None, **kwargs):
         peft_config = self.active_peft_config
         model_kwargs = self.base_model_prepare_inputs_for_generation(*args, **kwargs)
+        cache_name = get_transformers_cache_name()
 
         # https://github.com/huggingface/transformers/pull/26681/ introduced new cache format
         # for some architectures which requires a special fix for prompt tuning etc.
@@ -2491,11 +2495,11 @@ class PeftModelForCausalLM(PeftModel):
         if peft_config.peft_type == PeftType.POLY:
             model_kwargs["task_ids"] = task_ids
         if peft_config.is_prompt_learning:
-            if uses_cache and (model_kwargs.get("past_key_values", None) is not None):
+            if uses_cache and (model_kwargs.get(cache_name, None) is not None):
                 # change in the logic of `prepare_inputs_for_generation` makes the below code necessary
                 # In prompt learning methods, past key values are longer when compared to the `input_ids`.
                 # As such only consider the last input ids in the autogressive generation phase.
-                past_key_values = model_kwargs["past_key_values"]
+                past_key_values = model_kwargs[cache_name]
                 if isinstance(past_key_values, (tuple, list)):
                     seq_len = past_key_values[0][0].shape[-2]
                 else:  # using transformers kv cache
@@ -2537,7 +2541,7 @@ class PeftModelForCausalLM(PeftModel):
                         self.get_base_model(),
                         model_input=None,
                         attention_mask=attention_mask_2d,
-                        past_key_values=model_kwargs.get("past_key_values"),
+                        past_key_values=model_kwargs.get(cache_name),
                         cache_position=cache_position_,
                         batch_size=bs,
                         sequence_length=total_seq_len,
@@ -2556,8 +2560,8 @@ class PeftModelForCausalLM(PeftModel):
                 kwargs=model_kwargs,
             )
 
-            cache: transformers.Cache | None = model_kwargs.get("past_key_values", None)
-            # no past_key_values or past_key_values empty cache
+            cache: transformers.Cache | None = model_kwargs.get(cache_name, None)
+            # Inject the prompt when the cache is absent or empty.
             requires_prompt_injection = (cache is None) or (
                 isinstance(cache, transformers.Cache) and not cache.get_seq_length()
             )
@@ -2572,7 +2576,7 @@ class PeftModelForCausalLM(PeftModel):
                     batch_size=model_kwargs["input_ids"].shape[0],
                     max_cache_len=max_cache_len,
                 )
-                model_kwargs["past_key_values"] = new_past_key_values
+                model_kwargs[cache_name] = new_past_key_values
             elif requires_prompt_injection:
                 inputs_embeds = self.word_embeddings(model_kwargs["input_ids"])
                 prompts = self.get_prompt(batch_size=model_kwargs["input_ids"].shape[0], task_ids=task_ids)
@@ -2704,7 +2708,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
 
         if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
             # overwrite past_kv in kwargs
-            kwargs["past_key_values"] = self.get_prompt(batch_size)
+            kwargs[get_transformers_cache_name()] = self.get_prompt(batch_size)
             return self.base_model(
                 input_ids=input_ids,
                 inputs_embeds=inputs_embeds,
@@ -2827,10 +2831,11 @@ class PeftModelForSeq2SeqLM(PeftModel):
     def prepare_inputs_for_generation(self, *args, task_ids: torch.Tensor = None, **kwargs):
         peft_config = self.active_peft_config
         model_kwargs = self.base_model_prepare_inputs_for_generation(*args, **kwargs)
+        cache_name = get_transformers_cache_name()
         if peft_config.peft_type == PeftType.POLY:
             model_kwargs["task_ids"] = task_ids
         elif peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
-            past_key_values = model_kwargs.get("past_key_values", None)
+            past_key_values = model_kwargs.get(cache_name, None)
             # check prefill stage
             is_prefill_stage = kwargs.get("is_first_iteration")
             if is_prefill_stage is None:  # transformers < v5
@@ -2843,7 +2848,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
             if is_prefill_stage:
                 batch_size = model_kwargs["decoder_input_ids"].shape[0]
                 new_past_key_values = self.get_prompt(batch_size)
-                model_kwargs["past_key_values"] = new_past_key_values
+                model_kwargs[cache_name] = new_past_key_values
 
         return model_kwargs
 
@@ -3034,7 +3039,6 @@ class PeftModelForTokenClassification(PeftModel):
     ):
         batch_size = _get_batch_size(input_ids, inputs_embeds)
         past_key_values = self.get_prompt(batch_size)
-        fwd_params = list(inspect.signature(self.base_model.forward).parameters.keys())
         kwargs.update(
             {
                 "input_ids": input_ids,
@@ -3043,15 +3047,14 @@ class PeftModelForTokenClassification(PeftModel):
                 "output_attentions": output_attentions,
                 "output_hidden_states": output_hidden_states,
                 "return_dict": return_dict,
-                "past_key_values": past_key_values,
+                get_transformers_cache_name(): past_key_values,
             }
         )
-        if "past_key_values" in fwd_params:
+        if check_cache_in_signature(self.base_model.forward):
             return self.base_model(labels=labels, **kwargs)
         else:
             transformer_backbone_name = self.base_model.get_submodule(self.transformer_backbone_name)
-            fwd_params = list(inspect.signature(transformer_backbone_name.forward).parameters.keys())
-            if "past_key_values" not in fwd_params:
+            if not check_cache_in_signature(transformer_backbone_name.forward):
                 raise ValueError("Model does not support past key values which are required for prefix tuning.")
             outputs = transformer_backbone_name(**kwargs)
             sequence_output = outputs[0]
@@ -3270,7 +3273,6 @@ class PeftModelForQuestionAnswering(PeftModel):
     ):
         batch_size = _get_batch_size(input_ids, inputs_embeds)
         past_key_values = self.get_prompt(batch_size)
-        fwd_params = list(inspect.signature(self.base_model.forward).parameters.keys())
         kwargs.update(
             {
                 "input_ids": input_ids,
@@ -3279,15 +3281,14 @@ class PeftModelForQuestionAnswering(PeftModel):
                 "output_attentions": output_attentions,
                 "output_hidden_states": output_hidden_states,
                 "return_dict": return_dict,
-                "past_key_values": past_key_values,
+                get_transformers_cache_name(): past_key_values,
             }
         )
-        if "past_key_values" in fwd_params:
+        if check_cache_in_signature(self.base_model.forward):
             return self.base_model(start_positions=start_positions, end_positions=end_positions, **kwargs)
         else:
             transformer_backbone_name = self.base_model.get_submodule(self.transformer_backbone_name)
-            fwd_params = list(inspect.signature(transformer_backbone_name.forward).parameters.keys())
-            if "past_key_values" not in fwd_params:
+            if not check_cache_in_signature(transformer_backbone_name.forward):
                 raise ValueError("Model does not support past key values which are required for prefix tuning.")
             outputs = transformer_backbone_name(**kwargs)
             sequence_output = outputs[0]
@@ -3419,7 +3420,7 @@ class PeftModelForFeatureExtraction(PeftModel):
 
         if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
             # overwrite past_kv in kwargs
-            kwargs["past_key_values"] = self.get_prompt(batch_size)
+            kwargs[get_transformers_cache_name()] = self.get_prompt(batch_size)
             return self.base_model(input_ids=input_ids, inputs_embeds=inputs_embeds, **kwargs)
         else:
             if inputs_embeds is None:

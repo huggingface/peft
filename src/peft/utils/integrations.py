@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import functools
+import inspect
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -24,6 +25,8 @@ import packaging.version
 import torch
 import transformers
 from torch import nn
+
+from ..import_utils import get_transformers_cache_name
 
 
 _TORCH_WRAPPER_NAMES = {"_fsdp_wrapped_module", "_checkpoint_wrapped_module"}
@@ -249,6 +252,16 @@ def map_cache_to_layer_device_map(model: Any, cache: transformers.Cache) -> None
             # TODO: remove if we drop support for transformers <= 4.55
             cache.key_cache[idx] = cache.key_cache[idx].to(layer_device)
             cache.value_cache[idx] = cache.value_cache[idx].to(layer_device)
+
+
+def check_cache_in_signature(method) -> bool:
+    """Check whether a method explicitly accepts the Transformers cache argument.
+
+    Note that for the longest time, the argument was called `past_key_values` but it was deprecated in
+    https://github.com/huggingface/transformers/pull/50585 and is henceforth called `cache`. Therefore, the name is not
+    hard-coded.
+    """
+    return get_transformers_cache_name() in inspect.signature(method).parameters
 
 
 def is_activation_checkpointing(model: nn.Module, *, default: bool) -> bool:

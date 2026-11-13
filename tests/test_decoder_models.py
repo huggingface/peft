@@ -74,6 +74,7 @@ from peft import (
     WaveFTConfig,
     get_peft_model,
 )
+from peft.import_utils import get_transformers_cache_name
 from peft.utils import activation_checkpointing_enable
 
 from .testing_common import CONV1D_UNSUPPORTED_CONFIGS, PeftCommonTester, skip_non_prompt_learning
@@ -1152,7 +1153,7 @@ class TestDecoderModels(PeftCommonTester):
                 "input_ids": input_ids,
                 "attention_mask": attention_mask.clone(),
                 "cache_position": cache_position.clone(),
-                "past_key_values": None,
+                get_transformers_cache_name(): None,
             }
 
         model.base_model_prepare_inputs_for_generation = fake_prepare_inputs_for_generation
@@ -1186,7 +1187,7 @@ class TestDecoderModels(PeftCommonTester):
                 "input_ids": input_ids,
                 "attention_mask": attention_mask.clone(),
                 "cache_position": cache_position.clone(),
-                "past_key_values": None,
+                get_transformers_cache_name(): None,
             }
 
         model.base_model_prepare_inputs_for_generation = fake_prepare_inputs_for_generation
@@ -1194,9 +1195,10 @@ class TestDecoderModels(PeftCommonTester):
 
         assert torch.equal(model_kwargs["input_ids"], input_ids)
         assert "inputs_embeds" not in model_kwargs
-        past_key_values = model_kwargs["past_key_values"]
+        past_key_values = model_kwargs[get_transformers_cache_name()]
         assert isinstance(past_key_values, Cache)
         assert past_key_values.get_seq_length() == num_virtual_tokens
+        assert {"cache", "past_key_values"}.intersection(model_kwargs) == {get_transformers_cache_name()}
         assert model_kwargs["attention_mask"].shape == (2, num_virtual_tokens + input_ids.shape[1])
         # the cache already contains the virtual tokens, so the cache position of the input starts after them
         assert torch.equal(model_kwargs["cache_position"], cache_position + num_virtual_tokens)
@@ -1214,7 +1216,7 @@ class TestDecoderModels(PeftCommonTester):
         input_ids = torch.tensor([[1, 2, 3], [4, 5, 6]])
         with torch.no_grad():
             outputs = model(input_ids=input_ids, use_cache=True)
-        past_key_values = outputs.past_key_values
+        past_key_values = getattr(outputs, get_transformers_cache_name())
         assert past_key_values.get_seq_length() == num_virtual_tokens + input_ids.shape[1]
 
         # simulate the next decoding step: one new token, the 2d attention mask covers the tokens seen so far
@@ -1227,7 +1229,7 @@ class TestDecoderModels(PeftCommonTester):
                 "input_ids": next_input_ids,
                 "attention_mask": attention_mask,
                 "cache_position": cache_position,
-                "past_key_values": past_key_values,
+                get_transformers_cache_name(): past_key_values,
             }
 
         model.base_model_prepare_inputs_for_generation = fake_prepare_inputs_for_generation
@@ -1235,7 +1237,8 @@ class TestDecoderModels(PeftCommonTester):
 
         assert torch.equal(model_kwargs["input_ids"], next_input_ids[:, -1:])
         assert "inputs_embeds" not in model_kwargs
-        assert model_kwargs["past_key_values"] is past_key_values
+        assert model_kwargs[get_transformers_cache_name()] is past_key_values
+        assert {"cache", "past_key_values"}.intersection(model_kwargs) == {get_transformers_cache_name()}
         assert model_kwargs["attention_mask"].shape == (2, num_virtual_tokens + next_input_ids.shape[1])
         assert "cache_position" not in model_kwargs
 
@@ -1258,7 +1261,7 @@ class TestDecoderModels(PeftCommonTester):
                 "input_ids": input_ids,
                 "attention_mask": {"full_attention": attention_mask.clone()},
                 "cache_position": cache_position.clone(),
-                "past_key_values": None,
+                get_transformers_cache_name(): None,
             }
 
         model.base_model_prepare_inputs_for_generation = fake_prepare_single_mask
@@ -1274,7 +1277,7 @@ class TestDecoderModels(PeftCommonTester):
                     "sliding_attention": attention_mask.clone(),
                 },
                 "cache_position": cache_position.clone(),
-                "past_key_values": None,
+                get_transformers_cache_name(): None,
             }
 
         model.base_model_prepare_inputs_for_generation = fake_prepare_multiple_masks
@@ -1337,7 +1340,7 @@ class TestDecoderModels(PeftCommonTester):
                     "input_ids": input_ids,
                     "attention_mask": attention_mask_4d,
                     "cache_position": cache_position.clone(),
-                    "past_key_values": DynamicCache(),
+                    get_transformers_cache_name(): DynamicCache(),
                 }
 
             model.base_model_prepare_inputs_for_generation = fake_prepare_inputs_for_generation
