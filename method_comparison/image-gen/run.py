@@ -327,7 +327,7 @@ def train(
         **train_config.optimizer_kwargs,
     )
 
-    # print this after getting the optimizer, in case it modifies requires_gard
+    # print this after getting the optimizer, in case it modifies requires_grad
     if hasattr(transformer, "healthcheck"):
         healthcheck = transformer.healthcheck()
         print_verbose(format_healthcheck(healthcheck))
