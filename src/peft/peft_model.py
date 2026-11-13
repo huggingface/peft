@@ -1106,9 +1106,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 warnings.warn(
                     "The adapter layers are merged and FSDP2 was detected. To disable the adapter layers, the "
                     "adapters have to be unmerged first, and they will not be merged again when exiting the "
-                    "`disable_adapter` context."
+                    "`disable_adapter` context. This differs from the behavior without FSDP2, see the caveats section "
+                    "of the FSDP documentation for details."
                 )
-                self.unmerge_adapter()
+                self.unmerge_adapter(force_reshard=True)
             model_status = self.get_model_status()
             if model_status.enabled == "irregular":
                 warnings.warn(
@@ -1905,8 +1906,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 If `True`, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
-            kwargs: (`optional`):
-                Additional keyword arguments passed to the base model's `merge_adapter` method.
         """
         # The merge has to end up in the weights that FSDP2 keeps, i.e. the shards. A forward with
         # `reshard_after_forward=False` leaves the unsharded parameters registered, and a merge into those is dropped
@@ -1915,17 +1914,19 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self._reshard_fsdp_modules(include_merged=True)
         self.base_model.merge_adapter(adapter_names=adapter_names, safe_merge=safe_merge, **kwargs)
 
-    def unmerge_adapter(self, **kwargs: Any) -> None:
+    def unmerge_adapter(self, force_reshard: bool = False, **kwargs: Any) -> None:
         """
         Unmerge the adapters from the base model.
 
         Args:
-            kwargs: (`optional`):
-                Additional keyword arguments passed to the base model's `unmerge_adapter` method.
+            force_reshard (`bool`, *optional*):
+                Whether to reshard the FSDP2 modules even if no merged adapter layer was detected. This can be used to
+                avoid scanning the whole model for merged layers when the caller has already established that there is
+                at least one. Defaults to `False`.
         """
         # The unmerge has to end up in the shards as well, see merge_adapter. Resharding a merged layer is safe here
         # because the merge is in the sharded parameters.
-        if any(isinstance(module, BaseTunerLayer) and module.merged for module in self.modules()):
+        if force_reshard or any(isinstance(module, BaseTunerLayer) and module.merged for module in self.modules()):
             self._reshard_fsdp_modules(include_merged=True)
         self.base_model.unmerge_adapter(**kwargs)
 
