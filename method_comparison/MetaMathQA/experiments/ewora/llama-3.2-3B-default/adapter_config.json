@@ -1,0 +1,18 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "ewora_dropout": 0.0,
+  "inference_mode": false,
+  "init_weights": true,
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "modules_to_save": null,
+  "num_experts": 4,
+  "peft_type": "EWORA",
+  "peft_version": "0.20.1.dev0@UNKNOWN",
+  "r": 8,
+  "rank_pattern": {},
+  "revision": null,
+  "target_modules": null,
+  "task_type": null
+}
