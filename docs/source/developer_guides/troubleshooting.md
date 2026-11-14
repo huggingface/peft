@@ -145,6 +145,32 @@ Any `target_modules` entry that does not correspond to a module in the model is 
 > [!TIP]
 > This issue affects all PEFT methods that use `target_modules` (LoRA, LoHa, IA³, etc.), not just LoRA. The diagnostic steps are the same regardless of the method. If you are unsure which module names a given architecture uses, check the model's documentation or inspect `model.named_modules()` before configuring the adapter.
 
+### Targeting only some layers with `layers_to_transform`
+
+To apply the adapter only to some layers of the model, pass their indices as `layers_to_transform`. This requires `target_modules` to be a list of module names. PEFT reads the layer index of each module matched by `target_modules` from its name, e.g. `1` for `model.layers.1.self_attn.q_proj`, and only targets the module if that index is listed in `layers_to_transform`:
+
+```python
+from peft import LoraConfig, get_peft_model
+
+config = LoraConfig(target_modules=["q_proj", "v_proj"], layers_to_transform=[1])
+model = get_peft_model(base_model, config)
+print(model.targeted_module_names)
+# Llama model loaded with AutoModelForCausalLM:
+# ['model.layers.1.self_attn.q_proj', 'model.layers.1.self_attn.v_proj']
+# same checkpoint loaded with AutoModel:
+# ['layers.1.self_attn.q_proj', 'layers.1.self_attn.v_proj']
+```
+
+If `layers_pattern` is not specified, the first index in the module name is used as the layer index. This is the layer index for most models, including MoE models, where it is the layer index and not the expert index: `model.layers.1.mlp.experts.0.up_proj` belongs to layer `1`.
+
+When another numbered module comes before the layers, set `layers_pattern` to the name of the layer container (typically an `nn.ModuleList`, often called `"layers"` or `"h"`), and PEFT reads the index that follows this name instead. For example, a Swin model contains modules like `encoder.layers.0.blocks.1.attention.q_proj`, where `layers` are the stages and `blocks` the blocks within each stage. By default, `layers_to_transform=[1]` selects all blocks of stage `1`. To select block `1` of each stage, pass `layers_pattern="blocks"`:
+
+```python
+config = LoraConfig(target_modules=["q_proj", "v_proj"], layers_to_transform=[1], layers_pattern="blocks")
+```
+
+Always check `model.targeted_module_names` to verify that the intended modules are targeted.
+
 ## Bad results from a loaded PEFT model
 
 There can be several reasons for getting a poor result from a loaded PEFT model which are listed below. If you're still unable to troubleshoot the problem, see if anyone else had a similar [issue](https://github.com/huggingface/peft/issues) on GitHub, and if you can't find any, open a new issue.
