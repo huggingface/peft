@@ -190,15 +190,11 @@ class DeloraLinear(nn.Module, DeloraLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.delora_A.keys():
                 base_layer = self.get_base_layer()
-                delta_weight = (
-                    self.get_delta_weight(active_adapter)
-                    .detach()
-                    .to(dtype=base_layer.weight.dtype, device=base_layer.weight.device)
-                )
+                delta_weight = self.get_delta_weight(active_adapter).detach().to(device=base_layer.weight.device)
                 with torch.no_grad():
                     if safe_merge:
                         orig_weights = base_layer.weight.data.clone()
-                        orig_weights = orig_weights + delta_weight
+                        orig_weights += delta_weight
 
                         if not torch.isfinite(orig_weights).all():
                             raise ValueError(
