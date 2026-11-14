@@ -71,12 +71,21 @@ class WaveFTConfig(PeftConfig):
             List of modules, in addition to WaveFT layers, that should be marked as trainable and saved in the final
             checkpoint. Useful for layers like classifiers in sequence or token classification tasks that are randomly
             initialized and need training.
-        layers_to_transform (`Union[list[int],int]`):
-            Specific layer indices to transform. If provided, PEFT will only adapt layers at these indices. If a single
-            integer is given, only that layer is transformed.
-        layers_pattern (`Optional[Union[List[str], str]]`):
-            Pattern for layer names, used if `layers_to_transform` is specified and the layer pattern is not standard
-            (e.g., not 'layers' or 'h'). This should target the `nn.ModuleList` attribute in the model.
+        layers_to_transform (`Union[list[int], int]`, *optional*):
+            The indices of the layers to transform. If a list of ints is passed, only the layers at these indices are
+            transformed. If a single int is passed, only the layer at this index is transformed. If not specified, all
+            modules matched by `target_modules` are transformed. The layer index of a module is read from its name,
+            e.g. `1` for `model.layers.1.self_attn.q_proj`, see `layers_pattern` for details. This can only be used
+            when `target_modules` is a list of str.
+        layers_pattern (`Union[list[str], str]`, *optional*):
+            The name of the layer container (typically an `nn.ModuleList`, often called `'layers'` or `'h'`), used
+            together with `layers_to_transform`. The index following this name in the module name is the layer index,
+            e.g. `layers_pattern="layers"` reads the index `1` from `model.layers.1.self_attn.q_proj`. If a list is
+            passed, the first name that matches is used. If not specified, the first index in the module name is used,
+            which is the layer index for most models, e.g. `1` for `model.layers.1.mlp.experts.0.up_proj` and for
+            `layers.1.mlp.experts.0.up_proj`. Specify `layers_pattern` when another numbered module comes before the
+            layers, e.g. for `encoder.layers.0.blocks.1.attention`, `layers_pattern="blocks"` reads the index `1`
+            instead of `0`.
         n_frequency_pattern (`dict`):
             A dictionary mapping layer names (or regex) to specific `n_frequency` values, overriding the global
             `n_frequency`. Example: `{"model.decoder.layers.0.encoder_attn.k_proj": 1000}`.
@@ -193,8 +202,10 @@ class WaveFTConfig(PeftConfig):
         default=None,
         metadata={
             "help": (
-                "Specific layer indices to transform. If provided, PEFT will only adapt layers at these "
-                "indices. If a single integer is given, only that layer is transformed."
+                "The indices of the layers to transform. If a list of ints is passed, only the layers at these indices"
+                " are transformed. If a single int is passed, only the layer at this index is transformed. If not "
+                "specified, all modules matched by `target_modules` are transformed. This can only be used when "
+                "`target_modules` is a list of str."
             )
         },
     )
@@ -202,9 +213,10 @@ class WaveFTConfig(PeftConfig):
         default=None,
         metadata={
             "help": (
-                "Pattern for layer names, used if `layers_to_transform` is specified and the layer "
-                "pattern is not standard (e.g., not 'layers' or 'h'). This should target the "
-                "`nn.ModuleList` attribute in the model."
+                "The name of the layer container (typically an `nn.ModuleList`, often called `'layers'` or `'h'`), "
+                "used together with `layers_to_transform`. The index following this name in the module name is the "
+                "layer index. If not specified, the first index in the module name is used, which is the layer index "
+                "for most models. Specify it when another numbered module comes before the layers."
             )
         },
     )
