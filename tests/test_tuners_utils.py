@@ -118,6 +118,15 @@ REGEX_TEST_CASES = [
     ("foo.whatever.1.baz", ["baz"], [0], "", False),
     ("foo.whatever.1.baz", ["baz"], [1], None, True),
     ("foo.whatever.1.baz", ["baz"], [0], None, False),
+    # same without prefix before the layer container, e.g. the ModuleList at the root of the model
+    ("whatever.1.baz", ["baz"], [1], None, True),
+    ("whatever.1.baz", ["baz"], [0], None, False),
+    ("whatever.1.baz", ["baz"], [1], [], True),
+    ("whatever.1.baz", ["baz"], [0], "", False),
+    ("whatever.1.experts.0.baz", ["baz"], [1], None, True),
+    ("whatever.1.experts.0.baz", ["baz"], [0], None, False),
+    ("whatever.2.experts.1.baz", ["baz"], [1], None, False),
+    ("whatever.2.experts.1.baz", ["baz"], [2], None, True),
     # some realistic examples: transformers model
     ("transformer.h.1.attn.attention.q_proj.foo", ["q_proj"], None, [], False),
     ("transformer.h.1.attn.attention.q_proj", [], None, [], False),
@@ -524,11 +533,14 @@ class TestTargetedModuleNames:
         assert model.targeted_module_names == expected
 
     @pytest.mark.parametrize("layers_pattern", [None, "layers", ["h", "layers"]])
-    def test_layers_to_transform_filters_by_layer_not_expert_index(self, layers_pattern):
+    @pytest.mark.parametrize("prefix", ["model.", ""])
+    def test_layers_to_transform_filters_by_layer_not_expert_index(self, layers_pattern, prefix):
         # Test fix to issue #3016
         # The layer-index regex used a greedy ".*" prefix, so for MoE paths like
         # "model.layers.1.mlp.experts.0.up_proj" it captured the expert index instead of the layer
         # index, making layers_to_transform target the wrong modules.
+        # With prefix="", the layers sit at the root of the model ("layers.1.mlp.experts.0.up_proj"). Without
+        # layers_pattern, the layer index of such keys used to be ignored and the expert index was used instead (#4090).
         class ToyMoEBlock(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -543,8 +555,12 @@ class TestTargetedModuleNames:
         class ToyMoEModel(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.model = nn.Module()
-                self.model.layers = nn.ModuleList([ToyMoEBlock() for _ in range(4)])
+                layers = nn.ModuleList([ToyMoEBlock() for _ in range(4)])
+                if prefix:
+                    self.model = nn.Module()
+                    self.model.layers = layers
+                else:
+                    self.layers = layers
 
         config = LoraConfig(
             target_modules=["q_proj", "up_proj"],
@@ -559,11 +575,89 @@ class TestTargetedModuleNames:
         # Under the bug, layers.1.experts.0 was misread as layer 0 and dropped, and a
         # layers.2.experts.1 module could be misread as layer 1 and wrongly included.
         expected = {
-            "model.layers.1.self_attn.q_proj",
-            "model.layers.1.mlp.experts.0.up_proj",
-            "model.layers.1.mlp.experts.1.up_proj",
+            f"{prefix}layers.1.self_attn.q_proj",
+            f"{prefix}layers.1.mlp.experts.0.up_proj",
+            f"{prefix}layers.1.mlp.experts.1.up_proj",
         }
         assert set(model.targeted_module_names) == expected
+
+    @pytest.mark.parametrize(
+        "model_id, model_class, target_modules, layers_pattern, expected",
+        [
+            # Layers nested below a prefix ("model.layers.1..."): targeting is the same with and without
+            # layers_pattern, these cases already worked before #4090 and must not change.
+            (
+                "peft-internal-testing/tiny-random-LlamaForCausalLM",
+                AutoModelForCausalLM,
+                ["q_proj", "v_proj"],
+                None,
+                ["model.layers.1.self_attn.q_proj", "model.layers.1.self_attn.v_proj"],
+            ),
+            (
+                "peft-internal-testing/tiny-random-LlamaForCausalLM",
+                AutoModelForCausalLM,
+                ["q_proj", "v_proj"],
+                "layers",
+                ["model.layers.1.self_attn.q_proj", "model.layers.1.self_attn.v_proj"],
+            ),
+            (
+                "hf-internal-testing/tiny-random-gpt2",
+                AutoModelForCausalLM,
+                ["c_attn"],
+                None,
+                ["transformer.h.1.attn.c_attn"],
+            ),
+            (
+                "hf-internal-testing/tiny-random-gpt2",
+                AutoModelForCausalLM,
+                ["c_attn"],
+                "h",
+                ["transformer.h.1.attn.c_attn"],
+            ),
+            (
+                "hf-internal-testing/tiny-random-BertModel",
+                AutoModel,
+                ["query", "value"],
+                None,
+                ["encoder.layer.1.attention.self.query", "encoder.layer.1.attention.self.value"],
+            ),
+            (
+                "hf-internal-testing/tiny-random-BertModel",
+                AutoModel,
+                ["query", "value"],
+                "layer",
+                ["encoder.layer.1.attention.self.query", "encoder.layer.1.attention.self.value"],
+            ),
+            # Layers at the root of the model ("layers.1...", e.g. the base model loaded with AutoModel): with
+            # layers_pattern, this already worked; without it, no module used to match (#4090).
+            (
+                "peft-internal-testing/tiny-random-LlamaForCausalLM",
+                AutoModel,
+                ["q_proj", "v_proj"],
+                "layers",
+                ["layers.1.self_attn.q_proj", "layers.1.self_attn.v_proj"],
+            ),
+            (
+                "peft-internal-testing/tiny-random-LlamaForCausalLM",
+                AutoModel,
+                ["q_proj", "v_proj"],
+                None,
+                ["layers.1.self_attn.q_proj", "layers.1.self_attn.v_proj"],
+            ),
+            ("hf-internal-testing/tiny-random-gpt2", AutoModel, ["c_attn"], "h", ["h.1.attn.c_attn"]),
+            ("hf-internal-testing/tiny-random-gpt2", AutoModel, ["c_attn"], None, ["h.1.attn.c_attn"]),
+        ],
+    )
+    def test_layers_to_transform_targeted_module_names(
+        self, model_id, model_class, target_modules, layers_pattern, expected
+    ):
+        # Pin the exact modules targeted by layers_to_transform, with and without layers_pattern, for layers nested
+        # below a prefix and for layers at the root of the model.
+        with hub_online_once(model_id):
+            model = model_class.from_pretrained(model_id)
+        config = LoraConfig(target_modules=target_modules, layers_pattern=layers_pattern, layers_to_transform=[1])
+        model = get_peft_model(model, config)
+        assert model.targeted_module_names == expected
 
 
 class TestTargetedParameterNames:

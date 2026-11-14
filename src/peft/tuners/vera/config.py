@@ -58,13 +58,21 @@ class VeraConfig(PeftConfig):
         init_weights (`bool`):
             Whether to initialize the weights of the Vera layers with their default initialization. Don't change this
             setting, except if you know exactly what you're doing.
-        layers_to_transform (`Union[List[int],int]`):
-            The layer indexes to transform, if this argument is specified, it will apply the Vera transformations on
-            the layer indexes that are specified in this list. If a single integer is passed, it will apply the Vera
-            transformations on the layer at this index.
-        layers_pattern (`Optional[Union[List[str], str]]`):
-            The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
-            `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
+        layers_to_transform (`Union[list[int], int]`, *optional*):
+            The indices of the layers to transform. If a list of ints is passed, only the layers at these indices are
+            transformed. If a single int is passed, only the layer at this index is transformed. If not specified, all
+            modules matched by `target_modules` are transformed. The layer index of a module is read from its name,
+            e.g. `1` for `model.layers.1.self_attn.q_proj`, see `layers_pattern` for details. This can only be used
+            when `target_modules` is a list of str.
+        layers_pattern (`Union[list[str], str]`, *optional*):
+            The name of the layer container (typically an `nn.ModuleList`, often called `'layers'` or `'h'`), used
+            together with `layers_to_transform`. The index following this name in the module name is the layer index,
+            e.g. `layers_pattern="layers"` reads the index `1` from `model.layers.1.self_attn.q_proj`. If a list is
+            passed, the first name that matches is used. If not specified, the first index in the module name is used,
+            which is the layer index for most models, e.g. `1` for `model.layers.1.mlp.experts.0.up_proj` and for
+            `layers.1.mlp.experts.0.up_proj`. Specify `layers_pattern` when another numbered module comes before the
+            layers, e.g. for `encoder.layers.0.blocks.1.attention`, `layers_pattern="blocks"` reads the index `1`
+            instead of `0`.
     """
 
     r: int = field(default=256, metadata={"help": "Vera attention dimension"})
@@ -128,9 +136,10 @@ class VeraConfig(PeftConfig):
         default=None,
         metadata={
             "help": (
-                "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers"
-                " indexes that are specified inside this list. If a single integer is passed, PEFT will transform only"
-                " the layer at this index."
+                "The indices of the layers to transform. If a list of ints is passed, only the layers at these indices"
+                " are transformed. If a single int is passed, only the layer at this index is transformed. If not "
+                "specified, all modules matched by `target_modules` are transformed. This can only be used when "
+                "`target_modules` is a list of str."
             )
         },
     )
@@ -138,9 +147,10 @@ class VeraConfig(PeftConfig):
         default=None,
         metadata={
             "help": (
-                "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer "
-                "pattern is not in the common layers pattern. This should target the `nn.ModuleList` of the "
-                "model, which is often called `'layers'` or `'h'`."
+                "The name of the layer container (typically an `nn.ModuleList`, often called `'layers'` or `'h'`), "
+                "used together with `layers_to_transform`. The index following this name in the module name is the "
+                "layer index. If not specified, the first index in the module name is used, which is the layer index "
+                "for most models. Specify it when another numbered module comes before the layers."
             )
         },
     )

@@ -54,12 +54,21 @@ class MissConfig(PeftConfig):
             and general method in MiSS will be used. 'bat': In this mode, you can enable nonlinear updates across
             different shards. 'mini': In this mode, you can set a smaller rank to use fewer trainable parameters, but
             it is recommended to keep `out_features % mini_r == 0`.
-        layers_to_transform (`Union[List[int], int]`):
-            The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
-            that are specified in this list. If a single integer is passed, it will apply the transformations on the
-            layer at this index.
-        layers_pattern (`str`):
-            The layer pattern name, used only if `layers_to_transform` is different from `None`.
+        layers_to_transform (`Union[list[int], int]`, *optional*):
+            The indices of the layers to transform. If a list of ints is passed, only the layers at these indices are
+            transformed. If a single int is passed, only the layer at this index is transformed. If not specified, all
+            modules matched by `target_modules` are transformed. The layer index of a module is read from its name,
+            e.g. `1` for `model.layers.1.self_attn.q_proj`, see `layers_pattern` for details. This can only be used
+            when `target_modules` is a list of str.
+        layers_pattern (`Union[list[str], str]`, *optional*):
+            The name of the layer container (typically an `nn.ModuleList`, often called `'layers'` or `'h'`), used
+            together with `layers_to_transform`. The index following this name in the module name is the layer index,
+            e.g. `layers_pattern="layers"` reads the index `1` from `model.layers.1.self_attn.q_proj`. If a list is
+            passed, the first name that matches is used. If not specified, the first index in the module name is used,
+            which is the layer index for most models, e.g. `1` for `model.layers.1.mlp.experts.0.up_proj` and for
+            `layers.1.mlp.experts.0.up_proj`. Specify `layers_pattern` when another numbered module comes before the
+            layers, e.g. for `encoder.layers.0.blocks.1.attention`, `layers_pattern="blocks"` reads the index `1`
+            instead of `0`.
         bias (`str`):
             Bias type for MiSS. Can be `'none'`, `'all'` or `'MiSS_only'`.
         modules_to_save (`List[str]`):
@@ -105,13 +114,23 @@ class MissConfig(PeftConfig):
     layers_to_transform: Optional[Union[list[int], int]] = field(
         default=None,
         metadata={
-            "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index."
+            "help": (
+                "The indices of the layers to transform. If a list of ints is passed, only the layers at these indices"
+                " are transformed. If a single int is passed, only the layer at this index is transformed. If not "
+                "specified, all modules matched by `target_modules` are transformed. This can only be used when "
+                "`target_modules` is a list of str."
+            )
         },
     )
     layers_pattern: Optional[str] = field(
         default=None,
         metadata={
-            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
+            "help": (
+                "The name of the layer container (typically an `nn.ModuleList`, often called `'layers'` or `'h'`), "
+                "used together with `layers_to_transform`. The index following this name in the module name is the "
+                "layer index. If not specified, the first index in the module name is used, which is the layer index "
+                "for most models. Specify it when another numbered module comes before the layers."
+            )
         },
     )
     bias: str = field(default="none", metadata={"help": "Bias type for MiSS. Can be 'none', 'all' or 'MiSS_only'"})
