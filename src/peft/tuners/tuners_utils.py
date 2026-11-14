@@ -43,7 +43,7 @@ from peft.utils.constants import (
     MIN_TARGET_MODULES_FOR_OPTIMIZATION,
     SEQ_CLS_HEAD_NAMES,
 )
-from peft.utils.embedding_checks import remove_zero_embedding_checks
+from peft.utils.embedding_checks import move_zero_embedding_checks, remove_zero_embedding_checks
 from peft.utils.error import NoMatchingPeftModuleError
 from peft.utils.integrations import TpMeshDimRegistry, init_empty_weights, remove_torch_wrapper_names
 from peft.utils.other import (
@@ -1226,6 +1226,9 @@ class BaseTuner(nn.Module, ABC):
 
         for parameter, requires_grad in mapping_existing_parameter_requires_grad:
             parameter.requires_grad = requires_grad
+
+        # the new adapter may have wrapped the input embedding, the check must observe the outermost module
+        move_zero_embedding_checks(model)
 
     def _inject_parameters(
         self, peft_config: PeftConfig, model: nn.Module, adapter_name: str, low_cpu_mem_usage: bool

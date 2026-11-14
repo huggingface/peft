@@ -17,7 +17,7 @@ import pytest
 import torch
 from transformers import LlamaConfig, LlamaForCausalLM
 
-from peft import LoraConfig, PeftWarning, get_peft_model
+from peft import LoraConfig, PeftWarning, TrainableTokensConfig, get_peft_model
 from peft.utils.embedding_checks import MAX_CHECKED_BATCHES, ZeroEmbeddingCheck
 
 
@@ -158,8 +158,14 @@ class TestZeroEmbeddingCheck:
         with pytest.raises(ValueError, match=self.MATCH):
             model(input_ids=input_ids)
 
-    def test_reports_tokens_not_covered_by_trainable_token_indices(self, base_model, input_ids):
-        config = LoraConfig(target_modules=["q_proj"], trainable_token_indices=[5])
+    @pytest.mark.parametrize(
+        "config",
+        [
+            LoraConfig(target_modules=["q_proj"], trainable_token_indices=[5]),
+            TrainableTokensConfig(token_indices=[5]),
+        ],
+    )
+    def test_reports_tokens_not_covered_by_trainable_tokens(self, base_model, input_ids, config):
         model = get_peft_model(base_model, config, attach_checks="raise").train()
         with pytest.raises(ValueError, match=r"token ids \[6\]"):
             model(input_ids=input_ids)
@@ -175,6 +181,23 @@ class TestZeroEmbeddingCheck:
     def test_trainable_rows_are_not_reported(self, base_model, input_ids, config_kwargs):
         config = LoraConfig(**{"target_modules": ["q_proj"], **config_kwargs})
         model = get_peft_model(base_model, config, attach_checks="raise").train()
+        model(input_ids=input_ids)
+
+    def test_adapter_added_later_that_wraps_the_embedding(self, base_model, input_ids):
+        # the check moves to the LoRA embedding layer instead of observing the frozen base layer inside it
+        model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]), attach_checks="raise").train()
+        model.add_adapter("other", LoraConfig(target_modules=["q_proj", "embed_tokens"]))
+        model.set_adapter("other")
+        assert len(self.get_hooks(model)) == 1
+        model(input_ids=input_ids)
+
+    def test_inactive_with_disabled_adapters(self, base_model, input_ids):
+        # e.g. a reference forward pass during preference optimization, the rows are trainable once the adapters are
+        # enabled again
+        config = LoraConfig(target_modules=["q_proj"], trainable_token_indices=[5, 6])
+        model = get_peft_model(base_model, config, attach_checks="raise").train()
+        with model.disable_adapter():
+            model(input_ids=input_ids)
         model(input_ids=input_ids)
 
     @pytest.mark.parametrize("method", ["unload", "merge_and_unload"])

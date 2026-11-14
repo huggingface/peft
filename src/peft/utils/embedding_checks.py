@@ -87,12 +87,19 @@ class ZeroEmbeddingCheck:
         ):
             return
 
+        if getattr(module, "disable_adapters", False):
+            # e.g. a reference forward pass in the disable_adapter() context, the adapters may still train these rows
+            return
+
+        # local import to avoid circular import
+        from peft.tuners.trainable_tokens.layer import TrainableTokensLayer
+
+        layer = module.token_adapter if isinstance(module, TrainableTokensWrapper) else module
         trainable_ids = set()
-        if isinstance(module, TrainableTokensWrapper):
-            # only the rows listed in trainable_token_indices are updated
-            if not module.disable_adapters:
-                for adapter_name in module.active_adapters:
-                    trainable_ids.update(module.token_adapter.token_indices.get(adapter_name, []))
+        if isinstance(layer, TrainableTokensLayer):
+            # only the rows listed in the token indices are updated
+            for adapter_name in layer.active_adapters:
+                trainable_ids.update(layer.token_indices.get(adapter_name, []))
         elif output.grad_fn is not None:
             # The output depends on trainable parameters, e.g. with modules_to_save, LoRA on the embedding, or full
             # fine-tuning, so every row can be updated. Checking grad_fn instead of requires_grad matters: activation
@@ -121,9 +128,9 @@ class ZeroEmbeddingCheck:
             f"The training data contains the token ids {token_ids}, whose input embedding rows are all zero and "
             "frozen. This usually means that these tokens were never trained, e.g. special tokens of a chat template. "
             "As long as these rows stay frozen, the model is unlikely to learn to use or generate these tokens, even "
-            "if the training loss goes down. To train them, pass "
-            f"`trainable_token_indices={{{indices}}}` to the PEFT config (the output embedding is only needed if it is "
-            "not tied to the input embedding), ideally after initializing these rows, e.g. with the mean embedding of "
+            "if the training loss goes down. To train them, make these rows trainable, e.g. with "
+            f"`LoraConfig(trainable_token_indices={{{indices}}})` (the output embedding is only needed if it is not "
+            "tied to the input embedding), ideally after initializing these rows, e.g. with the mean embedding of "
             "related tokens. Alternatively, add the embedding layer to `target_modules` or `modules_to_save`. If this "
             "is expected, pass `attach_checks=False` to `get_peft_model` to disable this check."
         )
@@ -155,19 +162,32 @@ def _get_module_name(model: nn.Module, module: nn.Module | None) -> str | None:
     return next((name.rpartition(".")[-1] for name, m in model.named_modules() if m is module), None)
 
 
+def _get_input_embeddings(model: nn.Module) -> nn.Module | None:
+    try:
+        embedding = model.get_input_embeddings()
+    except (AttributeError, NotImplementedError):
+        return None
+    return embedding if isinstance(embedding, nn.Module) else None
+
+
+def _find_zero_embedding_checks(model: nn.Module) -> list[ZeroEmbeddingCheck]:
+    return [
+        hook
+        for module in model.modules()
+        for hook in module._forward_hooks.values()
+        if isinstance(hook, ZeroEmbeddingCheck)
+    ]
+
+
 def attach_zero_embedding_check(model: nn.Module, mode: Literal["warn", "raise"]) -> None:
     """
     Attach a [`ZeroEmbeddingCheck`] to the input embedding of `model`, if the model has one.
 
     The hook stays inactive during evaluation and removes itself after the first report or after `MAX_CHECKED_BATCHES`
-    training batches. It is attached to the embedding as it is when the PEFT model is created; adapters that are added
-    later and wrap the embedding are not taken into account.
+    training batches.
     """
-    try:
-        embedding = model.get_input_embeddings()
-    except (AttributeError, NotImplementedError):
-        return
-    if not isinstance(embedding, nn.Module):
+    embedding = _get_input_embeddings(model)
+    if embedding is None:
         return
 
     try:
@@ -175,7 +195,7 @@ def attach_zero_embedding_check(model: nn.Module, mode: Literal["warn", "raise"]
     except (AttributeError, NotImplementedError):
         output_embedding = None
 
-    remove_zero_embedding_checks(embedding)
+    remove_zero_embedding_checks(model)
     hook = ZeroEmbeddingCheck(
         mode=mode,
         ignored_token_ids=_get_ignored_token_ids(model, embedding),
@@ -185,9 +205,24 @@ def attach_zero_embedding_check(model: nn.Module, mode: Literal["warn", "raise"]
     hook.handle = embedding.register_forward_hook(hook)
 
 
+def move_zero_embedding_checks(model: nn.Module) -> None:
+    """
+    Move an attached [`ZeroEmbeddingCheck`] to the current input embedding of `model`.
+
+    This is needed when an adapter added after the check was attached wraps the embedding, since the check has to see
+    the output of the wrapper, not of the frozen base layer inside it.
+    """
+    hooks = _find_zero_embedding_checks(model)
+    if not hooks:
+        return
+    embedding = _get_input_embeddings(model)
+    for hook in hooks:
+        hook.remove()
+    if embedding is not None:
+        hooks[0].handle = embedding.register_forward_hook(hooks[0])
+
+
 def remove_zero_embedding_checks(model: nn.Module) -> None:
     """Remove all [`ZeroEmbeddingCheck`] hooks from `model` and its submodules."""
-    for module in model.modules():
-        for hook in list(module._forward_hooks.values()):
-            if isinstance(hook, ZeroEmbeddingCheck):
-                hook.remove()
+    for hook in _find_zero_embedding_checks(model):
+        hook.remove()
