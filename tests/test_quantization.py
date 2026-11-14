@@ -23,7 +23,16 @@ import torch
 from accelerate.utils.memory import clear_device_cache
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig, TorchAoConfig
 
-from peft import BOFTConfig, MissConfig, OFTConfig, PacaConfig, ShiraConfig, VeraConfig, get_peft_model
+from peft import (
+    ActivationSteeringConfig,
+    BOFTConfig,
+    MissConfig,
+    OFTConfig,
+    PacaConfig,
+    ShiraConfig,
+    VeraConfig,
+    get_peft_model,
+)
 from peft.import_utils import (
     is_bnb_4bit_available,
     is_bnb_available,
@@ -31,6 +40,7 @@ from peft.import_utils import (
     is_torchao_available,
     is_torchao_ge_v0_18_0,
 )
+from peft.tuners.activation_steering import calibrate_activation_steering
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import infer_device
 from peft.utils.quantization_utils import (
@@ -384,3 +394,27 @@ class TestQuantization:
             out_unloaded = model(dummy_input).logits
 
         check_outputs_similar(out_before, out_unloaded)
+
+    @pytest.mark.parametrize("quant", QUANTIZATION_BACKENDS, ids=_quant_id)
+    def test_activation_steering(self, quant, dummy_input):
+        model = quant.load_model()
+        config = ActivationSteeringConfig(
+            steering_pattern={"decoder.layers.0": {"source_module": "fc2", "indices": [0], "init_val": 0.1}}
+        )
+        if not quant.supports_merge:
+            # These backends cannot provide the dequantized source columns required for steering.
+            with pytest.raises(ValueError, match="requires dequantization"):
+                get_peft_model(model, config)
+            return
+
+        model.eval()
+        with torch.inference_mode():
+            reference = model(dummy_input).logits
+        model = get_peft_model(model, config)
+        calibrate_activation_steering(model, {"input_ids": dummy_input, "use_cache": False})
+        with torch.inference_mode():
+            steered = model(dummy_input).logits
+            with model.disable_adapter():
+                disabled = model(dummy_input).logits
+        assert not torch.allclose(steered, reference)
+        torch.testing.assert_close(disabled, reference)

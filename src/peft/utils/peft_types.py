@@ -21,6 +21,7 @@ class PeftType(str, enum.Enum):  # noqa: UP042
     Enum class for the different types of adapters in PEFT.
 
     Supported PEFT types:
+    - ACTIVATION_STEERING
     - PROMPT_TUNING
     - MULTITASK_PROMPT_TUNING
     - P_TUNING
@@ -63,6 +64,7 @@ class PeftType(str, enum.Enum):  # noqa: UP042
     PREFIX_TUNING = "PREFIX_TUNING"
     LORA = "LORA"
     ADALORA = "ADALORA"
+    ACTIVATION_STEERING = "ACTIVATION_STEERING"
     ADAMSS = "ADAMSS"
     BOFT = "BOFT"
     ADAPTION_PROMPT = "ADAPTION_PROMPT"
