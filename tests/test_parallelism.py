@@ -15,6 +15,7 @@
 import copy
 import os
 import platform
+import warnings
 from datetime import timedelta
 from pathlib import Path
 
@@ -30,7 +31,15 @@ from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.parallel import ColwiseParallel, RowwiseParallel, parallelize_module
 from transformers import AutoModelForCausalLM, Qwen3Config
 
-from peft import IA3Config, LoraConfig, PeftModel, get_peft_model, get_peft_model_state_dict, set_peft_model_state_dict
+from peft import (
+    IA3Config,
+    LoraConfig,
+    PeftModel,
+    PeftWarning,
+    get_peft_model,
+    get_peft_model_state_dict,
+    set_peft_model_state_dict,
+)
 from peft.import_utils import is_transformers_dtensor_tp
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
@@ -542,3 +551,56 @@ class TestFsdp2StateDict:
             nprocs=world_size,
             join=True,
         )
+
+
+def _zero_embedding_check_fsdp2_worker(rank, init_file):
+    from torch.distributed.fsdp import fully_shard
+
+    dist.init_process_group("gloo", init_method=f"file://{init_file}", rank=rank, world_size=2)
+    try:
+        torch.manual_seed(0)
+        config = Qwen3Config(
+            vocab_size=21,
+            hidden_size=16,
+            intermediate_size=32,
+            num_hidden_layers=1,
+            num_attention_heads=2,
+            num_key_value_heads=2,
+            head_dim=8,
+        )
+        model = AutoModelForCausalLM.from_config(config)
+        with torch.no_grad():
+            model.get_input_embeddings().weight[[5, 6]] = 0
+        # "raise" would stop only one rank and leave the other waiting in a collective, so test "warn"
+        model = get_peft_model(model, LoraConfig(target_modules=["q_proj"]), attach_checks="warn")
+        mesh = init_device_mesh("cpu", (2,))
+        for layer in model.base_model.model.model.layers:
+            fully_shard(layer, mesh=mesh)
+        fully_shard(model, mesh=mesh)
+        # the hook only sees the embedding output, the weight itself is sharded
+        assert isinstance(model.get_input_embeddings().weight, DTensor)
+        model.train()
+
+        # each rank only checks its own batch, so only rank 0 sees the zero rows
+        input_ids = torch.tensor([[1, 5, 6, 7]]) if rank == 0 else torch.tensor([[1, 2, 3, 4]])
+        with warnings.catch_warnings(record=True) as record:
+            warnings.simplefilter("always")
+            model(input_ids=input_ids, labels=input_ids).loss.backward()
+        messages = [str(w.message) for w in record if issubclass(w.category, PeftWarning)]
+        if rank == 0:
+            assert len(messages) == 1
+            assert "token ids [5, 6]" in messages[0]
+        else:
+            assert not messages
+    finally:
+        dist.destroy_process_group()
+
+
+@pytest.mark.skipif(platform.system() != "Linux", reason="Run distributed tests only on Linux")
+@pytest.mark.skipif(not dist.is_available() or not dist.is_gloo_available(), reason="Requires Gloo")
+@pytest.mark.skipif(
+    packaging.version.parse(torch.__version__) < packaging.version.parse("2.6"), reason="FSDP2 requires torch >= 2.6"
+)
+def test_zero_embedding_check_with_fsdp2(tmp_path):
+    # The zero embedding check from get_peft_model must work with sharded weights and without communication, see #4130.
+    mp.spawn(_zero_embedding_check_fsdp2_worker, args=(str(tmp_path / "dist_init"),), nprocs=2, join=True)

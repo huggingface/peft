@@ -43,6 +43,7 @@ from peft.utils.constants import (
     MIN_TARGET_MODULES_FOR_OPTIMIZATION,
     SEQ_CLS_HEAD_NAMES,
 )
+from peft.utils.embedding_checks import remove_zero_embedding_checks
 from peft.utils.error import NoMatchingPeftModuleError
 from peft.utils.integrations import TpMeshDimRegistry, init_empty_weights, remove_torch_wrapper_names
 from peft.utils.other import (
@@ -817,9 +818,11 @@ class BaseTuner(nn.Module, ABC):
         >>> merged_model = model.merge_and_unload()
         ```
         """
-        return self._unload_and_optionally_merge(
+        model = self._unload_and_optionally_merge(
             progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
         )
+        remove_zero_embedding_checks(self.model)
+        return model
 
     def unload(self) -> torch.nn.Module:
         """
@@ -827,7 +830,9 @@ class BaseTuner(nn.Module, ABC):
 
         It is important to assign the returned model to a variable and use it, this is not an in-place operation!
         """
-        return self._unload_and_optionally_merge(merge=False)
+        model = self._unload_and_optionally_merge(merge=False)
+        remove_zero_embedding_checks(self.model)
+        return model
 
     def _check_target_module_compatiblity(self, peft_config: PeftConfig, model: nn.Module, target_name: str):
         """

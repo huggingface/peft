@@ -1412,6 +1412,31 @@ class PeftCommonTester:
                 else:
                     assert param.grad is None
 
+    def _test_zero_embedding_check(self, model_id, config_cls, config_kwargs):
+        # Training on tokens whose input embedding row is zero and frozen should be reported for every PEFT method,
+        # see #4130. Rows covered by trainable_token_indices are trainable and must not be reported.
+        inputs = self.prepare_inputs_for_testing()
+        input_ids = inputs["input_ids"]
+        zero_ids = torch.unique(input_ids).tolist()
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+        padding_idx = model.get_input_embeddings().padding_idx
+        with torch.no_grad():
+            model.get_input_embeddings().weight[zero_ids] = 0
+
+        config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+        model = get_peft_model(model, config, attach_checks="raise").to(self.torch_device)
+        model.train()
+
+        expected = set(zero_ids) - set(config_kwargs.get("trainable_token_indices", [])) - {padding_idx}
+        if not expected:
+            model(**inputs)
+            return
+
+        with pytest.raises(ValueError, match="input embedding rows are all zero and frozen") as exc_info:
+            model(**inputs)
+        assert f"token ids {sorted(expected)}" in str(exc_info.value)
+
     def _test_inference_safetensors(self, model_id, config_cls, config_kwargs):
         if (config_cls == PrefixTuningConfig) and ("deberta" in model_id.lower()):
             # TODO: raises an error:
