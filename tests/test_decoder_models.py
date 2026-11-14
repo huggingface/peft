@@ -853,6 +853,12 @@ class TestDecoderModels(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_zero_embedding_check(self, model_id, config_cls, config_kwargs):
+        _skip_if_not_conv1d_supported(model_id, config_cls)
+        self._test_zero_embedding_check(model_id, config_cls, config_kwargs.copy())
+
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_training_decoders_layer_indexing(self, model_id, config_cls, config_kwargs):
         self._test_training_layer_indexing(model_id, config_cls, config_kwargs.copy())
 
