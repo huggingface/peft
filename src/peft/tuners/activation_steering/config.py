@@ -68,6 +68,9 @@ class ActivationSteeringConfig(PeftConfig):
             converted with a single factor. Do not use `"residual_stream"` for models that normalize the MLP output
             before adding it to the residual stream, e.g. Gemma 2/3 and OLMo 2. Calibration pools all non-padding
             tokens of the calibration batches, excluding the first valid token of each sequence.
+        modules_to_save (`Optional[List[str]]`):
+            List of modules apart from activation steering layers to be set as trainable and saved in the final
+            checkpoint.
 
     Inputs to the projections must have the shape `(batch, sequence, features)`, or `(batch * sequence, features)` for
     models that flatten them, such as OPT. Model inputs after the primary input, including `attention_mask` and `cache`
@@ -164,6 +167,14 @@ class ActivationSteeringConfig(PeftConfig):
                 "'residual_stream' for models that normalize the MLP output before adding it to the residual stream, "
                 "e.g. Gemma 2/3 and OLMo 2."
             ),
+        },
+    )
+    modules_to_save: Optional[list[str]] = field(
+        default=None,
+        metadata={
+            "help": "List of modules apart from activation steering layers to be set as trainable and saved in the "
+            "final checkpoint. For example, in Sequence Classification or Token Classification tasks, the final layer "
+            "`classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
     )
 

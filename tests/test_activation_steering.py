@@ -17,7 +17,7 @@ import copy
 import pytest
 import torch
 from torch import nn
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, LlamaConfig, LlamaForSequenceClassification
 
 from peft import (
     ActivationSteeringConfig,
@@ -320,6 +320,25 @@ class TestActivationSteering:
         model = get_peft_model(SteeringModel(), steering_config(dose_unit="residual_stream"))
         with pytest.raises(ValueError, match="numbered layer"):
             calibrate_activation_steering(model, {"hidden_states": inputs})
+
+    def test_sequence_classification_head_is_trained_and_saved(self):
+        # The classification head is randomly initialized, so it must be trainable and saved, as with other methods.
+        config = LlamaConfig(
+            vocab_size=32,
+            hidden_size=8,
+            intermediate_size=16,
+            num_hidden_layers=1,
+            num_attention_heads=2,
+            num_key_value_heads=1,
+            num_labels=3,
+            pad_token_id=0,
+        )
+        model = get_peft_model(
+            LlamaForSequenceClassification(config),
+            ActivationSteeringConfig(task_type="SEQ_CLS", target_modules=["down_proj"]),
+        )
+        assert any(param.requires_grad for name, param in model.named_parameters() if "score" in name)
+        assert any("score" in key for key in get_peft_model_state_dict(model))
 
 
 class TestNeuronSelection:
