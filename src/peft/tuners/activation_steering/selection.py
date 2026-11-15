@@ -126,6 +126,9 @@ def select_neurons(
 
     grads = _gradient_scores(layers, train_step, adapter_name)
     scores = torch.cat([grad.abs() for grad in grads])
+    if not torch.isfinite(scores).all():
+        # torch.topk ranks NaN highest, so such a dose would be kept instead of a useful one.
+        raise ValueError("Some doses received a non-finite gradient.")
     top = torch.topk(scores, num_neurons)
     if (top.values == 0).any():
         raise ValueError(

@@ -432,6 +432,14 @@ class TestNeuronSelection:
         with pytest.raises(ValueError, match="non-zero gradient"):
             select_neurons(model, train_step, num_neurons=4, init_val=0.5)
 
+    def test_non_finite_gradients_raise(self, model, train_step):
+        def nan_step():
+            train_step()
+            model.base_model.model.layers[1].down_proj.activation_steering_doses["default"].grad[0] = float("nan")
+
+        with pytest.raises(ValueError, match="non-finite gradient"):
+            select_neurons(model, nan_step, num_neurons=1)
+
     def test_missing_gradients_raise(self, model, inputs):
         with pytest.raises(RuntimeError, match="no gradient"):
             select_neurons(model, lambda: model(inputs), num_neurons=1, init_val=0.5)
