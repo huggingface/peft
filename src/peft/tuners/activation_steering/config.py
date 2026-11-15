@@ -52,7 +52,7 @@ class ActivationSteeringConfig(PeftConfig):
         layers_pattern (`Optional[Union[List[str], str]]`):
             The name of the `nn.ModuleList` that holds the layers, usually `"layers"` or `"h"`, if it is not one of the
             common names. It is used by `layers_to_transform` and to find the layer whose output sets the unit for
-            `dose_unit="layer_output"`.
+            `dose_unit="residual_stream"`.
         steering_pattern (`dict`):
             Maps projection names (exact or suffix matches) to specifications containing `indices` and `init_val`. The
             `indices` select the projection's input channels, and `init_val` initializes their independent, signed
@@ -60,12 +60,15 @@ class ActivationSteeringConfig(PeftConfig):
             entry are not steered. If empty, every input channel of every targeted projection gets a dose of 0, which
             leaves the model unchanged. `select_neurons` from `peft.tuners.activation_steering` then keeps the most
             useful neurons and writes them into this field.
-        dose_unit (`str`):
-            Where calibration measures the median L2 norm that sets the unit of the doses. `"layer_output"` uses the
-            output of the numbered layer that contains the projection, i.e. the residual stream. `"module_output"` uses
-            the projection's own output; use it for models that normalize the MLP output before adding it to the
-            residual stream (e.g. Gemma 2/3 and OLMo 2), or for models without numbered layers. Calibration pools all
-            non-padding tokens of the calibration batches, excluding the first valid token of each sequence.
+        dose_unit (`Literal["projection_output", "residual_stream"]`):
+            Where calibration measures the median L2 norm that sets the unit of the doses. `"projection_output"` uses
+            the targeted projection's own output. `"residual_stream"` uses the output of the numbered layer that
+            contains the projection, which is the unit of neuron-explorer: on models that add the MLP output directly
+            to the residual stream, e.g. Llama and Qwen, doses found there keep their meaning, as in the presets of the
+            activation steering example. The ratio of the two medians differs between layers, so such doses cannot be
+            converted with a single factor. Do not use `"residual_stream"` for models that normalize the MLP output
+            before adding it to the residual stream, e.g. Gemma 2/3 and OLMo 2. Calibration pools all non-padding
+            tokens of the calibration batches, excluding the first valid token of each sequence.
 
     Inputs to the projections must have the shape `(batch, sequence, features)`, or `(batch * sequence, features)` for
     models that flatten them, such as OPT. Model inputs after the primary input, including `attention_mask` and `cache`
@@ -85,13 +88,15 @@ class ActivationSteeringConfig(PeftConfig):
     >>> config = ActivationSteeringConfig(task_type=TaskType.CAUSAL_LM, target_modules=["down_proj"])
     ```
 
-    With pre-selected neurons, e.g. found with neuron-explorer, only these neurons are steered:
+    With pre-selected neurons, only these neurons are steered. Doses found with neuron-explorer are in units of the
+    residual stream:
 
     ```py
     >>> config = ActivationSteeringConfig(
     ...     base_model_name_or_path="Qwen/Qwen3.5-4B",
     ...     task_type=TaskType.CAUSAL_LM,
     ...     steering_pattern={"layers.15.mlp.down_proj": {"indices": [3920], "init_val": 0.5}},
+    ...     dose_unit="residual_stream",
     ... )
     ```
     """
@@ -126,7 +131,7 @@ class ActivationSteeringConfig(PeftConfig):
             "help": (
                 "The name of the `nn.ModuleList` that holds the layers, usually 'layers' or 'h', if it is not one of "
                 "the common names. It is used by `layers_to_transform` and to find the layer whose output sets the "
-                "unit for `dose_unit='layer_output'`."
+                "unit for `dose_unit='residual_stream'`."
             ),
         },
     )
@@ -143,15 +148,18 @@ class ActivationSteeringConfig(PeftConfig):
             ),
         },
     )
-    dose_unit: Literal["layer_output", "module_output"] = field(
-        default="layer_output",
+    dose_unit: Literal["projection_output", "residual_stream"] = field(
+        default="projection_output",
         metadata={
             "help": (
-                "Where calibration measures the median L2 norm that sets the unit of the doses. 'layer_output' uses "
-                "the output of the numbered layer that contains the projection, i.e. the residual stream. "
-                "'module_output' uses the projection's own output; use it for models that normalize the MLP output "
-                "before adding it to the residual stream (e.g. Gemma 2/3 and OLMo 2), or for models without numbered "
-                "layers."
+                "Where calibration measures the median L2 norm that sets the unit of the doses. "
+                "'projection_output' uses the targeted projection's own output. 'residual_stream' uses the output of "
+                "the numbered layer that contains the projection, which is the unit of neuron-explorer: on models "
+                "that add the MLP output directly to the residual stream, e.g. Llama and Qwen, doses found there keep "
+                "their meaning, as in the presets of the activation steering example. The ratio of the two medians "
+                "differs between layers, so such doses cannot be converted with a single factor. Do not use "
+                "'residual_stream' for models that normalize the MLP output before adding it to the residual stream, "
+                "e.g. Gemma 2/3 and OLMo 2."
             ),
         },
     )
@@ -159,8 +167,8 @@ class ActivationSteeringConfig(PeftConfig):
     def __post_init__(self):
         super().__post_init__()
         self.peft_type = PeftType.ACTIVATION_STEERING
-        if self.dose_unit not in ("layer_output", "module_output"):
-            raise ValueError(f"`dose_unit` must be 'layer_output' or 'module_output', got {self.dose_unit!r}.")
+        if self.dose_unit not in ("projection_output", "residual_stream"):
+            raise ValueError(f"`dose_unit` must be 'projection_output' or 'residual_stream', got {self.dose_unit!r}.")
         if not isinstance(self.steering_pattern, dict):
             raise TypeError("`steering_pattern` must be a dictionary.")
 

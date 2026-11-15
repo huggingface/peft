@@ -89,7 +89,6 @@ class TwoProjectionModel(nn.Module):
 
 
 def steering_config(indices=None, init_val=-1.0, **kwargs):
-    kwargs.setdefault("dose_unit", "module_output")
     return ActivationSteeringConfig(
         steering_pattern={"block.down_proj": {"indices": [0] if indices is None else indices, "init_val": init_val}},
         **kwargs,
@@ -207,6 +206,7 @@ class TestActivationSteering:
                 "layers.1.0": {"indices": [1], "init_val": -1.0},
             },
             # The unit comes from each layer's output; the layers are found by their ModuleList name.
+            dose_unit="residual_stream",
             layers_pattern="layers",
         )
         inputs = torch.tensor([[[100.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]])
@@ -309,15 +309,15 @@ class TestActivationSteering:
     def test_without_steering_pattern_every_neuron_starts_at_zero(self, inputs):
         base = SteeringModel()
         reference = base(inputs)
-        config = ActivationSteeringConfig(target_modules=["down_proj"], dose_unit="module_output")
+        config = ActivationSteeringConfig(target_modules=["down_proj"])
         model = calibrated_model(base, config, inputs)
         torch.testing.assert_close(model(inputs), reference)
         doses = model.base_model.model.block.down_proj.activation_steering_doses["default"]
         assert doses.requires_grad
         torch.testing.assert_close(doses, torch.zeros(3))
 
-    def test_layer_output_unit_requires_numbered_layer(self, inputs):
-        model = get_peft_model(SteeringModel(), steering_config(dose_unit="layer_output"))
+    def test_residual_stream_unit_requires_numbered_layer(self, inputs):
+        model = get_peft_model(SteeringModel(), steering_config(dose_unit="residual_stream"))
         with pytest.raises(ValueError, match="numbered layer"):
             calibrate_activation_steering(model, {"hidden_states": inputs})
 
@@ -337,7 +337,7 @@ class TestNeuronSelection:
     def inputs(self):
         return torch.tensor([[[100.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [3.0, 0.0, 0.0]]])
 
-    @pytest.fixture(params=["module_output", "layer_output"])
+    @pytest.fixture(params=["projection_output", "residual_stream"])
     def model(self, request, inputs):
         config = ActivationSteeringConfig(
             target_modules=["down_proj"], dose_unit=request.param, layers_pattern="layers"
@@ -392,7 +392,7 @@ class TestNeuronSelection:
         assert all(p.grad is not None for p in values)
 
     def test_multiple_adapters_raise(self, model, train_step):
-        model.add_adapter("other", ActivationSteeringConfig(target_modules=["down_proj"], dose_unit="module_output"))
+        model.add_adapter("other", ActivationSteeringConfig(target_modules=["down_proj"]))
         with pytest.raises(ValueError, match="single adapter"):
             select_neurons(model, train_step, num_neurons=1, init_val=0.5)
 

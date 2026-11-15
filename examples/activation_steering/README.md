@@ -94,10 +94,11 @@ config = ActivationSteeringConfig(
     base_model_name_or_path="Qwen/Qwen3.5-4B",
     task_type=TaskType.CAUSAL_LM,
     steering_pattern={"layers.15.mlp.down_proj": {"indices": [3920], "init_val": 0.5}},
+    dose_unit="residual_stream",
 )
 ```
 
-You can change the projection names, zero-based neuron indices, and signed doses to define your intervention. The neurons of these Qwen MLPs are the input channels of `mlp.down_proj`. A scalar `init_val` broadcasts over the indices, or provide a list with one dose per index.
+You can change the projection names, zero-based neuron indices, and signed doses to define your intervention. The neurons of these Qwen MLPs are the input channels of `mlp.down_proj`. A scalar `init_val` broadcasts over the indices, or provide a list with one dose per index. `dose_unit="residual_stream"` measures the doses in units of the residual stream, as neuron-explorer does, so that its doses keep their meaning; the presets set it too.
 
 ### 2. Create and calibrate the PEFT model
 

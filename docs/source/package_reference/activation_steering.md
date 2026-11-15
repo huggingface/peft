@@ -27,7 +27,7 @@ The reason why activation steering is a good fit for inclusion in the PEFT packa
 - Adapter can be disabled and re-enabled.
 - Multiple adapters can be loaded at the same time.
 
-A neuron is an input channel of a linear (or `Conv1D`) projection, typically an MLP's down projection, whose input channels are the MLP's hidden units. Steering adds a dose to those channels before the projection. The dose is measured in units of the median L2 norm of the stream the addition lands in: by default the output of the layer containing the projection, i.e. the residual stream. Models that normalize the MLP output before adding it to the residual stream, such as Gemma 2/3 and OLMo 2, should use `dose_unit="module_output"`. Merging of the adapter is not supported.
+A neuron is an input channel of a linear (or `Conv1D`) projection, typically an MLP's down projection, whose input channels are the MLP's hidden units. Steering adds a dose to those channels before the projection. By default, the dose is measured in units of the median L2 norm of the projection's output. Doses found with neuron-explorer are in units of the residual stream, i.e. the output of the layer containing the projection; for these, pass `dose_unit="residual_stream"`, as in the example below. This unit is not suited to models that normalize the MLP output before adding it to the residual stream, such as Gemma 2/3 and OLMo 2. Merging of the adapter is not supported.
 
 ## Example
 
@@ -44,6 +44,7 @@ config = ActivationSteeringConfig(
     base_model_name_or_path=model_id,
     task_type=TaskType.CAUSAL_LM,
     steering_pattern={"layers.15.mlp.down_proj": {"indices": [3920], "init_val": 0.5}},
+    dose_unit="residual_stream",
 )
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 base_model = AutoModelForCausalLM.from_pretrained(

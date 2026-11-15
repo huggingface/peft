@@ -44,10 +44,10 @@ def calibrate_activation_steering(
 
     Run baseline forwards with every adapter disabled and the model in evaluation mode. For each targeted projection,
     pool the L2 norms of the stream given by the adapter's `dose_unit` over calibration tokens, excluding padding and
-    the first valid token of every sequence, and take their median: the output of the numbered layer containing the
-    projection for `"layer_output"`, or the projection's own output for `"module_output"`. Each steered input channel
-    `n` then stores the scale `median / ||W[:, n]||`, where `W` is the projection's weight, so that a dose of 1 adds a
-    vector with L2 norm `median` to the projection's output.
+    the first valid token of every sequence, and take their median: the projection's own output for
+    `"projection_output"`, or the output of the numbered layer containing the projection for `"residual_stream"`. Each
+    steered input channel `n` then stores the scale `median / ||W[:, n]||`, where `W` is the projection's weight, so
+    that a dose of 1 adds a vector with L2 norm `median` to the projection's output.
 
     For an even number of tokens, use the average of the two middle norms, as in:
     https://github.com/lyramakesmusic/neuron-explorer/blob/5a8f8267f6bd3c8caa87d598870949ab0d25b914/sweep/neuron_stats.py
@@ -85,14 +85,14 @@ def calibrate_activation_steering(
     # The module whose output norms set the unit of each layer's doses; several layers can share one such stream.
     streams = {}
     for name in layers:
-        if config.dose_unit == "module_output":
+        if config.dose_unit == "projection_output":
             streams[name] = name
         else:
             match = _match_layer_index(name, config.layers_pattern)
             if match is None:
                 raise ValueError(
                     f"Could not find the numbered layer containing '{name}'. Pass `layers_pattern`, or use "
-                    "`dose_unit='module_output'` to measure the unit at the projection's output."
+                    "`dose_unit='projection_output'` to measure the unit at the projection's output."
                 )
             # The match ends with the dot after the layer index.
             streams[name] = match.group(0)[:-1]
