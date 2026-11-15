@@ -39,7 +39,9 @@ class ActivationSteeringConfig(PeftConfig):
             The projections whose input channels are steered, e.g. `["down_proj"]`. When passing a string, a regex
             match is performed. When passing a list of strings, either an exact match is performed or it is checked if
             the name of the module ends with any of the passed strings. If not specified, the keys of
-            `steering_pattern` are used.
+            `steering_pattern` are used. If both are given, only the targeted projections with an entry in
+            `steering_pattern` are steered, and every entry must match a targeted projection. Saved configs can contain
+            both, e.g. after `select_neurons`.
         exclude_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to not apply the adapter to. When passing a string, a regex match is performed.
             When passing a list of strings, either an exact match is performed or it is checked if the name of the
@@ -99,7 +101,9 @@ class ActivationSteeringConfig(PeftConfig):
         metadata={
             "help": (
                 "List of module names or regex expression of the projections whose input channels are steered, e.g. "
-                "['down_proj']. If not specified, the keys of `steering_pattern` are used."
+                "['down_proj']. If not specified, the keys of `steering_pattern` are used. If both are given, only "
+                "the targeted projections with an entry in `steering_pattern` are steered, and every entry must match "
+                "a targeted projection. Saved configs can contain both, e.g. after `select_neurons`."
             ),
         },
     )
