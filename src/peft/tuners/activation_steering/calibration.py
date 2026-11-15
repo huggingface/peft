@@ -18,6 +18,7 @@ from typing import Any
 import torch
 from torch import nn
 
+from peft.import_utils import get_transformers_cache_name
 from peft.tuners.tuners_utils import BaseTunerLayer, _match_layer_index
 from peft.utils.quantization_utils import get_quantization_kwargs
 
@@ -138,8 +139,9 @@ def calibrate_activation_steering(
         for batch in dataloader:
             if not isinstance(batch, Mapping):
                 raise TypeError("Calibration batches must be mappings of model inputs.")
-            if batch.get("past_key_values") is not None:
-                raise ValueError("Calibration batches must not contain past_key_values.")
+            cache_name = get_transformers_cache_name()
+            if batch.get(cache_name) is not None:
+                raise ValueError(f"Calibration batches must not contain `{cache_name}`.")
 
             attention_mask = batch.get("attention_mask")
             if attention_mask is not None and (

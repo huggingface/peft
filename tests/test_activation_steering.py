@@ -27,6 +27,7 @@ from peft import (
     inject_adapter_in_model,
     set_peft_model_state_dict,
 )
+from peft.import_utils import get_transformers_cache_name
 from peft.tuners.activation_steering import ActivationSteeringLayer, calibrate_activation_steering, select_neurons
 
 from .testing_common import PeftCommonTester
@@ -216,6 +217,13 @@ class TestActivationSteering:
         # Both identity blocks have baseline norms [1, 2, 3], hence scale 2, and add [2, 0] and [0, -2].
         # Calibrating the later block must ignore the earlier intervention.
         torch.testing.assert_close(model(inputs), inputs + torch.tensor([2.0, -2.0]))
+
+    def test_calibration_with_cache_raises(self, inputs):
+        # Calibration needs fresh sequences; the cache argument is called cache, previously past_key_values.
+        cache_name = get_transformers_cache_name()
+        model = get_peft_model(SteeringModel(), steering_config())
+        with pytest.raises(ValueError, match=f"must not contain `{cache_name}`"):
+            calibrate_activation_steering(model, {"hidden_states": inputs, cache_name: object()})
 
     def test_scales_are_checked_on_every_forward(self, inputs):
         model = calibrated_model(SteeringModel(), steering_config(), inputs)
