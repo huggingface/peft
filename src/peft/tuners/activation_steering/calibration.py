@@ -27,7 +27,7 @@ from .layer import ActivationSteeringLayer, get_projection_weight
 def _get_hidden_states(output, batch_size):
     hidden_states = (output[0] if output else None) if isinstance(output, tuple) else output
     if isinstance(hidden_states, torch.Tensor) and hidden_states.ndim == 2 and batch_size is not None:
-        # Some models, e.g. OPT, flatten the batch and sequence dimensions before the projection.
+        # OPT and the shared experts of MoE models flatten the batch and sequence dimensions before the projection.
         hidden_states = hidden_states.reshape(batch_size, -1, hidden_states.shape[-1])
     if not isinstance(hidden_states, torch.Tensor) or hidden_states.ndim != 3:
         raise ValueError("Activation steering calibration expects outputs of shape (batch, sequence, hidden).")

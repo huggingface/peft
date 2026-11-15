@@ -117,8 +117,8 @@ class ActivationSteeringLayer(nn.Module, BaseTunerLayer):
 
             mask = self._attention_mask
             if mask is not None:
-                # The input tokens are the last positions of the mask. Some models, e.g. OPT, flatten the batch and
-                # sequence dimensions before the projection.
+                # The input tokens are the last positions of the mask. OPT and the shared experts of MoE models, e.g.
+                # Qwen3.5-MoE, flatten the batch and sequence dimensions before the projection.
                 num_tokens = self._num_tokens or (x.shape[1] if x.ndim == 3 else None)
                 shape = (mask.shape[0], num_tokens) if x.ndim == 3 else (mask.shape[0] * (num_tokens or 0),)
                 if num_tokens is None or num_tokens > mask.shape[1] or x.shape[:-1] != shape:
