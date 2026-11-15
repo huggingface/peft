@@ -110,20 +110,20 @@ class ActivationSteeringModel(BaseTuner):
 
         if isinstance(target, ActivationSteeringLayer):
             target.update_layer(adapter_name, indices, init_val, config=peft_config)
-            return
-
-        quantization_kwargs = get_quantization_kwargs(self.model)
-        if (
-            not isinstance(target, (nn.Linear, Conv1D))
-            and resolve_quantization_backend(target, **quantization_kwargs) is None
-        ):
-            raise ValueError(
-                f"Target module {target} is not supported. Activation steering supports Linear and Conv1D projections."
-            )
-        new_module = ActivationSteeringLayer(target, adapter_name, indices, init_val, config=peft_config)
-        if adapter_name not in self.active_adapters:
-            new_module.requires_grad_(False)
-        self._replace_module(parent, target_name, new_module, target)
+        else:
+            quantization_kwargs = get_quantization_kwargs(self.model)
+            if (
+                not isinstance(target, (nn.Linear, Conv1D))
+                and resolve_quantization_backend(target, **quantization_kwargs) is None
+            ):
+                raise ValueError(
+                    f"Target module {target} is not supported. Activation steering supports Linear and Conv1D "
+                    "projections."
+                )
+            new_module = ActivationSteeringLayer(target, adapter_name, indices, init_val, config=peft_config)
+            if adapter_name not in self.active_adapters:
+                new_module.requires_grad_(False)
+            self._replace_module(parent, target_name, new_module, target)
 
     def _check_merge_allowed(self):
         raise ValueError("Activation steering does not support merging.")
