@@ -16,12 +16,17 @@ from torch import Tensor, nn
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTuner, check_target_module_exists
+from peft.utils import _is_valid_match
 from peft.utils.quantization_utils import get_quantization_kwargs, resolve_quantization_backend
 
 from .layer import ActivationSteeringLayer
 
 
 def _prepare_steering_forward(model, args, kwargs):
+    """Store the attention mask and the number of input tokens of a model call on the active steering layers.
+
+    This is a forward pre-hook of the model. The layers use the mask to leave padding positions unsteered.
+    """
     layers = [
         layer
         for layer in model.modules()
@@ -52,10 +57,6 @@ def _prepare_steering_forward(model, args, kwargs):
         layer._num_tokens = num_tokens
 
 
-def _matches(name, key):
-    return key == name or key.endswith("." + name)
-
-
 class ActivationSteeringModel(BaseTuner):
     """Manage additive steering of neurons, i.e. input channels of linear projections, with one dose per neuron."""
 
@@ -68,11 +69,11 @@ class ActivationSteeringModel(BaseTuner):
         found = check_target_module_exists(peft_config, key)
         if not found or not peft_config.steering_pattern:
             return found
-        return any(_matches(name, key) for name in peft_config.steering_pattern)
+        return any(_is_valid_match(key, name) for name in peft_config.steering_pattern)
 
     @staticmethod
     def _get_spec(config, key):
-        matches = [name for name in config.steering_pattern if _matches(name, key)]
+        matches = [name for name in config.steering_pattern if _is_valid_match(key, name)]
         if len(matches) != 1:
             raise ValueError(f"Expected exactly one steering specification for '{key}', got {matches}.")
 
@@ -86,7 +87,7 @@ class ActivationSteeringModel(BaseTuner):
         # Validate the steering pattern before replacing any modules: unmatched entries would be silently ignored.
         keys = [key for key, _ in model.named_modules() if self._check_target_module_exists(peft_config, key)]
         for name in peft_config.steering_pattern:
-            found = [key for key in keys if _matches(name, key)]
+            found = [key for key in keys if _is_valid_match(key, name)]
             if len(found) != 1:
                 raise ValueError(
                     f"Steering target '{name}' must match exactly one targeted module, found {len(found)}."
