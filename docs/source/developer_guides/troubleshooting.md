@@ -149,7 +149,7 @@ Any `target_modules` entry that does not correspond to a module in the model is 
 
 Some checkpoints contain special tokens that were never trained, for instance the tags of a chat template like `<tool_call>`. Their input embedding rows are all zero, and their output embedding (`lm_head`) rows are often identical to those of many other untrained tokens. Most PEFT methods keep both layers frozen, so the model cannot learn to generate such a token: tokens with identical output embedding rows always receive identical logits. The training loss still decreases, because the rest of the sequence is learned.
 
-[`get_peft_model`] detects this situation during the first training batches and warns about the affected token ids, as long as `attach_checks` is not set to `False`. To fix it, make the rows of these tokens trainable with `trainable_token_indices`. Since the trainable rows start from the current values, initialize them first, e.g. with the mean embedding of a related text:
+[`get_peft_model`] can detect this situation during the first training batches: pass `attach_checks="warn"` (or `"raise"`) and it reports the affected token ids. The check is off by default and adds a small runtime overhead to the first training batches only. To fix it, make the rows of these tokens trainable with `trainable_token_indices`. Since the trainable rows start from the current values, initialize them first, e.g. with the mean embedding of a related text:
 
 ```python
 tokens = ["<tool_call>", "</tool_call>"]
@@ -167,7 +167,7 @@ lora_config = LoraConfig(..., trainable_token_indices={"embed_tokens": token_ids
 peft_model = get_peft_model(base_model, lora_config)
 ```
 
-The `lm_head` entry is only needed if the output embedding is not tied to the input embedding, otherwise trainable tokens keep the tied layer updated automatically. Alternatively, add the embedding layers to `target_modules` or `modules_to_save`, see [Extending the vocabulary](#extending-the-vocabulary).
+The `lm_head` entry is only needed if the output embedding is not tied to the input embedding, otherwise trainable tokens keep the tied layer updated automatically. Alternatively, or if you're not using LoRA, add the embedding layers to `target_modules` or `modules_to_save` if the PEFT method supports it, see [Extending the vocabulary](#extending-the-vocabulary).
 
 Some inference engines do not load trainable tokens from a LoRA checkpoint. In that case, merge the adapter into the base model with [`~LoraModel.merge_and_unload`] before serving it.
 

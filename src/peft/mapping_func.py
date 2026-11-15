@@ -25,7 +25,7 @@ from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_PREFIX_MAPPING
 from .mixed_model import PeftMixedModel
 from .peft_model import PeftModel
 from .tuners.tuners_utils import BaseTuner, BaseTunerLayer
-from .utils.embedding_checks import attach_zero_embedding_check
+from .utils.runtime_checks import attach_runtime_checks
 
 
 if TYPE_CHECKING:
@@ -116,7 +116,7 @@ def get_peft_model(
     autocast_adapter_dtype: bool = True,
     revision: Optional[str] = None,
     low_cpu_mem_usage: bool = False,
-    attach_checks: Literal[False, "warn", "raise"] = "warn",
+    attach_checks: Literal[False, "warn", "raise"] = False,
 ) -> PeftModel | PeftMixedModel:
     """
     Returns a Peft model object from a model and a config, where the model will be modified in-place.
@@ -142,15 +142,18 @@ def get_peft_model(
             Create empty adapter weights on meta device. Useful to speed up the loading process. Leave this setting as
             False if you intend on training the model, unless the adapter weights will be replaced by different weights
             before training starts.
-        attach_checks (`False`, `"warn"` or `"raise"`, *optional*, defaults to `"warn"`):
-            Whether to attach runtime checks that catch common silent training failures. Currently, this checks the
-            first training batches for tokens whose input embedding row is all zero and frozen. Such tokens were
-            typically never trained (e.g. special tokens of a chat template), and the model cannot learn to use them
-            unless their rows are made trainable, e.g. with `trainable_token_indices`. With `"warn"`, a warning is
-            given, with `"raise"`, an error is raised, and `False` disables the checks. The checks are inactive in
-            evaluation mode, remove themselves after a few training batches, and are removed by `unload()` and
-            `merge_and_unload()`. In distributed training, each process only checks its own batches. With `"raise"`,
-            the error then stops only some processes while the others wait for them, so prefer `"warn"` there.
+        attach_checks (`False`, `"warn"` or `"raise"`, *optional*, defaults to `False`):
+            Whether to attach runtime checks that inspect the first training batches for problems that may not be
+            visible in the training loss. With `"warn"`, a warning is given, with `"raise"`, an error is raised, and
+            `False` attaches no checks. Currently, there is one check: it looks for tokens whose input embedding row is
+            all zero and frozen. Such tokens were typically never trained (e.g. special tokens of a chat template), and
+            the model cannot learn to use them unless their rows are made trainable, e.g. with
+            `trainable_token_indices` (LoRA only) or by adding the embedding layer to `modules_to_save` (supported by
+            most PEFT methods, but trains the whole layer). The checks add a small runtime overhead to the first
+            training batches. They are inactive in evaluation mode, remove themselves after a few training batches, and
+            are removed by `unload()` and `merge_and_unload()`. In distributed training, each process only checks its
+            own batches. With `"raise"`, the error then stops only some processes while the others wait for them, so
+            prefer `"warn"` there.
     """
     if attach_checks not in (False, "warn", "raise"):
         raise ValueError(f"attach_checks must be one of False, 'warn' or 'raise', got {attach_checks!r}.")
@@ -222,5 +225,5 @@ def get_peft_model(
         )
 
     if attach_checks:
-        attach_zero_embedding_check(model, mode=attach_checks)
+        attach_runtime_checks(model, mode=attach_checks)
     return peft_model

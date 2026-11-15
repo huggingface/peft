@@ -15,10 +15,12 @@ import pickle
 
 import pytest
 import torch
-from transformers import LlamaConfig, LlamaForCausalLM
+from transformers import AutoModelForCausalLM
 
 from peft import LoraConfig, PeftWarning, TrainableTokensConfig, get_peft_model
-from peft.utils.embedding_checks import MAX_CHECKED_BATCHES, ZeroEmbeddingCheck
+from peft.utils.runtime_checks import MAX_CHECKED_BATCHES, RuntimeCheck, ZeroEmbeddingCheck
+
+from .testing_utils import hub_online_once
 
 
 class TestGetPeftModel:
@@ -63,50 +65,55 @@ class TestZeroEmbeddingCheck:
     # Runtime check attached by get_peft_model that reports frozen, all-zero input embedding rows of tokens that occur
     # in the training data, see #4130. The battery test in testing_common.py covers all PEFT methods, these tests cover
     # the details of the check.
+    MODEL_ID = "peft-internal-testing/tiny-random-LlamaForCausalLM"
     ZERO_IDS = [5, 6]
+    PAD_ID = 31999  # the padding_idx of the embedding in this model
     MATCH = "input embedding rows are all zero and frozen"
 
     @pytest.fixture
     def base_model(self):
-        config = LlamaConfig(
-            vocab_size=32,
-            hidden_size=16,
-            intermediate_size=32,
-            num_hidden_layers=1,
-            num_attention_heads=2,
-            num_key_value_heads=2,
-            pad_token_id=0,
-            tie_word_embeddings=False,
-        )
-        torch.manual_seed(0)
-        model = LlamaForCausalLM(config)
+        with hub_online_once(self.MODEL_ID):
+            model = AutoModelForCausalLM.from_pretrained(self.MODEL_ID)
         with torch.no_grad():
-            model.get_input_embeddings().weight[self.ZERO_IDS] = 0
+            # the tokens 5 and 6 get the all-zero rows of never-trained special tokens; the padding row is zero too,
+            # as it would be in a real checkpoint, but must not be reported
+            model.get_input_embeddings().weight[[*self.ZERO_IDS, self.PAD_ID]] = 0
         return model
 
     @pytest.fixture
     def input_ids(self):
-        # contains the zero rows 5 and 6 as well as the pad token 0
-        return torch.tensor([[1, 5, 6, 7, 0, 0]])
+        # contains the zero rows 5 and 6 as well as the pad token
+        return torch.tensor([[1, 5, 6, 7, self.PAD_ID, self.PAD_ID]])
 
     def get_hooks(self, model):
         embedding = model.get_input_embeddings()
         return [hook for hook in embedding._forward_hooks.values() if isinstance(hook, ZeroEmbeddingCheck)]
 
-    def test_warns_and_names_trainable_token_indices(self, base_model, input_ids):
+    def test_off_by_default(self, base_model, input_ids, recwarn):
         model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"])).train()
+        assert not self.get_hooks(model)
+        model(input_ids=input_ids)
+        assert not any(self.MATCH in str(w.message) for w in recwarn)
+
+    def test_is_a_runtime_check(self):
+        assert issubclass(ZeroEmbeddingCheck, RuntimeCheck)
+
+    def test_warns(self, base_model, input_ids):
+        model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]), attach_checks="warn").train()
         with pytest.warns(PeftWarning, match=self.MATCH) as record:
             model(input_ids=input_ids)
-        # the pad token 0 also has a zero row but is not reported
+        # the pad token also has a zero row but is not reported
         assert "token ids [5, 6]" in str(record[0].message)
-        assert "trainable_token_indices={'embed_tokens': [5, 6], 'lm_head': [5, 6]}" in str(record[0].message)
+        assert "trainable_token_indices" in str(record[0].message)
         # the hook removes itself after the first report
         assert not self.get_hooks(model)
 
     def test_raise(self, base_model, input_ids):
         model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]), attach_checks="raise").train()
-        with pytest.raises(ValueError, match=self.MATCH):
+        with pytest.raises(RuntimeError, match=self.MATCH):
             model(input_ids=input_ids)
+        # the hook also removes itself when it raises
+        assert not self.get_hooks(model)
 
     def test_disabled(self, base_model, input_ids, recwarn):
         model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]), attach_checks=False).train()
@@ -130,9 +137,10 @@ class TestZeroEmbeddingCheck:
     def test_removed_after_max_checked_batches(self, base_model):
         model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]), attach_checks="raise").train()
         clean_input_ids = torch.tensor([[1, 2, 3]])
-        for _ in range(MAX_CHECKED_BATCHES):
-            assert self.get_hooks(model)
+        for _ in range(MAX_CHECKED_BATCHES - 1):
             model(input_ids=clean_input_ids)
+        assert self.get_hooks(model)
+        model(input_ids=clean_input_ids)
         assert not self.get_hooks(model)
 
     def test_near_zero_rows_are_reported(self, base_model, input_ids):
@@ -140,7 +148,7 @@ class TestZeroEmbeddingCheck:
         with torch.no_grad():
             base_model.get_input_embeddings().weight[self.ZERO_IDS] = 1e-37
         model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]), attach_checks="raise").train()
-        with pytest.raises(ValueError, match=self.MATCH):
+        with pytest.raises(RuntimeError, match=self.MATCH):
             model(input_ids=input_ids)
 
     def test_ignores_multimodal_placeholder_tokens(self, base_model, input_ids):
@@ -155,7 +163,7 @@ class TestZeroEmbeddingCheck:
         # trainable
         base_model.enable_input_require_grads()
         model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]), attach_checks="raise").train()
-        with pytest.raises(ValueError, match=self.MATCH):
+        with pytest.raises(RuntimeError, match=self.MATCH):
             model(input_ids=input_ids)
 
     @pytest.mark.parametrize(
@@ -167,7 +175,7 @@ class TestZeroEmbeddingCheck:
     )
     def test_reports_tokens_not_covered_by_trainable_tokens(self, base_model, input_ids, config):
         model = get_peft_model(base_model, config, attach_checks="raise").train()
-        with pytest.raises(ValueError, match=r"token ids \[6\]"):
+        with pytest.raises(RuntimeError, match=r"token ids \[6\]"):
             model(input_ids=input_ids)
 
     @pytest.mark.parametrize(
@@ -182,6 +190,15 @@ class TestZeroEmbeddingCheck:
         config = LoraConfig(**{"target_modules": ["q_proj"], **config_kwargs})
         model = get_peft_model(base_model, config, attach_checks="raise").train()
         model(input_ids=input_ids)
+
+    def test_trainable_tokens_on_a_trainable_embedding_are_not_reported(self, base_model, input_ids):
+        # with the base embedding trained as well, every row is trainable, not only the token indices
+        config = LoraConfig(target_modules=["q_proj"], trainable_token_indices=[5])
+        model = get_peft_model(base_model, config, attach_checks="raise").train()
+        for param in model.get_input_embeddings().parameters():
+            param.requires_grad_(True)
+        model(input_ids=input_ids)
+        assert not self.get_hooks(model)
 
     def test_adapter_added_later_that_wraps_the_embedding(self, base_model, input_ids):
         # the check moves to the LoRA embedding layer instead of observing the frozen base layer inside it
@@ -202,12 +219,12 @@ class TestZeroEmbeddingCheck:
 
     @pytest.mark.parametrize("method", ["unload", "merge_and_unload"])
     def test_unload_removes_hook(self, base_model, method):
-        model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]))
+        model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]), attach_checks="warn")
         assert self.get_hooks(model)
         base_model = getattr(model, method)()
         assert not self.get_hooks(base_model)
 
     def test_model_is_picklable(self, base_model):
-        model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]))
+        model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]), attach_checks="warn")
         loaded = pickle.loads(pickle.dumps(model))
         assert len(self.get_hooks(loaded)) == 1

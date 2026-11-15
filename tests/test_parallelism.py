@@ -554,6 +554,9 @@ class TestFsdp2StateDict:
 
 
 def _zero_embedding_check_fsdp2_worker(rank, init_file):
+    # Two ranks train a tiny model whose embedding rows 5 and 6 are zero, with the embedding weight sharded by FSDP2.
+    # Only rank 0 gets a batch containing these tokens, so only rank 0 may warn, and neither rank may hang waiting for
+    # the other, since the check does no communication.
     from torch.distributed.fsdp import fully_shard
 
     dist.init_process_group("gloo", init_method=f"file://{init_file}", rank=rank, world_size=2)
