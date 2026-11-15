@@ -68,14 +68,6 @@ def calibrate_activation_steering(
 
     All module training modes and adapter enabled states are restored, including on failure. Gradient flags and active
     adapter selection are unchanged. Scales are updated only after every targeted projection has valid statistics.
-
-    Example:
-        ```python
-        from peft.tuners.activation_steering import calibrate_activation_steering
-
-        calibrate_activation_steering(model, calibration_dataloader)
-        model.save_pretrained("steering-adapter")
-        ```
     """
     layers = {
         name: module
@@ -117,6 +109,8 @@ def calibrate_activation_steering(
                     raise ValueError("The calibration attention mask must match the output dimensions.")
                 eligible = attention_mask.to(device=hidden_states.device, dtype=torch.bool)
 
+            # Exclude the first valid token of each sequence, where the running count of valid tokens is 1, also with
+            # left padding. As in neuron-explorer, its norm is often an outlier, e.g. for attention sink tokens.
             eligible = eligible & (eligible.cumsum(dim=1) > 1)
             values = hidden_states.float().norm(dim=-1)[eligible]
             if not torch.isfinite(values).all():
