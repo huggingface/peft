@@ -81,9 +81,9 @@ def select_neurons(
             The number of neurons to keep across all targeted projections.
         init_val (`float`, defaults to `0.1`):
             The positive magnitude of each kept neuron's initial dose. With the default `dose_unit`, 0.1 changes the
-            outputs noticeably while keeping them close to the base model's on unrelated text; larger values steer
-            more strongly but can degrade the outputs, especially with many neurons. Doses in `"residual_stream"`
-            units have a larger effect, so smaller values suit them.
+            outputs noticeably while keeping them close to the base model's on unrelated text; larger values steer more
+            strongly but can degrade the outputs, especially with many neurons. Doses in `"residual_stream"` units have
+            a larger effect, so smaller values suit them.
         adapter_name (`str`, defaults to `"default"`):
             The adapter to select neurons for.
 
