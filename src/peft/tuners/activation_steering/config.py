@@ -73,9 +73,18 @@ class ActivationSteeringConfig(PeftConfig):
 
     Example:
 
+    Without pre-selected neurons, every input channel of the targeted projections starts at a dose of 0, and
+    `select_neurons` keeps the most useful neurons after calibration:
+
     ```py
     >>> from peft import ActivationSteeringConfig, TaskType
 
+    >>> config = ActivationSteeringConfig(task_type=TaskType.CAUSAL_LM, target_modules=["down_proj"])
+    ```
+
+    With pre-selected neurons, e.g. found with neuron-explorer, only these neurons are steered:
+
+    ```py
     >>> config = ActivationSteeringConfig(
     ...     base_model_name_or_path="Qwen/Qwen3.5-4B",
     ...     task_type=TaskType.CAUSAL_LM,
