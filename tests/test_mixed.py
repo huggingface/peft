@@ -70,14 +70,6 @@ def _param_name_func(testcase_func, param_num, params):
     return f"{testcase_func.__name__}_{param_num}_{name0}_x2"
 
 
-# fresh configs per test, as get_peft_model mutates them; OFT does not commute with the additive methods
-SAME_LAYER_CONFIG_FACTORIES = {
-    "Lora": lambda: LoraConfig(target_modules=["lin0"], init_lora_weights=False),
-    "OFT": lambda: OFTConfig(target_modules=["lin0"], init_weights=False, r=0, oft_block_size=2),
-    "LoHa": lambda: LoHaConfig(target_modules=["lin0"], init_weights=False),
-}
-
-
 class TestMixedAdapterTypes(unittest.TestCase):
     torch_device = infer_device()
 
@@ -226,6 +218,12 @@ class TestMixedAdapterTypes(unittest.TestCase):
         peft_model_01.set_adapter(["adapter0", "adapter1"])
         output_mixed_01 = peft_model_01(input)
 
+        model_copy = copy.deepcopy(peft_model_01)
+        model_copy.merge_adapter()
+        assert torch.allclose(output_mixed_01, model_copy(input), atol=atol, rtol=rtol)
+        model_copy.unmerge_adapter()
+        assert torch.allclose(output_mixed_01, model_copy(input), atol=atol, rtol=rtol)
+
         model_merged_01 = peft_model_01.merge_and_unload()
         output_merged_01 = model_merged_01(input)
         assert torch.allclose(output_mixed_01, output_merged_01, atol=atol, rtol=rtol)
@@ -236,6 +234,12 @@ class TestMixedAdapterTypes(unittest.TestCase):
         peft_model_10.add_adapter("adapter0", config0)
         peft_model_10.set_adapter(["adapter1", "adapter0"])
         output_mixed_10 = peft_model_10(input)
+
+        model_copy = copy.deepcopy(peft_model_10)
+        model_copy.merge_adapter()
+        assert torch.allclose(output_mixed_10, model_copy(input), atol=atol, rtol=rtol)
+        model_copy.unmerge_adapter()
+        assert torch.allclose(output_mixed_10, model_copy(input), atol=atol, rtol=rtol)
 
         model_merged_10 = peft_model_10.merge_and_unload()
         output_merged_10 = model_merged_10(input)
@@ -428,6 +432,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 LoHaConfig(target_modules=["lin0"], init_weights=False),
                 LoKrConfig(target_modules=["lin0"], init_weights=False),
                 AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
+                OFTConfig(target_modules=["lin0"], init_weights=False, r=0, oft_block_size=2),
             ],
             r=2,
         ),
@@ -472,6 +477,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 LoHaConfig(init_weights=False),
                 LoKrConfig(init_weights=False),
                 AdaLoraConfig(init_lora_weights=False, total_step=1),
+                OFTConfig(init_weights=False, r=0, oft_block_size=2),
             ],
             r=2,
         ),
@@ -577,10 +583,14 @@ class TestMixedAdapterTypes(unittest.TestCase):
         config2 = AdaLoraConfig(r=4, lora_alpha=4, target_modules=["lin1"], init_lora_weights=False, total_step=1)
         peft_model.add_adapter("adapter2", config2)
 
+        # OFT is not commutative with the other adapters, add it before adapter3 so that it is in the middle of lin0
+        config4 = OFTConfig(target_modules=["lin0"], init_weights=False, r=0, oft_block_size=2)
+        peft_model.add_adapter("adapter4", config4)
+
         config3 = LoKrConfig(r=4, alpha=4, target_modules=["lin0", "lin1"], init_weights=False)
         peft_model.add_adapter("adapter3", config3)
 
-        peft_model.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3"])
+        peft_model.set_adapter(["adapter0", "adapter1", "adapter2", "adapter4", "adapter3"])
         output_mixed = peft_model(input)
         assert torch.isfinite(output_base).all()
         assert not torch.allclose(output_base, output_mixed, atol=atol, rtol=rtol)
@@ -606,7 +616,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         assert torch.isfinite(output_13).all()
         assert not torch.allclose(output_mixed, output_13, atol=atol, rtol=rtol)
 
-        model_copy.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3"])
+        model_copy.set_adapter(["adapter0", "adapter1", "adapter2", "adapter4", "adapter3"])
         model_merged_unloaded = model_copy.merge_and_unload(adapter_names=["adapter1", "adapter3"])
         output_merged_13 = model_merged_unloaded(input)
         assert torch.isfinite(output_merged_13).all()
@@ -618,43 +628,6 @@ class TestMixedAdapterTypes(unittest.TestCase):
         output_unloaded = model_unloaded(input)
         assert torch.isfinite(output_unloaded).all()
         assert torch.allclose(output_base, output_unloaded, atol=atol, rtol=rtol)
-
-    @parameterized.expand(
-        ["_".join(names) for r in (2, 3) for names in itertools.permutations(SAME_LAYER_CONFIG_FACTORIES, r=r)]
-    )
-    def test_nested_same_layer_merge_order(self, config_names):
-        # Adapters of different types targeting the same layer are nested, with the innermost adapter being applied
-        # first in the forward pass. Since OFT is not commutative with other adapters, merging must follow the same
-        # order, see #4048.
-        config_names = config_names.split("_")
-        atol = 1e-4
-        rtol = 1e-4
-        input = torch.arange(90).reshape(9, 10).to(self.torch_device)
-        output_base = self._get_model(SimpleNet)(input)
-
-        adapter_names = [f"adapter{i}" for i in range(len(config_names))]
-        peft_model = self._get_model(
-            SimpleNet, SAME_LAYER_CONFIG_FACTORIES[config_names[0]](), adapter_names[0], seed=0
-        )
-        for i, (config_name, adapter_name) in enumerate(zip(config_names[1:], adapter_names[1:]), start=1):
-            torch.manual_seed(i)
-            peft_model.add_adapter(adapter_name, SAME_LAYER_CONFIG_FACTORIES[config_name]())
-        peft_model.set_adapter(adapter_names)
-        output_mixed = peft_model(input)
-        assert not torch.allclose(output_base, output_mixed, atol=atol, rtol=rtol)
-
-        model_copy = copy.deepcopy(peft_model)
-        base_weight = model_copy.base_model.model.lin0.get_base_layer().weight.detach().clone()
-        model_copy.merge_adapter()
-        assert torch.allclose(output_mixed, model_copy(input), atol=atol, rtol=rtol)
-        model_copy.unmerge_adapter()
-        assert torch.allclose(output_mixed, model_copy(input), atol=atol, rtol=rtol)
-        assert torch.allclose(
-            model_copy.base_model.model.lin0.get_base_layer().weight, base_weight, atol=atol, rtol=rtol
-        )
-
-        output_merged = peft_model.merge_and_unload()(input)
-        assert torch.allclose(output_mixed, output_merged, atol=atol, rtol=rtol)
 
     def test_merge_adapter_mha(self):
         # The LoRA MultiheadAttention layer also merges its out_proj child, so only nested base_layer chains may be

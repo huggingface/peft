@@ -242,6 +242,7 @@ class MixedModel(BaseTuner):
         """
         self._check_merge_allowed()
         tuner_layers = [module for module in self.model.modules() if isinstance(module, BaseTunerLayer)]
+        # tuner layers that are the base_layer of another tuner layer are merged as part of the outermost layer's chain
         nested = {id(module.base_layer) for module in tuner_layers if hasattr(module, "base_layer")}
         for module in tuner_layers:
             if id(module) in nested:
