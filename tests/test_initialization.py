@@ -17,6 +17,7 @@ import importlib.machinery
 import importlib.metadata
 import importlib.util
 import itertools
+import json
 import math
 import platform
 import re
@@ -3706,6 +3707,35 @@ class TestIA3Initialization:
             if isinstance(module, IA3Layer)
         }
         assert {name for name, value in is_feedforward.items() if value} == {"fc", "block.fc", "myblock.fc"}
+
+    @pytest.mark.parametrize(
+        "peft_version, expected",
+        [(None, True), ("0.17.0", True), ("0.21.2", True), ("0.21.3.dev0", False), ("0.22.0", False)],
+    )
+    def test_feedforward_layout_of_square_conv_restored_based_on_peft_version(self, peft_version, expected, tmp_path):
+        # For a conv layer with in_channels == out_channels, the feedforward and non-feedforward (IA)³ vectors have
+        # the same shape, so only the PEFT version tells if "not_fc" was a feedforward module when it was saved, i.e.
+        # if it was matched by "fc" with the old endswith rule.
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Conv2d(4, 4, 3)
+                self.not_fc = nn.Conv2d(4, 4, 3)
+
+        config = IA3Config(target_modules=["fc", "not_fc"], feedforward_modules=["fc"])
+        model = get_peft_model(Model().to(self.torch_device), config)
+        model.save_pretrained(tmp_path)
+        with open(tmp_path / "adapter_config.json") as f:
+            config_dict = json.load(f)
+        if peft_version is None:
+            del config_dict["peft_version"]
+        else:
+            config_dict["peft_version"] = peft_version
+        with open(tmp_path / "adapter_config.json", "w") as f:
+            json.dump(config_dict, f)
+
+        loaded = PeftModel.from_pretrained(Model().to(self.torch_device), tmp_path)
+        assert loaded.base_model.model.not_fc.is_feedforward is expected
 
 
 class TestPacaInitialization:

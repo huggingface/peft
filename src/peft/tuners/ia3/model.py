@@ -17,6 +17,7 @@ import re
 import warnings
 from dataclasses import replace
 
+import packaging.version
 import torch
 from torch import nn
 from transformers.pytorch_utils import Conv1D
@@ -226,6 +227,12 @@ class IA3Model(BaseTuner):
             feedforward_shape = (1, module.in_features) + (1,) * (getattr(module, "_kernel_dim", 2) - 2)
             if tuple(weight.shape) != feedforward_shape:
                 continue
+            # The shape check is preferred, but if both layouts have the same shape (e.g. conv layers with
+            # in_channels == out_channels), only the PEFT version of the checkpoint can tell them apart.
+            if (tuple(module.ia3_l[adapter_name].shape) == feedforward_shape) and not cls._saved_with_endswith_rule(
+                config
+            ):
+                continue
 
             # Replace the vector in place instead of calling update_layer again; its values are loaded from the
             # checkpoint afterwards.
@@ -247,6 +254,25 @@ class IA3Model(BaseTuner):
                 "target_modules explicitly."
             )
         return peft_model_state_dict
+
+    @staticmethod
+    def _saved_with_endswith_rule(config) -> bool:
+        """
+        Whether the adapter was saved with a PEFT version that matched list entries of feedforward_modules with a plain
+        endswith. The fix is released with PEFT 0.22.0. Dev versions from 0.21.3.dev0 on are treated as fixed, since
+        main stays on 0.21.x dev versions until then, while patch releases < 0.22.0 are made from release branches
+        without the fix. A config without peft_version is from before PEFT 0.18.0.
+        """
+        if getattr(config, "_peft_version_missing", False) or not config.peft_version:
+            return True
+        try:
+            peft_version = packaging.version.Version(config.peft_version.partition("@")[0])
+        except packaging.version.InvalidVersion:
+            return False
+        release = packaging.version.Version(peft_version.base_version)
+        if release < packaging.version.Version("0.21.3"):
+            return True
+        return (not peft_version.is_devrelease) and (release < packaging.version.Version("0.22.0"))
 
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
