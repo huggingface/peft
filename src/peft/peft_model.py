@@ -1893,6 +1893,22 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self._reshard_fsdp_modules()
                 self.base_model.enable_adapter_layers()
 
+    def _check_merge_allowed(self, adapter_names: Optional[list[str]] = None) -> None:
+        if adapter_names is None:
+            configs = [self.active_peft_config]
+        else:
+            configs = [self.peft_config[name] for name in adapter_names if name in self.peft_config]
+
+        for config in configs:
+            if config.is_prompt_learning:
+                raise ValueError(
+                    f"Cannot merge or unmerge adapters for prompt learning methods like {config.peft_type.value}."
+                )
+            if config.is_adaption_prompt:
+                raise ValueError(
+                    f"Cannot merge or unmerge adapters for adaption prompt methods like {config.peft_type.value}."
+                )
+
     def merge_adapter(
         self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False, **kwargs: Any
     ) -> None:
@@ -1908,6 +1924,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
         """
+        self._check_merge_allowed(adapter_names=adapter_names)
         # The merge has to end up in the weights that FSDP2 keeps, i.e. the shards. A forward with
         # `reshard_after_forward=False` leaves the unsharded parameters registered, and a merge into those is dropped
         # by the next reshard, see #3800. Resharding is safe even if a layer is already merged, because the merge is
@@ -1925,6 +1942,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 avoid scanning the whole model for merged layers when the caller has already established that there is
                 at least one. Defaults to `False`.
         """
+        self._check_merge_allowed()
         # The unmerge has to end up in the shards as well, see merge_adapter. Resharding a merged layer is safe here
         # because the merge is in the sharded parameters.
         if force_reshard or any(isinstance(module, BaseTunerLayer) and module.merged for module in self.modules()):
