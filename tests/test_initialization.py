@@ -3654,6 +3654,18 @@ class TestHraInitialization:
         assert torch.allclose(output, output_merged, atol=1e-5, rtol=1e-5)
 
 
+class TestOftInitialization:
+    """Test class to check the initialization of OFT adapters."""
+
+    def test_error_raised_for_conv2d_groups_greater_than_one(self):
+        # OFT's rotation acts on in_channels * kernel_height * kernel_width inputs, which does not match the weight of a
+        # grouped conv (in_channels // groups), so constructing the adapter must fail immediately and clearly.
+        base_model = nn.Sequential(nn.Conv2d(4, 8, kernel_size=3, groups=2))
+        config = OFTConfig(target_modules=["0"], r=0, oft_block_size=2)
+        with pytest.raises(NotImplementedError, match="OFT does not support Conv2d layers with groups > 1"):
+            get_peft_model(base_model, config)
+
+
 class TestPacaInitialization:
     """Test class to check the initialization of PaCA adapters."""
 
