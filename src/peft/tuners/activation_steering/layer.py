@@ -94,38 +94,41 @@ class ActivationSteeringLayer(nn.Module, BaseTunerLayer):
     def forward(self, x, *args, **kwargs):
         adapters = [name for name in self.active_adapters if name in self.activation_steering_values]
         if self.disable_adapters or not adapters:
-            return self.base_layer(x, *args, **kwargs)
+            result = self.base_layer(x, *args, **kwargs)
+        else:
+            for name in adapters:
+                if name not in self._calibrated_adapters:
+                    scales = self.activation_steering_scales[name]
+                    if not (torch.isfinite(scales).all() and (scales > 0).all()):
+                        raise RuntimeError(
+                            f"Activation steering adapter '{name}' is not calibrated. Call "
+                            "peft.tuners.activation_steering.calibrate_activation_steering before using it."
+                        )
+                    self._calibrated_adapters.add(name)
 
-        for name in adapters:
-            if name not in self._calibrated_adapters:
-                scales = self.activation_steering_scales[name]
-                if not (torch.isfinite(scales).all() and (scales > 0).all()):
-                    raise RuntimeError(
-                        f"Activation steering adapter '{name}' is not calibrated. "
-                        "Call calibrate_activation_steering before using it."
+            if x.ndim not in (2, 3):
+                raise ValueError(
+                    "Activation steering expects projection inputs of shape (batch, sequence, features) or (batch * "
+                    "sequence, features)."
+                )
+
+            delta = torch.zeros(x.shape[-1], device=x.device, dtype=torch.float32)
+            for name in adapters:
+                values = self.activation_steering_values[name].to(device=x.device, dtype=torch.float32)
+                scales = self.activation_steering_scales[name].to(device=x.device, dtype=torch.float32)
+                delta = delta.index_add(0, self.activation_steering_indices[name].to(x.device), values * scales)
+
+            mask = self._attention_mask
+            if mask is not None:
+                # The input tokens are the last positions of the mask. Some models, e.g. OPT, flatten the batch and
+                # sequence dimensions before the projection.
+                num_tokens = self._num_tokens or (x.shape[1] if x.ndim == 3 else None)
+                shape = (mask.shape[0], num_tokens) if x.ndim == 3 else (mask.shape[0] * (num_tokens or 0),)
+                if num_tokens is None or num_tokens > mask.shape[1] or x.shape[:-1] != shape:
+                    raise ValueError(
+                        "The attention mask must match the projection input's batch and sequence dimensions."
                     )
-                self._calibrated_adapters.add(name)
-
-        if x.ndim not in (2, 3):
-            raise ValueError(
-                "Activation steering expects projection inputs of shape (batch, sequence, features) or (batch * "
-                "sequence, features)."
-            )
-
-        delta = torch.zeros(x.shape[-1], device=x.device, dtype=torch.float32)
-        for name in adapters:
-            values = self.activation_steering_values[name].to(device=x.device, dtype=torch.float32)
-            scales = self.activation_steering_scales[name].to(device=x.device, dtype=torch.float32)
-            delta = delta.index_add(0, self.activation_steering_indices[name].to(x.device), values * scales)
-
-        mask = self._attention_mask
-        if mask is not None:
-            # The input tokens are the last positions of the mask. Some models, e.g. OPT, flatten the batch and sequence
-            # dimensions before the projection.
-            num_tokens = self._num_tokens or (x.shape[1] if x.ndim == 3 else None)
-            shape = (mask.shape[0], num_tokens) if x.ndim == 3 else (mask.shape[0] * (num_tokens or 0),)
-            if num_tokens is None or num_tokens > mask.shape[1] or x.shape[:-1] != shape:
-                raise ValueError("The attention mask must match the projection input's batch and sequence dimensions.")
-            mask = mask[:, -num_tokens:].to(device=x.device, dtype=torch.bool).reshape(shape)
-            delta = delta * mask.unsqueeze(-1)
-        return self.base_layer(x + delta.to(x.dtype), *args, **kwargs)
+                mask = mask[:, -num_tokens:].to(device=x.device, dtype=torch.bool).reshape(shape)
+                delta = delta * mask.unsqueeze(-1)
+            result = self.base_layer(x + delta.to(x.dtype), *args, **kwargs)
+        return result
