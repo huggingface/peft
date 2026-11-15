@@ -25,13 +25,14 @@ class ActivationSteeringConfig(PeftConfig):
     """Configuration for additive activation steering of individual neurons.
 
     A neuron is an input channel of a targeted linear projection, typically an MLP's down projection. Steering adds a
-    signed, trainable dose to the selected channels before the projection, which edits the neurons' activations
-    directly. The dose normalization follows Lyra's neuron-explorer implementation:
+    signed, trainable dose, multiplied by a fixed scale, to each selected channel before the projection, which edits
+    the neurons' activations directly. The scale of neuron `n` is `median / ||W[:, n]||`, where `W` is the
+    projection's weight and `median` is the median L2 norm of the stream given by `dose_unit`, measured on baseline
+    calibration data. A dose of 1 thus adds `median * W[:, n] / ||W[:, n]||` to the projection's output. This
+    normalization follows Lyra's neuron-explorer implementation:
     https://github.com/lyramakesmusic/neuron-explorer/blob/5a8f8267f6bd3c8caa87d598870949ab0d25b914/explorer/runtime.py#L653
-    A dose of 1 on neuron `n` adds `median * W[:, n] / ||W[:, n]||` to the projection's output, where `W` is the
-    projection's weight and `median` is the median L2 norm of the stream the addition lands in, measured on baseline
-    calibration data. Call `calibrate_activation_steering` from `peft.tuners.activation_steering` before using a new
-    adapter. The calibrated scales are saved with the adapter and are not trainable; the doses can be fine-tuned.
+    Call `calibrate_activation_steering` from `peft.tuners.activation_steering` to compute the scales before using a
+    new adapter. The scales are saved with the adapter and are not trainable; the doses can be fine-tuned.
 
     Args:
         target_modules (`Optional[Union[List[str], str]]`):
