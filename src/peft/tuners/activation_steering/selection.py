@@ -53,9 +53,9 @@ def _gradient_scores(layers, train_step, adapter_name):
 def select_neurons(
     model: nn.Module,
     train_step: Callable[[], None],
-    num_neurons: int,
+    num_neurons: int = 8,
     *,
-    init_val: float,
+    init_val: float = 0.1,
     adapter_name: str = "default",
 ) -> None:
     """Select the neurons to steer by the gradient of a loss and remove all other doses in place.
@@ -77,10 +77,13 @@ def select_neurons(
         train_step (`Callable[[], None]`):
             Runs forward and backward passes of a loss whose descent direction is the desired behavior, e.g. the
             negative log-likelihood of example completions. Gradients accumulate over all passes.
-        num_neurons (`int`):
+        num_neurons (`int`, defaults to `8`):
             The number of neurons to keep across all targeted projections.
-        init_val (`float`):
-            The positive magnitude of each kept neuron's initial dose.
+        init_val (`float`, defaults to `0.1`):
+            The positive magnitude of each kept neuron's initial dose. With the default `dose_unit`, 0.1 changes the
+            outputs noticeably while keeping them close to the base model's on unrelated text; larger values steer
+            more strongly but can degrade the outputs, especially with many neurons. Doses in `"residual_stream"`
+            units have a larger effect, so smaller values suit them.
         adapter_name (`str`, defaults to `"default"`):
             The adapter to select neurons for.
 
@@ -99,7 +102,7 @@ def select_neurons(
                 model(**batch).loss.backward()
 
 
-        select_neurons(model, train_step, num_neurons=8, init_val=0.5)
+        select_neurons(model, train_step)
         model.save_pretrained("steering-adapter")
         ```
     """

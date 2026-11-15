@@ -142,7 +142,8 @@ def train_step():
         model(**batch).loss.backward()
 
 
-select_neurons(model, train_step, num_neurons=8, init_val=0.5)
+# by default, keep 8 neurons, each starting at a dose of 0.1 with the sign that lowers the loss
+select_neurons(model, train_step)
 print(model.peft_config["default"].steering_pattern)
 model.save_pretrained("path/to/checkpoint")
 ```

@@ -364,6 +364,13 @@ class TestNeuronSelection:
         # 0.5 * 10 * ([3/5, 4/5] + [0, 1]) + -0.5 * 2 * [0, -1] = [3, 9] + [0, 1].
         torch.testing.assert_close(model(inputs), reference + torch.tensor([3.0, 10.0]))
 
+    def test_default_init_val(self, model, train_step):
+        select_neurons(model, train_step, num_neurons=3)
+        assert model.peft_config["default"].steering_pattern == {
+            "layers.0.down_proj": {"indices": [0, 1], "init_val": [0.1, 0.1]},
+            "layers.1.down_proj": {"indices": [2], "init_val": [-0.1]},
+        }
+
     def test_projections_without_kept_neurons_are_unwrapped(self, model, train_step):
         # 0.3 is not exact in float32; the config must still contain exactly 0.3.
         select_neurons(model, train_step, num_neurons=2, init_val=0.3)
