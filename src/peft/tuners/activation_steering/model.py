@@ -39,8 +39,8 @@ def _prepare_steering_forward(model, args, kwargs):
 
     if len(args) > 1:
         raise ValueError(
-            "When activation steering is enabled, pass attention_mask, past_key_values, and other optional model "
-            "inputs by keyword; only the primary input may be positional."
+            "When activation steering is enabled, pass attention_mask, cache (previously called past_key_values), "
+            "and other optional model inputs by keyword; only the primary input may be positional."
         )
 
     mask = kwargs.get("attention_mask")

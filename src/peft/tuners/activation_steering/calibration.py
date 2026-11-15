@@ -61,7 +61,8 @@ def calibrate_activation_steering(
         dataloader (`Iterable[Mapping]` or `Mapping`):
             Model input batches, or one input batch. Prepare tensors on the model's input device. An optional
             two-dimensional `attention_mask` identifies valid tokens. Each batch must be a fresh sequence, without
-            `past_key_values`. For language models, passing `use_cache=False` avoids allocating unused caches.
+            `cache` (previously called `past_key_values`). For language models, passing `use_cache=False` avoids
+            allocating unused caches.
         adapter_name (`str`, defaults to `"default"`):
             Adapter to calibrate, including an inactive adapter. Other adapters' scales and all dose parameters are
             unchanged. Repeated calls replace this adapter's scales using the new calibration data.
