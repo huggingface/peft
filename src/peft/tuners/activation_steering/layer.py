@@ -51,13 +51,13 @@ def get_projection_weight(module, quantization_kwargs):
 
 
 class ActivationSteeringLayer(nn.Module, BaseTunerLayer):
-    adapter_layer_names = ("activation_steering_values",)
+    adapter_layer_names = ("activation_steering_doses",)
     other_param_names = ("activation_steering_indices", "activation_steering_scales")
 
     def __init__(self, base_layer, adapter_name, indices, init_val, config: ActivationSteeringConfig):
         super().__init__()
         self.base_layer = base_layer
-        self.activation_steering_values = nn.ParameterDict()
+        self.activation_steering_doses = nn.ParameterDict()
         # The indices are restored from the config on load, while the calibrated scales are saved with the adapter.
         self.activation_steering_indices = BufferDict(persistent=False)
         self.activation_steering_scales = BufferDict(persistent=True)
@@ -76,9 +76,9 @@ class ActivationSteeringLayer(nn.Module, BaseTunerLayer):
             indices = list(range(self.in_features))
         elif max(indices) >= self.in_features:
             raise ValueError(f"`indices` exceed the input dimension of the targeted projection ({self.in_features}).")
-        values = init_val if isinstance(init_val, list) else [init_val] * len(indices)
+        doses = init_val if isinstance(init_val, list) else [init_val] * len(indices)
 
-        self.activation_steering_values[adapter_name] = nn.Parameter(torch.tensor(values, dtype=torch.float32))
+        self.activation_steering_doses[adapter_name] = nn.Parameter(torch.tensor(doses, dtype=torch.float32))
         self.activation_steering_indices[adapter_name] = torch.tensor(indices, dtype=torch.long)
         self.activation_steering_scales[adapter_name] = torch.zeros(len(indices), dtype=torch.float32)
         self._calibrated_adapters.discard(adapter_name)
@@ -92,7 +92,7 @@ class ActivationSteeringLayer(nn.Module, BaseTunerLayer):
         raise ValueError("Activation steering does not support unmerging.")
 
     def forward(self, x, *args, **kwargs):
-        adapters = [name for name in self.active_adapters if name in self.activation_steering_values]
+        adapters = [name for name in self.active_adapters if name in self.activation_steering_doses]
         if self.disable_adapters or not adapters:
             result = self.base_layer(x, *args, **kwargs)
         else:
@@ -114,9 +114,9 @@ class ActivationSteeringLayer(nn.Module, BaseTunerLayer):
 
             delta = torch.zeros(x.shape[-1], device=x.device, dtype=torch.float32)
             for name in adapters:
-                values = self.activation_steering_values[name].to(device=x.device, dtype=torch.float32)
+                doses = self.activation_steering_doses[name].to(device=x.device, dtype=torch.float32)
                 scales = self.activation_steering_scales[name].to(device=x.device, dtype=torch.float32)
-                delta = delta.index_add(0, self.activation_steering_indices[name].to(x.device), values * scales)
+                delta = delta.index_add(0, self.activation_steering_indices[name].to(x.device), doses * scales)
 
             mask = self._attention_mask
             if mask is not None:

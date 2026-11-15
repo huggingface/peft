@@ -32,7 +32,7 @@ def _prepare_steering_forward(model, args, kwargs):
         for layer in model.modules()
         if isinstance(layer, ActivationSteeringLayer)
         and not layer.disable_adapters
-        and any(name in layer.activation_steering_values for name in layer.active_adapters)
+        and any(name in layer.activation_steering_doses for name in layer.active_adapters)
     ]
     if not layers:
         return

@@ -72,7 +72,7 @@ def calibrate_activation_steering(
     layers = {
         name: module
         for name, module in model.named_modules()
-        if isinstance(module, ActivationSteeringLayer) and adapter_name in module.activation_steering_values
+        if isinstance(module, ActivationSteeringLayer) and adapter_name in module.activation_steering_doses
     }
     if not layers:
         raise ValueError(f"No activation steering layers found for adapter '{adapter_name}'.")

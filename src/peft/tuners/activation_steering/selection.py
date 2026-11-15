@@ -27,19 +27,19 @@ from .model import ActivationSteeringModel
 
 def _gradient_scores(layers, train_step, adapter_name):
     # Each dose's gradient is the first-order effect of steering its neuron on the loss.
-    values = [layer.activation_steering_values[adapter_name] for layer in layers.values()]
-    states = [(value.requires_grad, value.grad) for value in values]
+    doses = [layer.activation_steering_doses[adapter_name] for layer in layers.values()]
+    states = [(dose.requires_grad, dose.grad) for dose in doses]
     try:
-        for value in values:
-            value.requires_grad_(True)
-            value.grad = None
+        for dose in doses:
+            dose.requires_grad_(True)
+            dose.grad = None
         with torch.enable_grad():
             train_step()
-        grads = [value.grad for value in values]
+        grads = [dose.grad for dose in doses]
     finally:
-        for value, (requires_grad, grad) in zip(values, states):
-            value.requires_grad_(requires_grad)
-            value.grad = grad
+        for dose, (requires_grad, grad) in zip(doses, states):
+            dose.requires_grad_(requires_grad)
+            dose.grad = grad
 
     if any(grad is None for grad in grads):
         raise RuntimeError(
@@ -116,7 +116,7 @@ def select_neurons(
     layers = {
         name: module for name, module in tuner.model.named_modules() if isinstance(module, ActivationSteeringLayer)
     }
-    num_doses = sum(layer.activation_steering_values[adapter_name].numel() for layer in layers.values())
+    num_doses = sum(layer.activation_steering_doses[adapter_name].numel() for layer in layers.values())
     if not 0 < num_neurons <= num_doses:
         raise ValueError(f"`num_neurons` must be between 1 and the number of doses ({num_doses}).")
 
@@ -143,16 +143,16 @@ def select_neurons(
             continue
 
         # Each kept dose starts at init_val against the sign of its gradient, which lowers the loss.
-        values = [-init_val * sign for sign in layer_signs[positions].tolist()]
-        old = layer.activation_steering_values[adapter_name]
-        layer.activation_steering_values[adapter_name] = nn.Parameter(
-            torch.tensor(values, device=old.device, dtype=old.dtype), requires_grad=old.requires_grad
+        doses = [-init_val * sign for sign in layer_signs[positions].tolist()]
+        old = layer.activation_steering_doses[adapter_name]
+        layer.activation_steering_doses[adapter_name] = nn.Parameter(
+            torch.tensor(doses, device=old.device, dtype=old.dtype), requires_grad=old.requires_grad
         )
         for buffers in (layer.activation_steering_indices, layer.activation_steering_scales):
             buffers[adapter_name] = buffers[adapter_name][positions.to(buffers[adapter_name].device)]
         steering_pattern[name] = {
             "indices": layer.activation_steering_indices[adapter_name].tolist(),
-            "init_val": values,
+            "init_val": doses,
         }
 
     tuner.peft_config[adapter_name].steering_pattern = steering_pattern

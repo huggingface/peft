@@ -312,9 +312,9 @@ class TestActivationSteering:
         config = ActivationSteeringConfig(target_modules=["down_proj"], dose_unit="module_output")
         model = calibrated_model(base, config, inputs)
         torch.testing.assert_close(model(inputs), reference)
-        values = model.base_model.model.block.down_proj.activation_steering_values["default"]
-        assert values.requires_grad
-        torch.testing.assert_close(values, torch.zeros(3))
+        doses = model.base_model.model.block.down_proj.activation_steering_doses["default"]
+        assert doses.requires_grad
+        torch.testing.assert_close(doses, torch.zeros(3))
 
     def test_layer_output_unit_requires_numbered_layer(self, inputs):
         model = get_peft_model(SteeringModel(), steering_config(dose_unit="layer_output"))
