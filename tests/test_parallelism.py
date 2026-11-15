@@ -421,6 +421,8 @@ class _ExpertWeights(nn.Module):
 
 
 class _ExpertParameterModel(nn.Module):
+    """A single expert stack for placement cases the Transformers loader cannot select."""
+
     def __init__(self, is_transposed, num_experts=4):
         super().__init__()
         self.experts = _ExpertWeights(is_transposed, num_experts)
@@ -448,6 +450,7 @@ class TestExpertParameterParallelism:
         dist.init_process_group("gloo", init_method=init_uri, rank=rank, world_size=math.prod(mesh_shape))
         try:
             torch.set_num_threads(1)
+
             torch.manual_seed(42)
             base = _ExpertParameterModel(is_transposed, num_experts)
             weight = base.experts.weight.detach().clone()
@@ -465,12 +468,13 @@ class TestExpertParameterParallelism:
             mesh = init_device_mesh("cpu", mesh_shape, mesh_dim_names=mesh_names)
             placements = [Shard(dim) if dim is not None else Replicate() for dim in shard_dims]
             base.experts.weight = nn.Parameter(distribute_tensor(weight.clone(), mesh, placements))
+
             config = LoraConfig(r=2, lora_alpha=2, target_parameters=["experts.weight"], init_lora_weights=False)
             torch.manual_seed(7)
             model = get_peft_model(base, config)
             if squeeze_mesh:
-                # The base is already unsharded during checkpoint recomputation, dropping its singleton FSDP axis.
-                # Adapter parameters keep their original mesh; only their temporary factors should follow the base.
+                # Model the recomputation view: FSDP has dropped its size-one axis from the base, but adapter storage
+                # still uses the original mesh. Both views address the same local expert shard.
                 wrapper = base.experts
                 original = wrapper.get_param()
                 wrapper.get_base_layer().weight = nn.Parameter(
@@ -479,6 +483,7 @@ class TestExpertParameterParallelism:
                     ),
                     requires_grad=False,
                 )
+
             torch.manual_seed(7)
             reference = get_peft_model(reference_base, LoraConfig(**config.to_dict()))
             x = torch.randn(num_experts, 3, 6)
@@ -495,6 +500,7 @@ class TestExpertParameterParallelism:
             torch.testing.assert_close(actual, expected)
             actual.square().sum().backward()
             expected.square().sum().backward()
+
             actual_params = {name: param for name, param in model.named_parameters() if "lora_" in name}
             expected_params = {name: param for name, param in reference.named_parameters() if "lora_" in name}
             for name, param in actual_params.items():
@@ -519,6 +525,8 @@ class TestExpertParameterParallelism:
         finally:
             dist.destroy_process_group()
 
+    # The actual Qwen3-MoE loader below covers the normal TP/EP path. This fixture varies the base weight layout and
+    # placement independently, including combinations that Qwen3-MoE's fixed TP plan does not expose.
     @pytest.mark.parametrize("shard_dim", [None, 0, 1, 2], ids=["replicated", "experts", "dim1", "dim2"])
     @pytest.mark.parametrize("is_transposed", [False, True])
     def test_expert_parameters_match_unsharded(self, tmp_path, shard_dim, is_transposed):
@@ -612,6 +620,7 @@ class TestExpertParameterParallelism:
 
     @staticmethod
     def _check_transformers(rank, init_uri, checkpoint, ep_size, device_type):
+        """Compare a real tiny Qwen3-MoE loaded with TP/EP against the same unsharded checkpoint."""
         from transformers.distributed import DistributedConfig
 
         # Transformers chooses the CUDA device from LOCAL_RANK, independently of torch.cuda.set_device.
@@ -640,6 +649,9 @@ class TestExpertParameterParallelism:
             torch.manual_seed(7)
             reference = get_peft_model(reference_base, LoraConfig(**config.to_dict()))
             ids = torch.tensor([[1, 2, 3, 4, 5, 6]], device=device)
+            model.train()
+            reference.train()
+
             actual = model(input_ids=ids, labels=ids)
             expected = reference(input_ids=ids, labels=ids)
             torch.testing.assert_close(actual.logits, expected.logits, atol=2e-6, rtol=2e-5)
@@ -647,11 +659,26 @@ class TestExpertParameterParallelism:
             actual.loss.backward()
             expected.loss.backward()
             reference_params = dict(reference.named_parameters())
-            for name, param in model.named_parameters():
-                if "lora_" in name:
-                    assert param.grad is not None
-                    grad = param.grad.full_tensor() if isinstance(param.grad, DTensor) else param.grad
-                    torch.testing.assert_close(grad, reference_params[name].grad, atol=2e-6, rtol=2e-5)
+
+            def assert_adapter_gradients_match():
+                for name, param in model.named_parameters():
+                    if "lora_" in name:
+                        assert param.grad is not None
+                        grad = param.grad.full_tensor() if isinstance(param.grad, DTensor) else param.grad
+                        torch.testing.assert_close(grad, reference_params[name].grad, atol=2e-6, rtol=2e-5)
+
+            assert_adapter_gradients_match()
+
+            if ep_size > 1:
+                # Recompute real expert forwards with checkpointing and compare against the uncheckpointed gradients.
+                model.zero_grad(set_to_none=True)
+                model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+                recomputed = model(input_ids=ids, labels=ids)
+                torch.testing.assert_close(recomputed.logits, expected.logits, atol=2e-6, rtol=2e-5)
+                recomputed.loss.backward()
+                assert_adapter_gradients_match()
+                model.gradient_checkpointing_disable()
+
             state, expected_state = get_peft_model_state_dict(model), get_peft_model_state_dict(reference)
             assert state.keys() == expected_state.keys()
             for name, value in state.items():

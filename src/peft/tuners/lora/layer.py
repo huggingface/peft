@@ -38,6 +38,7 @@ from peft.utils import ALLOWED_COMPUTE_DTYPES, UPCAST_DTYPES
 from peft.utils.integrations import (
     TpMeshDimRegistry,
     dequantize_module_weight,
+    dtensor_to_singleton_submesh,
     gather_params_ctx,
     get_bnb_param_type,
     skip_init_on_device,
@@ -2479,10 +2480,11 @@ class _LoraFactorsProxy(nn.Module):
             from torch.distributed.tensor import Partial, Replicate, Shard
             from torch.distributed.tensor.placement_types import _StridedShard
 
-            # Expert kernels consume local shards. Keep checkpoint-saved baddbmm operands local as well:
-            # FSDP may expose a different logical mesh during recomputation, but the local shards are unchanged.
-            # A replicated factor's gradient is partial when the other factor shards the corresponding free axis.
+            # Checkpointing saves the operands of baddbmm. Save local tensors because the original forward and
+            # recomputation can give the same shard different mesh metadata (a size-one FSDP axis comes and goes).
             def local_factor(factor, other):
+                # Each rank sees only the other factor's shard of the output, so its contribution to the gradient
+                # of a replicated factor must be summed across those ranks.
                 grad_placements = [
                     Partial() if isinstance(p, Replicate) and isinstance(q, (Shard, _StridedShard)) else p
                     for p, q in zip(factor.placements, other.placements)
@@ -2679,19 +2681,25 @@ class ParamWrapper(nn.Module, LoraLayer):
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def _parallelize_adapter(self, adapter_name: str) -> None:
+        """Store LoRA factors on the target's TP/EP mesh, preserving their checkpoint layout."""
         param = self.get_param()
         mesh = getattr(param, "device_mesh", None)
         if mesh is None:
             return
+
         # FSDP storage sharding alone is not tensor/expert parallel execution.
         if not any(TpMeshDimRegistry.is_registered(name) or name == "ep" for name in (mesh.mesh_dim_names or ())):
             if getattr(self.get_base_layer(), "_hf_tp_plan", None) is None:
                 return
+
         from torch.distributed.tensor import DTensor, Replicate, Shard, distribute_tensor
         from torch.distributed.tensor.placement_types import _StridedShard
 
         if isinstance(self.lora_A[adapter_name].weight, DTensor):
             return
+
+        # Matrix weights are (out, in); expert stacks can be (experts, in, out) or (experts, out, in).
+        # A stores the input axis in dimension 1, and B stores the output axis in dimension 0.
         input_dim = 1 if param.ndim == 2 or not self._did_swap_in_out_features else 2
         output_dim = 0 if param.ndim == 2 else 3 - input_dim
         placements_A, placements_B = [], []
@@ -2717,6 +2725,7 @@ class ParamWrapper(nn.Module, LoraLayer):
                     placements_B.append(factor_shard(0, placement) if placement.dim == output_dim else Replicate())
             else:
                 raise TypeError("LoRA target_parameters requires replicated or sharded base parameter placements.")
+
         for layer, placements in ((self.lora_A, placements_A), (self.lora_B, placements_B)):
             weight = layer[adapter_name].weight
             # The parameter is already registered. Avoid the empty-parameter constructor hook when loading on meta,
@@ -2773,34 +2782,16 @@ class ParamWrapper(nn.Module, LoraLayer):
             lhs, rhs = weight_B, weight_A
         param = self.get_param()
         if getattr(weight_A, "device_mesh", None) is not None:
-            from torch.distributed.tensor import DTensor, Replicate, Shard
+            from torch.distributed.tensor import Replicate, Shard
             from torch.distributed.tensor.placement_types import _StridedShard
 
             if lhs.device_mesh != param.device_mesh:
-                # FSDP checkpoint recomputation can expose the base on its EP submesh while adapters retain a
-                # size-one FSDP axis. Dropping only singleton axes preserves the local shard and its gradients.
-                source_mesh, target_mesh = lhs.device_mesh, param.device_mesh
-                source_names, target_names = source_mesh.mesh_dim_names, target_mesh.mesh_dim_names
-                if not source_names or not target_names or any(name not in source_names for name in target_names):
-                    raise ValueError("LoRA expert factors require the base mesh to be a compatible submesh.")
-                retained_dims = [source_names.index(name) for name in target_names]
-                if source_mesh[target_names] != target_mesh or any(
-                    source_mesh.size(dim) != 1 for dim in range(source_mesh.ndim) if dim not in retained_dims
-                ):
-                    raise ValueError("LoRA expert factors can only drop singleton device mesh dimensions.")
+                # FSDP recomputation can expose the base on its EP submesh while the stored factors keep the FSDP axis.
+                lhs = dtensor_to_singleton_submesh(lhs, param.device_mesh)
+                rhs = dtensor_to_singleton_submesh(rhs, param.device_mesh)
 
-                def drop_singleton_mesh_dims(factor):
-                    return DTensor.from_local(
-                        factor.to_local(),
-                        target_mesh,
-                        [factor.placements[dim] for dim in retained_dims],
-                        shape=factor.shape,
-                        stride=factor.stride(),
-                    )
-
-                lhs, rhs = drop_singleton_mesh_dims(lhs), drop_singleton_mesh_dims(rhs)
-
-            # The contraction rank stays replicated; free dimensions follow the expert parameter's placements.
+            # (experts, rows, rank) @ (experts, rank, cols). When the base shards rows or cols,
+            # shard the matching factor and replicate the other one, not its contraction (rank) axis.
             lhs_placements = [
                 Replicate() if isinstance(p, (Shard, _StridedShard)) and p.dim == 2 else p for p in param.placements
             ]
@@ -2809,12 +2800,14 @@ class ParamWrapper(nn.Module, LoraLayer):
             ]
             lhs = lhs.redistribute(param.device_mesh, lhs_placements)
             rhs = rhs.redistribute(param.device_mesh, rhs_placements)
+
         return lhs.to(param.dtype), rhs.to(param.dtype), self.scaling[adapter_name]
 
     def get_delta_weight(self, adapter_name, *args, **kwargs):
         if self._param_ndim == 3 and getattr(self.lora_A[adapter_name].weight, "device_mesh", None) is not None:
             lhs, rhs, scaling = self.get_delta_factors(adapter_name)
             return torch.bmm(lhs, rhs) * scaling
+
         if self.num_experts == 1:
             # could actually be a normal layer or experts stacked block-diagonally, acting like a single layer
             delta_weight = Linear.get_delta_weight(self, adapter_name, *args, **kwargs)
@@ -2871,8 +2864,8 @@ class ParamWrapper(nn.Module, LoraLayer):
             proxy = _LoraParameterProxy(delta_weight, local_tensor=local_tensor)
 
         requires_grad_before = param.requires_grad
-        # Transformers executes expert kernels on local tensors. The proxy returns the local updated shard, not a
-        # gathered full weight; its shape intentionally differs from the DTensor's logical global shape.
+        # Transformers' local expert kernels need only the updated local shard. Skip parametrization's shape check
+        # in this path: the returned shard is smaller than the DTensor's global shape by design.
         nn.utils.parametrize.register_parametrization(base_layer, self.parameter_name, proxy, unsafe=local_tensor)
         # set requires_grad, as it defaults to False
         base_layer.parametrizations[self.parameter_name].original.requires_grad_(requires_grad_before)

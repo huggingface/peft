@@ -54,7 +54,11 @@ from peft.utils import (
 from peft.utils.integrations import TpInfo
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
 from peft.utils.other import get_pattern_key
-from peft.utils.save_and_load import _maybe_shard_state_dict_for_tp
+from peft.utils.save_and_load import (
+    _distribute_state_dict_like_parameters,
+    _gather_state_dict_for_save,
+    _maybe_shard_state_dict_for_tp,
+)
 
 from .aqlm import dispatch_aqlm
 from .awq import dispatch_awq
@@ -1134,10 +1138,8 @@ class LoraModel(BaseTuner):
     def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
         to_return = super()._get_adapter_state_dict(model, config, adapter_name, state_dict, unwanted_adapter_names)
 
-        if config.target_parameters:
-            to_return = {
-                k: v.full_tensor() if getattr(v, "device_mesh", None) is not None else v for k, v in to_return.items()
-            }
+        if config.target_parameters and torch.distributed.is_available() and torch.distributed.is_initialized():
+            to_return = _gather_state_dict_for_save(to_return, to_cpu=False)
 
         if config.use_dora:
             # Here we take care of a refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a
@@ -1167,18 +1169,8 @@ class LoraModel(BaseTuner):
         state_dict = {renamed_dora_weights(k): v for k, v in state_dict.items()}
         peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
 
-        if config.target_parameters:
-            parameters = dict(model.named_parameters())
-            for key, value in peft_model_state_dict.items():
-                reference = parameters.get(key)
-                if getattr(reference, "device_mesh", None) is not None and getattr(value, "device_mesh", None) is None:
-                    from torch.distributed.tensor import distribute_tensor
-
-                    peft_model_state_dict[key] = distribute_tensor(
-                        value.to(reference.device_mesh.device_type if reference.is_meta else reference.device),
-                        reference.device_mesh,
-                        reference.placements,
-                    )
+        if config.target_parameters and torch.distributed.is_available() and torch.distributed.is_initialized():
+            peft_model_state_dict = _distribute_state_dict_like_parameters(model, peft_model_state_dict)
 
         # Before PEFT 0.22.0, the out_proj delta weight of MultiheadAttention was applied twice (#3774). To keep the
         # outputs of these adapters unchanged, lora_B is doubled and the version is updated so this happens only once.
