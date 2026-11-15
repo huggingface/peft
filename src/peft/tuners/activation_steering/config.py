@@ -75,10 +75,9 @@ class ActivationSteeringConfig(PeftConfig):
     Inputs to the projections must have the shape `(batch, sequence, features)`, or `(batch * sequence, features)`
     where they are flattened, as in OPT and in the shared experts of MoE models. Model inputs after the primary input,
     including `attention_mask` and `cache` (previously called `past_key_values`), must be passed by keyword. Padding
-    positions are not steered.
-    Encoder-decoder models are not supported. With gradient checkpointing, run the backward pass of a steered forward
-    pass before the next steered forward pass, since the recomputation uses the attention mask of the most recent model
-    call.
+    positions are not steered. Encoder-decoder models are not supported. With gradient checkpointing, run the backward
+    pass of a steered forward pass before the next steered forward pass, since the recomputation uses the attention
+    mask of the most recent model call.
 
     Example:
 
