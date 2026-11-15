@@ -65,8 +65,6 @@ class ActivationSteeringLayer(nn.Module, BaseTunerLayer):
         # The attention mask and the number of input tokens of the current model call, set by a forward pre-hook.
         self._attention_mask: torch.Tensor | None = None
         self._num_tokens: int | None = None
-        # Adapters whose scales were found to be calibrated, so that the check runs once instead of on every forward.
-        self._calibrated_adapters: set[str] = set()
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, indices, init_val, config=config)
 
@@ -81,7 +79,6 @@ class ActivationSteeringLayer(nn.Module, BaseTunerLayer):
         self.activation_steering_doses[adapter_name] = nn.Parameter(torch.tensor(doses, dtype=torch.float32))
         self.activation_steering_indices[adapter_name] = torch.tensor(indices, dtype=torch.long)
         self.activation_steering_scales[adapter_name] = torch.zeros(len(indices), dtype=torch.float32)
-        self._calibrated_adapters.discard(adapter_name)
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=config.inference_mode)
 
@@ -97,14 +94,14 @@ class ActivationSteeringLayer(nn.Module, BaseTunerLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             for name in adapters:
-                if name not in self._calibrated_adapters:
-                    scales = self.activation_steering_scales[name]
-                    if not (torch.isfinite(scales).all() and (scales > 0).all()):
-                        raise RuntimeError(
-                            f"Activation steering adapter '{name}' is not calibrated. Call "
-                            "peft.tuners.activation_steering.calibrate_activation_steering before using it."
-                        )
-                    self._calibrated_adapters.add(name)
+                # Checked on every forward, since scales can also change after calibration, e.g. by loading a state
+                # dict.
+                scales = self.activation_steering_scales[name]
+                if not (torch.isfinite(scales).all() and (scales > 0).all()):
+                    raise RuntimeError(
+                        f"Activation steering adapter '{name}' is not calibrated. Call "
+                        "peft.tuners.activation_steering.calibrate_activation_steering before using it."
+                    )
 
             if x.ndim not in (2, 3):
                 raise ValueError(
