@@ -38,28 +38,27 @@ class ActivationSteeringConfig(PeftConfig):
         target_modules (`Optional[Union[List[str], str]]`):
             The projections whose input channels are steered, e.g. `["down_proj"]`. When passing a string, a regex
             match is performed. When passing a list of strings, either an exact match is performed or it is checked if
-            the name of the module ends with any of the passed strings. If not specified, the keys of
-            `steering_pattern` are used. If both are given, only the targeted projections with an entry in
-            `steering_pattern` are steered, and every entry must match a targeted projection. Saved configs can contain
-            both, e.g. after `select_neurons`.
+            the name of the module ends with any of the passed strings. Must not be set together with
+            `steering_pattern`, whose keys are then the targets.
         exclude_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to not apply the adapter to. When passing a string, a regex match is performed.
             When passing a list of strings, either an exact match is performed or it is checked if the name of the
-            module ends with any of the passed strings.
+            module ends with any of the passed strings. Must not be set together with `steering_pattern`.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, the adapter is applied to the layer indices in
-            this list. If a single integer is passed, the adapter is applied to this layer index only.
+            this list. If a single integer is passed, the adapter is applied to this layer index only. Must not be set
+            together with `steering_pattern`.
         layers_pattern (`Optional[Union[List[str], str]]`):
             The name of the `nn.ModuleList` that holds the layers, usually `"layers"` or `"h"`, if it is not one of the
             common names. It is used by `layers_to_transform` and to find the layer whose output sets the unit for
             `dose_unit="residual_stream"`.
         steering_pattern (`dict`):
-            Maps projection names (exact or suffix matches) to specifications containing `indices` and `init_val`. The
-            `indices` select the projection's input channels, and `init_val` initializes their independent, signed
-            doses; a number broadcasts, and a list must match the number of indices. Targeted projections without an
-            entry are not steered. If empty, every input channel of every targeted projection gets a dose of 0, which
-            leaves the model unchanged. `select_neurons` from `peft.tuners.activation_steering` then keeps the most
-            useful neurons and writes them into this field.
+            Maps projection names (exact or suffix matches) to specifications containing `indices` and `init_val`.
+            These projections are the targets. The `indices` select the projection's input channels, and `init_val`
+            initializes their independent, signed doses; a number broadcasts, and a list must match the number of
+            indices. If empty, `target_modules` selects the projections, and every input channel gets a dose of 0,
+            which leaves the model unchanged. `select_neurons` from `peft.tuners.activation_steering` then keeps the
+            most useful neurons and writes them into this field.
         dose_unit (`Literal["projection_output", "residual_stream"]`):
             Where calibration measures the median L2 norm that sets the unit of the doses. `"projection_output"` uses
             the targeted projection's own output. `"residual_stream"` uses the output of the numbered layer that
@@ -106,22 +105,26 @@ class ActivationSteeringConfig(PeftConfig):
         metadata={
             "help": (
                 "List of module names or regex expression of the projections whose input channels are steered, e.g. "
-                "['down_proj']. If not specified, the keys of `steering_pattern` are used. If both are given, only "
-                "the targeted projections with an entry in `steering_pattern` are steered, and every entry must match "
-                "a targeted projection. Saved configs can contain both, e.g. after `select_neurons`."
+                "['down_proj']. Must not be set together with `steering_pattern`, whose keys are then the targets."
             ),
         },
     )
     exclude_modules: Optional[Union[list[str], str]] = field(
         default=None,
-        metadata={"help": "List of module names or regex expression of the module names to exclude from steering."},
+        metadata={
+            "help": (
+                "List of module names or regex expression of the module names to exclude from steering. Must not be "
+                "set together with `steering_pattern`."
+            ),
+        },
     )
     layers_to_transform: Optional[Union[list[int], int]] = field(
         default=None,
         metadata={
             "help": (
                 "The layer indices to transform. If a list of ints is passed, the adapter is applied to the layer "
-                "indices in this list. If a single integer is passed, the adapter is applied to this layer index only."
+                "indices in this list. If a single integer is passed, the adapter is applied to this layer index "
+                "only. Must not be set together with `steering_pattern`."
             ),
         },
     )
@@ -140,10 +143,10 @@ class ActivationSteeringConfig(PeftConfig):
         metadata={
             "help": (
                 "Maps projection names (exact or suffix matches) to specifications containing `indices` and "
-                "`init_val`. The `indices` select the projection's input channels, and `init_val` initializes their "
-                "independent, signed doses; a number broadcasts, and a list must match the number of indices. "
-                "Targeted projections without an entry are not steered. If empty, every input channel of every "
-                "targeted projection gets a dose of 0, which leaves the model unchanged. `select_neurons` from "
+                "`init_val`. These projections are the targets. The `indices` select the projection's input "
+                "channels, and `init_val` initializes their independent, signed doses; a number broadcasts, and a "
+                "list must match the number of indices. If empty, `target_modules` selects the projections, and every "
+                "input channel gets a dose of 0, which leaves the model unchanged. `select_neurons` from "
                 "`peft.tuners.activation_steering` then keeps the most useful neurons and writes them into this field."
             ),
         },
@@ -203,9 +206,15 @@ class ActivationSteeringConfig(PeftConfig):
             ):
                 raise ValueError(f"`init_val` for '{name}' must contain finite numbers.")
 
-        if self.target_modules is None:
-            if not self.steering_pattern:
+        if self.steering_pattern:
+            # The steering pattern is the single source of truth for the targets.
+            filters = (self.target_modules, self.layers_to_transform, self.exclude_modules)
+            if any(value is not None for value in filters):
                 raise ValueError(
-                    "Specify `target_modules`, the projections whose input channels are steered, or `steering_pattern`."
+                    "`target_modules`, `layers_to_transform` and `exclude_modules` cannot be combined with "
+                    "`steering_pattern`, whose keys are the targets."
                 )
-            self.target_modules = list(self.steering_pattern)
+        elif self.target_modules is None:
+            raise ValueError(
+                "Specify `target_modules`, the projections whose input channels are steered, or `steering_pattern`."
+            )

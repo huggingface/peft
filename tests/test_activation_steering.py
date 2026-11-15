@@ -359,8 +359,8 @@ class TestNeuronSelection:
             "layers.0.down_proj": {"indices": [0, 1], "init_val": [0.5, 0.5]},
             "layers.1.down_proj": {"indices": [2], "init_val": [-0.5]},
         }
-        # The search space is unchanged; the pattern selects within it.
-        assert model.peft_config["default"].target_modules == ["down_proj"]
+        # The kept neurons are now the targets.
+        assert model.peft_config["default"].target_modules is None
         # 0.5 * 10 * ([3/5, 4/5] + [0, 1]) + -0.5 * 2 * [0, -1] = [3, 9] + [0, 1].
         torch.testing.assert_close(model(inputs), reference + torch.tensor([3.0, 10.0]))
 

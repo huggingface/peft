@@ -64,12 +64,16 @@ class ActivationSteeringModel(BaseTuner):
     tuner_layer_cls = ActivationSteeringLayer
 
     @staticmethod
+    def _prepare_adapter_config(peft_config, model_config):
+        # The targets are given by target_modules or by the keys of steering_pattern; there are no default targets.
+        return peft_config
+
+    @staticmethod
     def _check_target_module_exists(peft_config, key):
-        # With a steering pattern, only the targeted projections that have an entry are steered.
-        found = check_target_module_exists(peft_config, key)
-        if not found or not peft_config.steering_pattern:
-            return found
-        return any(_is_valid_match(key, name) for name in peft_config.steering_pattern)
+        # With a steering pattern, its keys are the targets.
+        if peft_config.steering_pattern:
+            return any(_is_valid_match(key, name) for name in peft_config.steering_pattern)
+        return check_target_module_exists(peft_config, key)
 
     @staticmethod
     def _get_spec(config, key):
@@ -85,13 +89,11 @@ class ActivationSteeringModel(BaseTuner):
             raise ValueError("Activation steering does not support encoder-decoder models.")
 
         # Validate the steering pattern before replacing any modules: unmatched entries would be silently ignored.
-        keys = [key for key, _ in model.named_modules() if self._check_target_module_exists(peft_config, key)]
+        keys = [key for key, _ in model.named_modules()]
         for name in peft_config.steering_pattern:
             found = [key for key in keys if _is_valid_match(key, name)]
             if len(found) != 1:
-                raise ValueError(
-                    f"Steering target '{name}' must match exactly one targeted module, found {len(found)}."
-                )
+                raise ValueError(f"Steering target '{name}' must match exactly one module, found {len(found)}.")
 
     def _post_injection_hook(self, model, config, adapter_name):
         if not hasattr(model, "_activation_steering_hook"):

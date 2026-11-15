@@ -8090,8 +8090,21 @@ class TestActivationSteeringInitialization:
         with pytest.raises(ValueError, match="dose_unit"):
             ActivationSteeringConfig(target_modules=["down_proj"], dose_unit="residual")
 
-    def test_target_modules_derived_from_steering_pattern(self):
-        assert self.get_config().target_modules == ["block.down_proj"]
+    def test_steering_pattern_is_the_only_target(self, model):
+        config = self.get_config()
+        assert config.target_modules is None
+        model = get_peft_model(model, config)
+        assert model.base_model.targeted_module_names == ["block.down_proj"]
+        # target_modules stays unset, so the saved config has the steering pattern as its only targets.
+        assert model.peft_config["default"].target_modules is None
+
+    @pytest.mark.parametrize(
+        "kwargs", [{"target_modules": ["down_proj"]}, {"layers_to_transform": [0]}, {"exclude_modules": ["up_proj"]}]
+    )
+    def test_target_filters_with_steering_pattern_raise(self, kwargs):
+        pattern = {"block.down_proj": {"indices": [0], "init_val": 1.0}}
+        with pytest.raises(ValueError, match="cannot be combined with `steering_pattern`"):
+            ActivationSteeringConfig(steering_pattern=pattern, **kwargs)
 
     @pytest.mark.parametrize(
         "target,indices",
@@ -8100,14 +8113,6 @@ class TestActivationSteeringInitialization:
     def test_unknown_target_or_neuron_raises(self, model, target, indices):
         config = ActivationSteeringConfig(steering_pattern={target: {"indices": indices, "init_val": 1.0}})
         with pytest.raises(ValueError):
-            get_peft_model(model, config)
-
-    def test_pattern_entry_outside_targets_raises(self, model):
-        # The steering pattern only selects among targeted modules; an entry they exclude must not be dropped silently.
-        config = ActivationSteeringConfig(
-            target_modules=["up_proj"], steering_pattern={"block.down_proj": {"indices": [0], "init_val": 1.0}}
-        )
-        with pytest.raises(ValueError, match="must match exactly one targeted module"):
             get_peft_model(model, config)
 
     def test_encoder_decoder_model_raises(self):

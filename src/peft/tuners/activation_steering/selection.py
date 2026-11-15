@@ -65,7 +65,8 @@ def select_neurons(
     desired behavior, which gives every dose the gradient of the loss. Across all layers, the `num_neurons` doses with
     the largest absolute gradients are kept, each initialized to `init_val` with the sign that lowers the loss. All
     other doses are removed, projections without kept doses are restored to their base layers, and the kept neurons are
-    written to the adapter's `steering_pattern`. The calibrated scales of the kept neurons are retained.
+    written to the adapter's `steering_pattern`, which replaces `target_modules`, `layers_to_transform` and
+    `exclude_modules`. The calibrated scales of the kept neurons are retained.
 
     The doses remain trainable, so they can be refined with a regular training loop, and `save_pretrained` saves only
     the kept doses and their scales. Call this function before creating an optimizer and before compiling the model,
@@ -158,4 +159,7 @@ def select_neurons(
             "init_val": doses,
         }
 
-    tuner.peft_config[adapter_name].steering_pattern = steering_pattern
+    # The kept neurons are now the targets, as in a hand-written steering pattern.
+    config = tuner.peft_config[adapter_name]
+    config.steering_pattern = steering_pattern
+    config.target_modules = config.layers_to_transform = config.exclude_modules = None
