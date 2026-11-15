@@ -432,6 +432,22 @@ class TestNeuronSelection:
         with pytest.raises(ValueError, match="non-zero gradient"):
             select_neurons(model, train_step, num_neurons=4, init_val=0.5)
 
+    def test_layers_without_the_adapter_are_ignored(self, inputs):
+        model = get_peft_model(
+            TwoProjectionModel(),
+            ActivationSteeringConfig(steering_pattern={"layers.1.down_proj": {"indices": [0], "init_val": 1.0}}),
+            adapter_name="other",
+        )
+        model.add_adapter("default", ActivationSteeringConfig(target_modules=["layers.0.down_proj"]))
+        model.set_adapter("default")
+        # layers.1.down_proj stays wrapped but has no doses left.
+        model.delete_adapter("other")
+        calibrate_activation_steering(model, {"hidden_states": inputs})
+        select_neurons(model, lambda: (-model(inputs)[..., 1].sum()).backward(), num_neurons=1)
+        assert model.peft_config["default"].steering_pattern == {
+            "layers.0.down_proj": {"indices": [1], "init_val": [0.1]}
+        }
+
     def test_non_finite_gradients_raise(self, model, train_step):
         def nan_step():
             train_step()

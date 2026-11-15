@@ -117,8 +117,11 @@ def select_neurons(
     if not math.isfinite(init_val) or init_val <= 0:
         raise ValueError("`init_val` must be a finite, positive number.")
 
+    # Deleting another adapter can leave layers without doses for this one.
     layers = {
-        name: module for name, module in tuner.model.named_modules() if isinstance(module, ActivationSteeringLayer)
+        name: module
+        for name, module in tuner.model.named_modules()
+        if isinstance(module, ActivationSteeringLayer) and adapter_name in module.activation_steering_doses
     }
     num_doses = sum(layer.activation_steering_doses[adapter_name].numel() for layer in layers.values())
     if not 0 < num_neurons <= num_doses:
