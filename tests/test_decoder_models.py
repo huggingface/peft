@@ -1579,6 +1579,27 @@ class TestDecoderModels(PeftCommonTester):
             with pytest.raises(TypeError, match=msg):
                 model.set_requires_grad(adapter_names="adpater0")
 
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_merge_adapter_prompt_learning_raises(self, config_cls, config_kwargs):
+        # Test that for prompt learning, calling merge_adapter or unmerge_adapter raises an error with an appropriate
+        # error message instead of an AttributeError from the underlying Transformers model.
+        model_id = PEFT_DECODER_MODELS_TO_TEST[0]  # it's enough to test this with one model
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        if not config.is_prompt_learning:
+            pytest.skip("This test is only for prompt learning methods.")
+
+        with hub_online_once(model_id + config_kwargs.get("tokenizer_name_or_path", "")):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            model = get_peft_model(model, config)
+            msg = "Merging is not supported for prompt learning methods like"
+            with pytest.raises(TypeError, match=msg):
+                model.merge_adapter()
+            with pytest.raises(TypeError, match=msg):
+                model.unmerge_adapter()
+
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_lora_conversion(self, model_id, config_cls, config_kwargs):
