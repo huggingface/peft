@@ -4816,7 +4816,7 @@ class TestPeftCustomModel(PeftCommonTester):
             ("svd", 0.99, 0.01),
             ("cat", 0.99, 0.01),
             ("linear", 0.6, 1.0),
-            ("ties", 0.4, 1.0),
+            ("ties", 0.35, 1.0),
             ("ties_svd", 0.8, 1.0),
             ("dare_ties", 0.1, None),
             ("dare_ties_svd", 0.55, None),

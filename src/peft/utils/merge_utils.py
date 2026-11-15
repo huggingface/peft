@@ -204,11 +204,11 @@ def ties(
     # sparsify
     task_tensors = [prune(tensor, density, method="magnitude") for tensor in task_tensors]
     task_tensors = torch.stack(task_tensors, dim=0)
-    # Elect Sign
-    majority_sign_mask = calculate_majority_sign_mask(task_tensors, method=majority_sign_method)
     # weighted task tensors
     weights = reshape_weight_task_tensors(task_tensors, weights)
     weighted_task_tensors = task_tensors * weights
+    # Elect Sign
+    majority_sign_mask = calculate_majority_sign_mask(weighted_task_tensors, method=majority_sign_method)
     # Disjoint Merge
     mixed_task_tensors = disjoint_merge(weighted_task_tensors, majority_sign_mask)
     return mixed_task_tensors
@@ -258,11 +258,11 @@ def dare_ties(
     # sparsify
     task_tensors = [prune(tensor, density, method="random", rescale=True) for tensor in task_tensors]
     task_tensors = torch.stack(task_tensors, dim=0)
-    # Elect Sign
-    majority_sign_mask = calculate_majority_sign_mask(task_tensors, method=majority_sign_method)
     # weighted task tensors
     weights = reshape_weight_task_tensors(task_tensors, weights)
     weighted_task_tensors = task_tensors * weights
+    # Elect Sign
+    majority_sign_mask = calculate_majority_sign_mask(weighted_task_tensors, method=majority_sign_method)
     # Disjoint Merge
     mixed_task_tensors = disjoint_merge(weighted_task_tensors, majority_sign_mask)
     return mixed_task_tensors
