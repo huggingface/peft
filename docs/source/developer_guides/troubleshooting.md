@@ -149,7 +149,7 @@ Any `target_modules` entry that does not correspond to a module in the model is 
 
 Some checkpoints contain special tokens that were never trained, for instance the tags of a chat template like `<tool_call>`. Their input embedding rows are all zero, and their output embedding (`lm_head`) rows are often identical to those of many other untrained tokens. Most PEFT methods keep both layers frozen, so the model cannot learn to generate such a token: tokens with identical output embedding rows always receive identical logits. The training loss still decreases, because the rest of the sequence is learned.
 
-[`get_peft_model`] can detect this situation during the first training batches: pass `attach_checks="warn"` (or `"raise"`) and it reports the affected token ids. The check is off by default and adds a small runtime overhead to the first training batches only. To fix it, make the rows of these tokens trainable with `trainable_token_indices`. Since the trainable rows start from the current values, initialize them first, e.g. with the mean embedding of a related text:
+[`get_peft_model`] can detect this situation during the first training batches: pass `runtime_checks="warn"` (or `"raise"`) and it reports the affected token ids. The check is off by default and adds a small runtime overhead to the first training batches only. To fix it, make the rows of these tokens trainable with `trainable_token_indices`. Since the trainable rows start from the current values, initialize them first, e.g. with the mean embedding of a related text:
 
 ```python
 tokens = ["<tool_call>", "</tool_call>"]

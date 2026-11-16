@@ -56,7 +56,7 @@ if TYPE_CHECKING:
         autocast_adapter_dtype: bool = ...,
         revision: Optional[str] = ...,
         low_cpu_mem_usage: bool = ...,
-        attach_checks: Literal[False, "warn", "raise"] = ...,
+        runtime_checks: Literal[False, "warn", "raise"] = ...,
     ) -> PeftMixedModel: ...
 
     @overload
@@ -68,7 +68,7 @@ if TYPE_CHECKING:
         autocast_adapter_dtype: bool = ...,
         revision: Optional[str] = ...,
         low_cpu_mem_usage: bool = ...,
-        attach_checks: Literal[False, "warn", "raise"] = ...,
+        runtime_checks: Literal[False, "warn", "raise"] = ...,
     ) -> _LoraPeftModel: ...
 
     @overload
@@ -80,7 +80,7 @@ if TYPE_CHECKING:
         autocast_adapter_dtype: bool = ...,
         revision: Optional[str] = ...,
         low_cpu_mem_usage: bool = ...,
-        attach_checks: Literal[False, "warn", "raise"] = ...,
+        runtime_checks: Literal[False, "warn", "raise"] = ...,
     ) -> PeftModel: ...
 
     @overload
@@ -92,7 +92,7 @@ if TYPE_CHECKING:
         autocast_adapter_dtype: bool = ...,
         revision: Optional[str] = ...,
         low_cpu_mem_usage: bool = ...,
-        attach_checks: Literal[False, "warn", "raise"] = ...,
+        runtime_checks: Literal[False, "warn", "raise"] = ...,
     ) -> _TunerPeftModel: ...
 
     @overload
@@ -104,7 +104,7 @@ if TYPE_CHECKING:
         autocast_adapter_dtype: bool = ...,
         revision: Optional[str] = ...,
         low_cpu_mem_usage: bool = ...,
-        attach_checks: Literal[False, "warn", "raise"] = ...,
+        runtime_checks: Literal[False, "warn", "raise"] = ...,
     ) -> PeftModel | PeftMixedModel: ...
 
 
@@ -116,7 +116,7 @@ def get_peft_model(
     autocast_adapter_dtype: bool = True,
     revision: Optional[str] = None,
     low_cpu_mem_usage: bool = False,
-    attach_checks: Literal[False, "warn", "raise"] = False,
+    runtime_checks: Literal[False, "warn", "raise"] = False,
 ) -> PeftModel | PeftMixedModel:
     """
     Returns a Peft model object from a model and a config, where the model will be modified in-place.
@@ -142,7 +142,7 @@ def get_peft_model(
             Create empty adapter weights on meta device. Useful to speed up the loading process. Leave this setting as
             False if you intend on training the model, unless the adapter weights will be replaced by different weights
             before training starts.
-        attach_checks (`False`, `"warn"` or `"raise"`, *optional*, defaults to `False`):
+        runtime_checks (`False`, `"warn"` or `"raise"`, *optional*, defaults to `False`):
             Whether to attach runtime checks that inspect the first training batches for problems that may not be
             visible in the training loss. With `"warn"`, a warning is given, with `"raise"`, an error is raised, and
             `False` attaches no checks. Currently, there is one check: it looks for tokens whose input embedding row is
@@ -155,8 +155,8 @@ def get_peft_model(
             own batches. With `"raise"`, the error then stops only some processes while the others wait for them, so
             prefer `"warn"` there.
     """
-    if attach_checks not in (False, "warn", "raise"):
-        raise ValueError(f"attach_checks must be one of False, 'warn' or 'raise', got {attach_checks!r}.")
+    if runtime_checks not in (False, "warn", "raise"):
+        raise ValueError(f"runtime_checks must be one of False, 'warn' or 'raise', got {runtime_checks!r}.")
 
     old_name = peft_config.base_model_name_or_path
     # Transformers from-config models use name_or_path == ""; that is not a Hub id.
@@ -224,6 +224,6 @@ def get_peft_model(
             low_cpu_mem_usage=low_cpu_mem_usage,
         )
 
-    if attach_checks:
-        attach_runtime_checks(model, mode=attach_checks)
+    if runtime_checks:
+        attach_runtime_checks(model, mode=runtime_checks)
     return peft_model

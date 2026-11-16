@@ -26,8 +26,6 @@ and removes itself afterwards. Currently there is one check:
   weight is sharded, e.g. with FSDP. It does no collective communication: each rank checks its own batches.
 """
 
-from __future__ import annotations
-
 import warnings
 from abc import ABC, abstractmethod
 from typing import Literal
@@ -79,19 +77,19 @@ class RuntimeCheck(ABC):
 
     @classmethod
     @abstractmethod
-    def create(cls, model: nn.Module, mode: Literal["warn", "raise"]) -> RuntimeCheck:
+    def create(cls, model: nn.Module, mode: Literal["warn", "raise"]) -> "RuntimeCheck":
         """A new, not yet registered check for `model`."""
 
     @abstractmethod
-    def __call__(self, module: nn.Module, args: tuple, output) -> None:
-        """The forward hook."""
+    def __call__(self, module: nn.Module, args: tuple, kwargs: dict, output) -> None:
+        """The forward hook, registered with `with_kwargs=True`."""
 
     def register(self, model: nn.Module) -> None:
         """Hook the check into the current target module of `model`, replacing an earlier registration."""
         self.remove()
         target = self.get_target_module(model)
         if target is not None:
-            self.handle = target.register_forward_hook(self)
+            self.handle = target.register_forward_hook(self, with_kwargs=True)
 
     def remove(self) -> None:
         if self.handle is not None:
@@ -121,7 +119,8 @@ def _get_ignored_token_ids(model: nn.Module, embedding: nn.Module) -> set[int]:
     # The tokenizer is not available here, so the model config is the best source. Transformers models usually store
     # these ids in their config (pad_token_id, and image_token_id etc. for multimodal models), but it is not
     # guaranteed. A missing id can only lead to a false positive, which is why the check is opt-in.
-    configs = [config for name in ("config", "text_config") if (config := getattr(model, name, None))]
+    config = getattr(model, "config", None)
+    configs = [c for c in (config, getattr(config, "text_config", None)) if c is not None]
     for config in configs:
         for attribute in IGNORED_TOKEN_ID_ATTRIBUTES:
             value = getattr(config, attribute, None)
@@ -148,23 +147,27 @@ class ZeroEmbeddingCheck(RuntimeCheck):
         return _get_input_embeddings(model)
 
     @classmethod
-    def create(cls, model: nn.Module, mode: Literal["warn", "raise"]) -> ZeroEmbeddingCheck:
+    def create(cls, model: nn.Module, mode: Literal["warn", "raise"]) -> "ZeroEmbeddingCheck":
         embedding = _get_input_embeddings(model)
         ignored = _get_ignored_token_ids(model, embedding) if embedding is not None else set()
         return cls(mode=mode, ignored_token_ids=ignored)
 
-    def __call__(self, module: nn.Module, args: tuple, output) -> None:
+    def __call__(self, module: nn.Module, args: tuple, kwargs: dict, output) -> None:
         if not (module.training and torch.is_grad_enabled()):
             return
-        # A forward hook gets the positional arguments of the forward call. The input embedding is normally called as
-        # `embedding(input_ids)`, but a model may pass `inputs_embeds` instead of ids, call it with keyword arguments
-        # only (then `args` is empty), or wrap it in a module whose output is not a plain tensor. The check only makes
-        # sense for integer ids with one embedding vector per id, so anything else is skipped. The conditions are
-        # ordered so that `args[0]` is only read if `args` is not empty, and `output.shape` only if `output` is a
-        # tensor; nothing here can raise.
-        if not args or not isinstance(output, torch.Tensor):
+        # Every training batch counts, including skipped ones, so that the check always expires.
+        self.num_checked_batches += 1
+        if self.num_checked_batches >= MAX_CHECKED_BATCHES:
+            self.remove()
+
+        # The input embedding is normally called as `embedding(input_ids)`, but it may also be called with keyword
+        # arguments only (e.g. `input=` for nn.Embedding), or be wrapped in a module whose output is not a plain
+        # tensor. The check only makes sense for integer ids with one embedding vector per id, so anything else is
+        # skipped. The conditions are ordered so that `output.shape` is only read if `output` is a tensor; nothing
+        # here can raise.
+        input_ids = args[0] if args else next(iter(kwargs.values()), None)
+        if not isinstance(output, torch.Tensor):
             return
-        input_ids = args[0]
         if not isinstance(input_ids, torch.Tensor) or input_ids.is_floating_point():
             return
         if output.shape[:-1] != input_ids.shape:
@@ -195,7 +198,6 @@ class ZeroEmbeddingCheck(RuntimeCheck):
             self.remove()
             return
 
-        self.num_checked_batches += 1
         with torch.no_grad():
             is_zero = output.abs().amax(dim=-1) < ZERO_TOLERANCE
             zero_ids = set(torch.unique(input_ids[is_zero]).tolist())
@@ -212,11 +214,9 @@ class ZeroEmbeddingCheck(RuntimeCheck):
                 "input embedding, the output embedding too. Ideally, initialize these rows first, e.g. with the mean "
                 "embedding of related tokens. Alternatively, or if you're not using LoRA, add the embedding layer to "
                 "`target_modules` or `modules_to_save` if the PEFT method supports it. If these tokens are not "
-                "supposed to be learned, e.g. because they are masked out of the loss, pass `attach_checks=False` to "
+                "supposed to be learned, e.g. because they are masked out of the loss, pass `runtime_checks=False` to "
                 "`get_peft_model` to disable this check."
             )
-        elif self.num_checked_batches >= MAX_CHECKED_BATCHES:
-            self.remove()
 
 
 # All checks attached by `attach_runtime_checks`. A new check only needs to subclass `RuntimeCheck` and be added here.

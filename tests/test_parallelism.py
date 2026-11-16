@@ -575,7 +575,7 @@ def _zero_embedding_check_fsdp2_worker(rank, init_file):
         with torch.no_grad():
             model.get_input_embeddings().weight[[5, 6]] = 0
         # "raise" would stop only one rank and leave the other waiting in a collective, so test "warn"
-        model = get_peft_model(model, LoraConfig(target_modules=["q_proj"]), attach_checks="warn")
+        model = get_peft_model(model, LoraConfig(target_modules=["q_proj"]), runtime_checks="warn")
         mesh = init_device_mesh("cpu", (2,))
         for layer in model.base_model.model.model.layers:
             fully_shard(layer, mesh=mesh)

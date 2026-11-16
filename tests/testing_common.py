@@ -1429,10 +1429,12 @@ class PeftCommonTester:
             model.get_input_embeddings().weight[zero_ids] = 0
 
         config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
-        model = get_peft_model(model, config, attach_checks="raise").to(self.torch_device)
+        model = get_peft_model(model, config, runtime_checks="raise").to(self.torch_device)
         model.train()
 
-        expected = set(zero_ids) - set(config_kwargs.get("trainable_token_indices", [])) - {padding_idx}
+        # LoRA uses trainable_token_indices, TrainableTokensConfig uses token_indices
+        token_indices = config_kwargs.get("trainable_token_indices") or config_kwargs.get("token_indices") or []
+        expected = set(zero_ids) - set(token_indices) - {padding_idx}
         if not expected:
             model(**inputs)
             return
@@ -1451,8 +1453,8 @@ class PeftCommonTester:
         # With the input embedding in modules_to_save, every row is trainable, so nothing may be reported.
         if "modules_to_save" not in {field.name for field in dataclasses.fields(config_cls)}:
             pytest.skip(f"{config_cls.__name__} does not support modules_to_save")
-        if "trainable_token_indices" in config_kwargs:
-            pytest.skip("trainable_token_indices and modules_to_save cannot target the same embedding")
+        if "trainable_token_indices" in config_kwargs or "token_indices" in config_kwargs:
+            pytest.skip("trainable tokens and modules_to_save cannot target the same embedding")
         inputs = self.prepare_inputs_for_testing()
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
@@ -1464,7 +1466,7 @@ class PeftCommonTester:
             embedding.weight[torch.unique(inputs["input_ids"])] = 0
 
         config = config_cls(base_model_name_or_path=model_id, **{**config_kwargs, "modules_to_save": [embedding_name]})
-        model = get_peft_model(model, config, attach_checks="warn").to(self.torch_device)
+        model = get_peft_model(model, config, runtime_checks="warn").to(self.torch_device)
         model.train()
         with warnings.catch_warnings(record=True) as record:
             warnings.simplefilter("always")
