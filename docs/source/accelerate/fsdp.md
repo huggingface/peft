@@ -74,8 +74,9 @@ adapter_path = "qwen-sft-lora-fsdp2"
 config = PeftConfig.from_pretrained(adapter_path)
 tokenizer = AutoTokenizer.from_pretrained(adapter_path)
 base_model = AutoModelForCausalLM.from_pretrained(config.base_model_name_or_path, dtype=torch.float32)
-# Only needed if training grew the embeddings. Match the padding used by the SFT example.
-base_model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
+# Match the SFT example: grow the embeddings if needed, but never shrink them.
+if len(tokenizer) > base_model.get_input_embeddings().num_embeddings:
+    base_model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
 model = PeftModel.from_pretrained(base_model, adapter_path)
 ```
 
