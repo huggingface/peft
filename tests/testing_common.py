@@ -112,6 +112,12 @@ CONV1D_UNSUPPORTED_CONFIGS = (
 )
 
 
+class _NeutralParametrization(torch.nn.Module):
+    # leaves the values unchanged but, like real parametrizations, returns a new tensor
+    def forward(self, tensor):
+        return tensor * 1.0
+
+
 def skip_non_prompt_learning(config_cls):
     if not issubclass(config_cls, PromptLearningConfig):
         pytest.skip("Skip tests that are not prompt learning")
@@ -1060,15 +1066,11 @@ class PeftCommonTester:
         self._assert_base_layer_unchanged(layer, orig_weight, orig_bias)
 
     def _test_merge_into_parametrized_base_layer_raises(self, model_id, config_cls, config_kwargs):
-        # With a parametrized weight, merging would write into a tensor that the parametrization recomputes on every
-        # access, so the base layer would silently stay unchanged. Merging must raise instead.
+        # When the tensor that the adapters are merged into is parametrized, merging would write into a tensor that the
+        # parametrization recomputes on every access, so the base layer would silently stay unchanged. Merging must
+        # raise instead.
         if issubclass(config_cls, LNTuningConfig):
             pytest.skip("LN tuning swaps the layer on merge, so there is no merged tensor to write.")
-
-        class NeutralParametrization(torch.nn.Module):
-            # leaves the values unchanged but, like real parametrizations, returns a new tensor
-            def forward(self, weight):
-                return weight * 1.0
 
         torch.manual_seed(0)
         with hub_online_once(model_id):
@@ -1082,13 +1084,43 @@ class PeftCommonTester:
 
         layer = layers[0]
         base_layer = layer.get_base_layer()
-        torch.nn.utils.parametrize.register_parametrization(base_layer, "weight", NeutralParametrization())
+        # BEFT merges into the bias, LoRA with target_parameters into the targeted parameter, the rest into the weight
+        if issubclass(config_cls, BeftConfig):
+            merge_into = "bias"
+        else:
+            merge_into = getattr(layer, "parameter_name", "weight")
+        torch.nn.utils.parametrize.register_parametrization(base_layer, merge_into, _NeutralParametrization())
         orig_weight = base_layer.weight.detach().clone()
         orig_bias = base_layer.bias.detach().clone() if getattr(base_layer, "bias", None) is not None else None
 
-        with pytest.raises(ValueError, match="parametriz"):
+        with pytest.raises(ValueError, match=f"Cannot merge adapters into `{merge_into}`"):
             model.merge_adapter()
         self._assert_base_layer_unchanged(layer, orig_weight, orig_bias)
+
+    def _test_merge_with_other_parametrized_tensor_works(self, model_id, config_cls, config_kwargs):
+        # A parametrized tensor that the adapters are not merged into does not affect merging, so it must not raise.
+        torch.manual_seed(0)
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(**config_kwargs)
+            model = get_peft_model(model.to(self.torch_device), config)
+
+        layers = self._get_mergeable_tuner_layers(model)
+        if not layers:
+            pytest.skip("No mergeable tuner layers in this model.")
+
+        layer = layers[0]
+        base_layer = layer.get_base_layer()
+        base_layer.register_parameter("other", torch.nn.Parameter(torch.zeros(1, device=self.torch_device)))
+        param_names = ["other"]
+        if issubclass(config_cls, (BeftConfig, LNTuningConfig)):
+            # BEFT only merges into the bias and LN tuning swaps the layer, so they don't merge into the weight either
+            param_names.append("weight")
+        for param_name in param_names:
+            torch.nn.utils.parametrize.register_parametrization(base_layer, param_name, _NeutralParametrization())
+
+        model.merge_adapter()  # must not raise
+        assert layer.merged
 
     def _test_safe_merge_non_finite_bias_leaves_base_layer_unchanged(self, model_id, config_cls, config_kwargs):
         # A non-finite merged bias must be caught before the merged weight is written. The bias is poisoned in the

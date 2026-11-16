@@ -2805,6 +2805,12 @@ class TestPeftCustomModel(PeftCommonTester):
         self._test_merge_into_parametrized_base_layer_raises(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_merge_with_other_parametrized_tensor_works(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_merge_with_other_parametrized_tensor_works(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_safe_merge_non_finite_bias_leaves_base_layer_unchanged(
         self, test_name, model_id, config_cls, config_kwargs
     ):

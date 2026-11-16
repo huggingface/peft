@@ -2596,12 +2596,16 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
     return peft_config
 
 
-def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list[str]] = None) -> list[str]:
+def check_adapters_to_merge(
+    module: BaseTunerLayer, adapter_names: Optional[list[str]] = None, merge_into: Optional[str] = "weight"
+) -> list[str]:
     """
     Helper function to check which adapters should be merged.
 
     Only return those adapters that are not already merged. Give a warning if some or all of the adapters are already
-    merged. Raise an error if the base layer is parametrized, since the merged weights would be silently discarded.
+    merged. Raise an error if `merge_into`, the name of the base layer tensor that the adapters are merged into, is
+    parametrized, since the merged weights would be silently discarded. Pass `merge_into=None` if merging does not
+    write into a tensor of the base layer.
 
     """
     if adapter_names is None:
@@ -2621,14 +2625,14 @@ def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list
         else:
             warnings.warn("All adapters are already merged, nothing to do.")
 
-    if adapter_names:
+    if adapter_names and (merge_into is not None):
         base_layer = module.get_base_layer()
-        if nn.utils.parametrize.is_parametrized(base_layer):
+        if nn.utils.parametrize.is_parametrized(base_layer, merge_into):
             raise ValueError(
-                f"Cannot merge adapters into a parametrized base layer of type {type(base_layer).__name__}: the "
-                "merged weights would be silently lost because a parametrized weight is recomputed on every access. "
+                f"Cannot merge adapters into `{merge_into}` of {type(base_layer).__name__} because it is parametrized: "
+                "the merged weights would be silently lost, as a parametrized tensor is recomputed on every access. "
                 "Remove the parametrization first, e.g. with "
-                "`torch.nn.utils.parametrize.remove_parametrizations(layer, 'weight', leave_parametrized=True)`."
+                f"`torch.nn.utils.parametrize.remove_parametrizations(layer, '{merge_into}', leave_parametrized=True)`."
             )
 
     return adapter_names

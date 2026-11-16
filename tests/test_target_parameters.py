@@ -575,6 +575,43 @@ class TestTargetParameters:
         output_unloaded = unloaded(x)
         assert torch.all(output_unloaded == output_parametrized)
 
+    def test_merge_raises_only_if_targeted_parameter_is_parametrized(self):
+        # Merging into a parametrized parameter would be silently lost, so it must raise, but a parametrization on
+        # another parameter of the same module must not prevent merging, see #4148
+        class MyLinear(nn.Linear):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.other_weight = nn.Parameter(torch.ones(self.weight.shape))
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = MyLinear(2, 2, bias=False)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        class MyParametrization(nn.Module):
+            def forward(self, x):
+                return x * 1.0
+
+        # the targeted parameter is parametrized: merging must raise
+        config = LoraConfig(target_parameters=["lin.other_weight"], init_lora_weights=False)
+        model = get_peft_model(MyModule(), config)
+        lin = model.base_model.model.lin.get_base_layer()
+        nn.utils.parametrize.register_parametrization(lin, "other_weight", MyParametrization())
+        with pytest.raises(ValueError, match="Cannot merge adapters into `other_weight`"):
+            model.merge_adapter()
+        assert torch.all(lin.other_weight == 1)
+
+        # another parameter is parametrized: merging must work
+        config = LoraConfig(target_parameters=["lin.other_weight"], init_lora_weights=False)
+        model = get_peft_model(MyModule(), config)
+        lin = model.base_model.model.lin.get_base_layer()
+        nn.utils.parametrize.register_parametrization(lin, "weight", MyParametrization())
+        model.merge_adapter()
+        assert not torch.all(lin.other_weight == 1)
+
     def test_target_parameter_result_caching_works(self, monkeypatch):
         # See 2912
         # There was an issue with the caching of _LoraParameterProxy not working correctly. This test checks that the

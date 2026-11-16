@@ -2798,7 +2798,7 @@ class ParamWrapper(nn.Module, LoraLayer):
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         # same as lora.Linear.merge but not hard-coding base_layer.weight and without special cases like variants removed
-        adapter_names = check_adapters_to_merge(self, adapter_names)
+        adapter_names = check_adapters_to_merge(self, adapter_names, merge_into=self.parameter_name)
         if not adapter_names:
             # no adapter to merge
             return

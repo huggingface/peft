@@ -70,7 +70,8 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
 
     def merge(self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False):
         # note that there is no actual merging, so whether safe_merge is True or False is irrelevant
-        adapter_names = check_adapters_to_merge(self, adapter_names)
+        # the layers are swapped instead of writing into a tensor, so parametrized tensors are not a problem either
+        adapter_names = check_adapters_to_merge(self, adapter_names, merge_into=None)
         if not adapter_names:
             # no adapter to merge
             return

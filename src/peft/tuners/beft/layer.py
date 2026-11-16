@@ -90,7 +90,7 @@ class Linear(nn.Module, BeftLayer):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
         """
-        adapter_names = check_adapters_to_merge(self, adapter_names)
+        adapter_names = check_adapters_to_merge(self, adapter_names, merge_into="bias")
         if not adapter_names:
             # no adapter to merge
             return
