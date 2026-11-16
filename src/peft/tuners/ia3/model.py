@@ -39,8 +39,8 @@ from .layer import Conv2d, Conv3d, IA3Layer, Linear
 def _is_peft_version_lt_0_22(config) -> bool:
     """
     Whether the adapter was saved with a PEFT version < 0.22.0, which matched list entries of feedforward_modules with
-    a plain endswith. The fix is released with PEFT 0.22.0. Dev versions from 0.21.3.dev0 on are treated as fixed, since
-    main stays on 0.21.x dev versions until then, while patch releases < 0.22.0 are made from release branches
+    a plain endswith. The fix is released with PEFT 0.22.0. Dev versions from 0.21.3.dev0 on are treated as fixed,
+    since main stays on 0.21.x dev versions until then, while patch releases < 0.22.0 are made from release branches
     without the fix. A config without peft_version is from before PEFT 0.18.0.
     """
     if getattr(config, "_peft_version_missing", False) or not config.peft_version:
