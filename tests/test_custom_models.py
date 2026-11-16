@@ -1286,7 +1286,7 @@ TEST_CASES = [
         {"target_modules": ["lin0"], "r": 4, "psoft_alpha": 4, "ab_svd_init": "pissa_init"},
     ),
     (
-        # fan_in_fan_out=True is not correct for nn.Linear and is set to False when the layer is created
+        # fan_in_fan_out=True is not correct for nn.Linear and should be set to False when the layer is created
         "Vanilla MLP PSOFT fan_in_fan_out",
         "MLP",
         PsoftConfig,
