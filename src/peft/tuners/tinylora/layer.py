@@ -176,8 +176,9 @@ class TinyLoraLayer(BaseTunerLayer):
 
         # Compute truncated SVD of base weights (following LoRA-XS convention)
         # actual_r may be less than r if matrix dimensions are smaller
-        # Use the layer's fan_in_fan_out, which is set once from the corrected config when the layer is created (e.g.
-        # True for Conv1D). The config of an adapter added later to the existing layer is not corrected.
+        #
+        # Use the layer's fan_in_fan_out instead of the config's as this value may be changed once 
+        # during creation in _create_new_module and therefore can diverge from the incoming config.
         self._init_svd(adapter_name, r, self.fan_in_fan_out)
 
         # Initialize random projection tensors P using the actual rank
