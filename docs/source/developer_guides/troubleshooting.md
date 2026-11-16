@@ -145,7 +145,11 @@ Any `target_modules` entry that does not correspond to a module in the model is 
 > [!TIP]
 > This issue affects all PEFT methods that use `target_modules` (LoRA, LoHa, IA³, etc.), not just LoRA. The diagnostic steps are the same regardless of the method. If you are unsure which module names a given architecture uses, check the model's documentation or inspect `model.named_modules()` before configuring the adapter.
 
-### Targeting only some layers with `layers_to_transform`
+## Choosing which layers to target
+
+By default, the adapter is applied to every module matched by `target_modules`, in all layers of the model. There are two ways to target only some layers: `layers_to_transform`, or a regex for `target_modules`.
+
+### Using `layers_to_transform`
 
 To apply the adapter only to some layers of the model, pass their indices as `layers_to_transform`. This requires `target_modules` to be a list of module names. PEFT reads the layer index of each module matched by `target_modules` from its name, e.g. `1` for `model.layers.1.self_attn.q_proj`, and only targets the module if that index is listed in `layers_to_transform`:
 
@@ -169,7 +173,17 @@ When another numbered module comes before the layers, set `layers_pattern` to th
 config = LoraConfig(target_modules=["q_proj", "v_proj"], layers_to_transform=[1], layers_pattern="blocks")
 ```
 
-Always check `model.targeted_module_names` to verify that the intended modules are targeted.
+### Using a regex for `target_modules`
+
+When `target_modules` is a string, it is used as a regex that must match the full module name. This lets you select layers by index directly in the pattern, for instance to target the attention projections of layers 1 and 3 only:
+
+```python
+config = LoraConfig(target_modules=r".*layers\.(1|3)\.self_attn\.(q|v)_proj")
+```
+
+Because the regex is matched against the full name, `layers\.(1|3)\.` matches `model.layers.1.self_attn.q_proj` but not `model.layers.11.self_attn.q_proj`. A regex can express selections that `layers_to_transform` cannot, such as different modules in different layers, but it depends on the exact module names of the architecture. `layers_to_transform` and `layers_pattern` can only be used when `target_modules` is a list.
+
+Whichever option you use, check `model.targeted_module_names` to verify that the intended modules are targeted.
 
 ## Bad results from a loaded PEFT model
 
