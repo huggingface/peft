@@ -275,6 +275,9 @@ class Linear(LoHaLayer):
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
         return True
 
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        return self.get_delta_weight(adapter_name)
+
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "loha." + rep
@@ -306,14 +309,7 @@ class Conv2d(LoHaLayer):
         input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()
-        return F.conv2d(
-            input,
-            delta_weight,
-            stride=base_layer.stride,
-            padding=base_layer.padding,
-            dilation=base_layer.dilation,
-            groups=base_layer.groups,
-        )
+        return base_layer._conv_forward(input, delta_weight, bias=None)
 
     def __repr__(self) -> str:
         rep = super().__repr__()
@@ -346,14 +342,7 @@ class Conv1d(LoHaLayer):
         input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()
-        return F.conv1d(
-            input,
-            delta_weight,
-            stride=base_layer.stride,
-            padding=base_layer.padding,
-            dilation=base_layer.dilation,
-            groups=base_layer.groups,
-        )
+        return base_layer._conv_forward(input, delta_weight, bias=None)
 
     def __repr__(self) -> str:
         rep = super().__repr__()

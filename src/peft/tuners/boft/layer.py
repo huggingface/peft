@@ -24,7 +24,6 @@ from contextlib import contextmanager
 from typing import Any, Optional
 
 import torch
-import torch.nn.functional as F
 from torch import nn
 from torch.autograd import Function
 
@@ -591,6 +590,27 @@ class Linear(nn.Module, BOFTLayer):
 
         return butterfly_oft_mat, boft_s
 
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        """Return the additive delta W' - W for BOFT.
+
+        BOFT is a multiplicative method: W' = (W @ R^T) * s, where R is the orthogonal rotation matrix and s is the
+        scaling vector. The additive delta is thus (W @ R^T) * s - W.
+        """
+        butterfly_oft_mat, boft_s = self.get_delta_weight(adapter_name)
+        base_weight = self.get_base_weight()
+        # compute in float32 for numerical stability
+        weight = base_weight.float()
+        # W @ R^T (same as (R @ W^T)^T, matching the merge logic)
+        effective_weight = torch.mm(weight, butterfly_oft_mat.float().t())
+        # apply scaling: boft_s is (out_features, 1), broadcasts over in_features
+        effective_weight = effective_weight * boft_s.float()
+        delta = effective_weight - weight
+        # return in the dtype of the adapter weights
+        return delta.to(self.boft_s[adapter_name].dtype)
+
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        return True
+
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype
 
@@ -717,13 +737,13 @@ class Conv2d(nn.Module, BOFTLayer):
         # layer information from the base layer
         base_layer = self.get_base_layer()
         if base_layer.groups > 1:
-            # The rotation below is built over the full in_channels * kernel_size**2, but a grouped conv's
+            # The rotation below is built over the full in_channels * prod(kernel_size), but a grouped conv's
             # weight only holds in_channels // groups there, so forward and merge both crash on shape mismatch.
             raise NotImplementedError(
                 f"BOFT does not support {type(base_layer).__name__} layers with groups > 1 "
                 f"(got groups={base_layer.groups})."
             )
-        conv_filter_dim = self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
+        conv_filter_dim = self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[1]
 
         # Initialize the BOFT parameters.
         if boft_block_size == 0 and boft_block_num != 0:
@@ -829,29 +849,34 @@ class Conv2d(nn.Module, BOFTLayer):
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
 
                     orig_weight = orig_weight.view(
-                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
+                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[1]
                     )
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = torch.mm(butterfly_oft_mat, orig_weight.to(butterfly_oft_mat.dtype))
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = orig_weight * boft_s
                     orig_weight = orig_weight.view(
-                        self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
+                        self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[1]
                     )
+
+                    if not torch.isfinite(orig_weight).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
 
                     self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
                 else:
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
 
                     orig_weight = orig_weight.view(
-                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
+                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[1]
                     )
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = torch.mm(butterfly_oft_mat, orig_weight.to(butterfly_oft_mat.dtype))
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = orig_weight * boft_s
                     orig_weight = orig_weight.view(
-                        self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
+                        self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[1]
                     )
 
                     self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
@@ -875,7 +900,7 @@ class Conv2d(nn.Module, BOFTLayer):
                 orig_dtype = orig_weight.dtype
                 orig_weight = orig_weight.view(
                     self.out_features,
-                    self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0],
+                    self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[1],
                 )
                 orig_weight = torch.transpose(orig_weight, 0, 1)
                 orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight.to(butterfly_oft_mat.dtype))
@@ -885,7 +910,7 @@ class Conv2d(nn.Module, BOFTLayer):
                     self.out_features,
                     self.in_features,
                     base_layer.kernel_size[0],
-                    base_layer.kernel_size[0],
+                    base_layer.kernel_size[1],
                 )
 
                 self.set_base_weight(orig_weight.to(orig_dtype))
@@ -934,7 +959,7 @@ class Conv2d(nn.Module, BOFTLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             boft_rotation = torch.eye(
-                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
+                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[1],
                 device=x.device,
                 dtype=x.dtype,
             )
@@ -976,7 +1001,7 @@ class Conv2d(nn.Module, BOFTLayer):
 
             orig_weight = orig_weight.view(
                 self.out_features,
-                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
+                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[1],
             )
             orig_weight = torch.transpose(orig_weight, 0, 1)
             rotated_weight = torch.mm(boft_rotation, orig_weight)
@@ -985,17 +1010,11 @@ class Conv2d(nn.Module, BOFTLayer):
             scaled_rotated_weight = rotated_weight * boft_scale
 
             scaled_rotated_weight = scaled_rotated_weight.view(
-                self.out_features, self.in_features, self.base_layer.kernel_size[0], self.base_layer.kernel_size[0]
+                self.out_features, self.in_features, self.base_layer.kernel_size[0], self.base_layer.kernel_size[1]
             )
             x = self._cast_input_dtype(x, scaled_rotated_weight.dtype)
             bias = self._cast_input_dtype(self.base_layer.bias, scaled_rotated_weight.dtype)
-            result = F.conv2d(
-                input=x,
-                weight=scaled_rotated_weight,
-                bias=bias,
-                padding=self.base_layer.padding[0],
-                stride=self.base_layer.stride[0],
-            )
+            result = self.base_layer._conv_forward(x, scaled_rotated_weight, bias=bias)
 
         result = result.to(previous_dtype)
         return result

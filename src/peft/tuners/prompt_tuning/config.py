@@ -20,7 +20,7 @@ from peft.config import PromptLearningConfig
 from peft.utils import PeftType
 
 
-class PromptTuningInit(str, enum.Enum):
+class PromptTuningInit(str, enum.Enum):  # noqa: UP042
     TEXT = "TEXT"
     SAMPLE_VOCAB = "SAMPLE_VOCAB"
     RANDOM = "RANDOM"

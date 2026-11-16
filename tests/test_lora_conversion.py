@@ -19,6 +19,7 @@ import re
 import pytest
 import torch
 from torch import nn
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import apply_activation_checkpointing
 from transformers import AutoModelForCausalLM
 
 from peft import (
@@ -28,6 +29,7 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     MissConfig,
+    PacaConfig,
     PeftModel,
     PrefixTuningConfig,
     convert_to_lora,
@@ -494,7 +496,8 @@ class TestLoraConversion:
         assert mse_converted == 0.0
 
     @pytest.mark.parametrize("auxiliary_type", ["modules_to_save", "trainable_tokens"])
-    def test_convert_model_with_auxiliary_training_wrappers(self, auxiliary_type):
+    @pytest.mark.parametrize("checkpoint_wrapped", [False, True])
+    def test_convert_model_with_auxiliary_training_wrappers(self, auxiliary_type, checkpoint_wrapped):
         class ModelWithAuxiliaryModules(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -538,10 +541,18 @@ class TestLoraConversion:
                 source_tokens.trainable_tokens_delta["default"].add_(0.5)
             expected_keys = {"base_model.model.embedding.token_adapter.trainable_tokens_delta"}
 
+        if checkpoint_wrapped:
+            # the wrapper adds a level to the module names, which must not end up in the converted adapter, see #3876
+            apply_activation_checkpointing(
+                source_model, check_fn=lambda module: isinstance(module, ModelWithAuxiliaryModules)
+            )
+
         lora_config, state_dict = convert_to_lora(source_model, rank=4)
 
         # The converted checkpoint must contain the state selected by either wrapper type.
         assert expected_keys <= state_dict.keys()
+        assert lora_config.target_modules == {"linear"}
+        assert not any("_checkpoint_wrapped_module" in key for key in state_dict)
         if auxiliary_type == "trainable_tokens":
             assert lora_config.trainable_token_indices == peft_config.trainable_token_indices
 
@@ -781,3 +792,34 @@ class TestKasaLoraConversion:
         # Vanilla LoRA is unaffected by the variant-aware check.
         vanilla = get_peft_model(self.MLP(), LoraConfig(target_modules=["lin0"], r=4))
         assert vanilla.supports_lora_conversion() is True
+
+
+class TestPacaLoraConversion:
+    """Test PaCA to LoRA conversion."""
+
+    model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+    torch_device = infer_device()
+
+    def get_base_model(self):
+        with hub_online_once(self.model_id):
+            return AutoModelForCausalLM.from_pretrained(self.model_id).to(self.torch_device)
+
+    def test_paca_exact_conversion(self):
+        # The PaCA update is non-zero in r columns only, so a LoRA adapter of rank r represents it exactly.
+        torch.manual_seed(0)
+        config = PacaConfig(r=4, init_weights=False, target_modules=["q_proj", "v_proj"])
+        paca_model = get_peft_model(self.get_base_model(), config).eval()
+        assert paca_model.supports_lora_conversion()
+        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+        with torch.inference_mode():
+            output_paca = paca_model(inputs, output_hidden_states=True)
+
+        lora_config, state_dict = convert_to_lora(paca_model, rank=4)
+        lora_model = get_peft_model(self.get_base_model(), lora_config).eval()
+        load_result = set_peft_model_state_dict(lora_model, state_dict)
+        assert not load_result.unexpected_keys
+        with torch.inference_mode():
+            output_lora = lora_model(inputs, output_hidden_states=True)
+
+        mse = nn.functional.mse_loss(output_lora.hidden_states[-1], output_paca.hidden_states[-1]).item()
+        assert mse < 1e-5, f"PaCA conversion should be exact, got mse={mse}"

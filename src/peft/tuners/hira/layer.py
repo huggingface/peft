@@ -29,6 +29,10 @@ from .config import HiraConfig
 
 
 class HiraLayer(BaseTunerLayer):
+    # LoRA conversion is not supported: the converter factorizes the additive residual W' - W, but HiRA's update is
+    # multiplicative, W' = W * (1 + Delta_hira), so that residual would be W * Delta_hira and thus depend on the
+    # current base weight. get_delta_weight() returns Delta_hira, which is what merge/unmerge needs, but it is not
+    # the quantity the converter is looking for.
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names: tuple[str, ...] = ("hira_A", "hira_B", "hira_embedding_A", "hira_embedding_B")
     # All names of other parameters that may contain adapter-related parameters
@@ -271,15 +275,6 @@ class Linear(nn.Module, HiraLayer):
             result = result.to(torch_result_dtype)
 
         return result
-
-    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
-        # The generic LoRA conversion path only works for additive adapters, i.e. adapters that can be written as
-        # W' = W + Delta and expose that additive residual via get_delta_weight(). HiRA is different: its effective
-        # update is multiplicative, W' = W * (1 + Delta_hira), so the actual additive residual would be
-        # W * Delta_hira and depends on the current base weight. Returning Delta_hira from get_delta_weight() is
-        # sufficient for HiRA merge/unmerge, but it is not the quantity that the generic LoRA converter factorizes.
-        # Mark conversion as unsupported to avoid producing a LoRA adapter that does not preserve HiRA behavior.
-        return False
 
     def __repr__(self) -> str:
         rep = super().__repr__()
@@ -587,15 +582,6 @@ class _ConvNd(nn.Module, HiraLayer):
             result = self.base_layer(x, *args, **kwargs)
             torch_result_dtype = result.dtype
             base = self.get_base_layer()
-            # Determine which convolution function to use
-            if isinstance(base, nn.Conv1d):
-                conv_fn = F.conv1d
-            elif isinstance(base, nn.Conv2d):
-                conv_fn = F.conv2d
-            elif isinstance(base, nn.Conv3d):
-                conv_fn = F.conv3d
-            else:
-                raise TypeError(f"Unsupported conv layer {type(base)} for HiRA.")
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.hira_A.keys():
                     continue
@@ -609,15 +595,7 @@ class _ConvNd(nn.Module, HiraLayer):
                 # element-wise modulate base weight: W0 ⊙ (B@A)
                 base_weight = base.weight
                 eff_weight = base_weight * bia
-                hira_out = conv_fn(
-                    x_drop,
-                    eff_weight,
-                    bias=None,
-                    stride=base.stride,
-                    padding=base.padding,
-                    dilation=getattr(base, "dilation", 1),
-                    groups=base.groups,
-                )
+                hira_out = base._conv_forward(x_drop, eff_weight, bias=None)
                 result = result + hira_out
 
             result = result.to(torch_result_dtype)

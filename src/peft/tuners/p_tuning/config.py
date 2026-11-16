@@ -20,7 +20,7 @@ from peft.config import PromptLearningConfig
 from peft.utils import PeftType
 
 
-class PromptEncoderReparameterizationType(str, enum.Enum):
+class PromptEncoderReparameterizationType(str, enum.Enum):  # noqa: UP042
     MLP = "MLP"
     LSTM = "LSTM"
 

@@ -15,7 +15,6 @@ from typing import Any, NamedTuple, Protocol, TypeAlias, Union, cast, overload
 
 import numpy as np
 import torch
-from typing_extensions import Unpack
 
 from .wavelet import Wavelet as minimal_wavelet
 
@@ -26,9 +25,9 @@ class WaveletDetailTuple2d(NamedTuple):
     diagonal: torch.Tensor
 
 
-WaveletCoeff2d: TypeAlias = tuple[torch.Tensor, Unpack[tuple[WaveletDetailTuple2d, ...]]]
+WaveletCoeff2d: TypeAlias = tuple[torch.Tensor, *tuple[WaveletDetailTuple2d, ...]]
 WaveletDetailDict: TypeAlias = dict[str, torch.Tensor]
-WaveletCoeffNd: TypeAlias = tuple[torch.Tensor, Unpack[tuple[WaveletDetailDict, ...]]]
+WaveletCoeffNd: TypeAlias = tuple[torch.Tensor, *tuple[WaveletDetailDict, ...]]
 
 
 class Wavelet(Protocol):

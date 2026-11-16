@@ -30,6 +30,7 @@ from peft import (
     prompt_embeddings_from_past_key_values,
 )
 from peft.tuners import PrefixTuningConfig
+from peft.utils import activation_checkpointing_enable
 
 from .testing_utils import hub_online_once
 
@@ -252,7 +253,7 @@ def test_cartridge_inference_mode_disables_grads_and_forward_works(num_frozen_to
 
 def test_cartridge_gradient_checkpointing_raises(base_model):
     base = base_model
-    base.gradient_checkpointing_enable()
+    activation_checkpointing_enable(base)
     peft_config = CartridgeConfig(num_virtual_tokens=4, num_frozen_tokens=0, task_type="CAUSAL_LM")
 
     with pytest.raises(ValueError, match="does not work with gradient checkpointing"):

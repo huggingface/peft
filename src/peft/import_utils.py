@@ -14,6 +14,7 @@
 import importlib
 import importlib.metadata as importlib_metadata
 import platform
+import warnings
 from functools import lru_cache
 
 import packaging.version
@@ -159,10 +160,14 @@ def is_torchao_available() -> bool:
         return False
 
     if torchao_version < TORCHAO_MINIMUM_VERSION:
-        raise ImportError(
+        # Warn instead of raising, since an old torchao is often installed without being used (e.g. on Google Colab).
+        # Raising would break PEFT for all models, not just torchao-quantized ones.
+        warnings.warn(
             f"Found an incompatible version of torchao. Found version {torchao_version}, "
-            f"but only versions above {TORCHAO_MINIMUM_VERSION} are supported"
+            f"but only versions above {TORCHAO_MINIMUM_VERSION} are supported. torchao support in PEFT is disabled; "
+            "if you want to use a torchao-quantized model with PEFT, please upgrade torchao."
         )
+        return False
     return True
 
 

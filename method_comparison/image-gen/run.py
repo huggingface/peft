@@ -66,6 +66,7 @@ from utils import (
 from data import get_train_valid_test_datasets
 from peft import PeftConfig, PeftModel
 from peft.utils import CONFIG_NAME, infer_device
+from peft.utils.healthcheck import format_healthcheck
 
 
 os.environ["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
@@ -327,8 +328,18 @@ def train(
     )
 
     # print this after getting the optimizer, in case it modifies requires_gard
-    if hasattr(transformer, "print_healthcheck"):
-        transformer.print_healthcheck(sink=print_verbose)
+    if hasattr(transformer, "healthcheck"):
+        healthcheck = transformer.healthcheck()
+        print_verbose(format_healthcheck(healthcheck))
+        num_trainable_params = healthcheck["summary"]["trainable_params"]
+        num_params = healthcheck["summary"]["total_params"]
+    else:
+        num_params = sum(param.numel() for param in transformer.parameters())
+        num_trainable_params = sum(param.numel() for param in transformer.parameters() if param.requires_grad)
+        print_verbose(
+            f"trainable params: {num_trainable_params:,d} || all params: {num_params:,d} || "
+            f"trainable: {100 * num_trainable_params / num_params:.4f}%"
+        )
 
     status = TrainStatus.FAILED
     tic_train = time.perf_counter()

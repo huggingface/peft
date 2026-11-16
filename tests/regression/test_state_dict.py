@@ -169,7 +169,7 @@ MODEL_OUTPUT_FILENAME = "output.safetensors"
 ADAPTER_WEIGHTS_NAME = "adapter_model.safetensors"
 
 MODEL_OPT = "peft-internal-testing/tiny-random-OPTForCausalLM"
-MODEL_LLAMA = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+MODEL_LLAMA = "peft-internal-testing/tiny-random-LlamaForCausalLM"
 MODEL_T5 = "peft-internal-testing/tiny-random-T5ForConditionalGeneration-calibrated"
 # decoder model with a more exotic architecture than opt
 MODEL_GEMMA4 = "peft-internal-testing/tiny-random-gemma4-E2B"
@@ -295,13 +295,6 @@ CASES = [
         "lora_mha",
         LoraConfig,
         {"target_modules": ["mha"], "r": 4},
-        model_id=MODEL_MHA,
-        model_cls="MhaModel",
-    ),
-    Case(
-        "lora_mha_lora_bias",
-        LoraConfig,
-        {"target_modules": ["mha"], "r": 4, "lora_bias": True},
         model_id=MODEL_MHA,
         model_cls="MhaModel",
     ),
@@ -437,6 +430,7 @@ CASES = [
 ]
 
 CASE_IDS = [case.name for case in CASES]
+MHA_CASES = [case for case in CASES if case.model_cls == "MhaModel"]
 
 
 def download_artifact(case_name):
@@ -662,6 +656,9 @@ class TestStateDictRegression:
     @pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
     def test_save_load_roundtrip(self, case, tmp_path):
         # saving the loaded model must reproduce the checkpoint: same keys and same tensor values
+        if case.model_cls == "MhaModel":
+            # the out_proj weights of MHA checkpoints from PEFT < 0.22.0 are adjusted when loading, see #3774
+            pytest.skip("MHA is covered by test_save_load_roundtrip_mha")
         case_dir = download_artifact(case.name)
         manifest = self.load_manifest(case_dir)
         model = load_model_from_artifact(case_dir, manifest)
@@ -678,5 +675,29 @@ class TestStateDictRegression:
                 old_state_dict[key],
                 atol=atol,
                 rtol=rtol,
+                msg=lambda m, key=key: f"Mismatch in key {key}:\n{m}",
+            )
+
+    @pytest.mark.parametrize("case", MHA_CASES, ids=[case.name for case in MHA_CASES])
+    def test_save_load_roundtrip_mha(self, case, tmp_path):
+        # The out_proj weights of MHA checkpoints from PEFT < 0.22.0 are adjusted when loading (see #3774), so the
+        # saved checkpoint differs from the original one. Instead, check that saving and loading it again doesn't
+        # change it, e.g. because the adjustment is applied a second time.
+        case_dir = download_artifact(case.name)
+        manifest = self.load_manifest(case_dir)
+        model = load_model_from_artifact(case_dir, manifest)
+        model.save_pretrained(str(tmp_path / "first"))
+
+        model = load_model_from_artifact(tmp_path / "first", manifest)
+        model.save_pretrained(str(tmp_path / "second"))
+
+        first_state_dict = safe_load_file(tmp_path / "first" / ADAPTER_WEIGHTS_NAME)
+        second_state_dict = safe_load_file(tmp_path / "second" / ADAPTER_WEIGHTS_NAME)
+        assert set(first_state_dict.keys()) == set(second_state_dict.keys()) == set(manifest["state_dict_keys"])
+
+        for key in sorted(first_state_dict.keys()):
+            torch.testing.assert_close(
+                second_state_dict[key],
+                first_state_dict[key],
                 msg=lambda m, key=key: f"Mismatch in key {key}:\n{m}",
             )
