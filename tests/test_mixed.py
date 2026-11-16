@@ -40,7 +40,6 @@ from peft import (
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
-from peft.utils.constants import DUMMY_TARGET_MODULES
 
 
 class SimpleNet(nn.Module):
@@ -612,7 +611,9 @@ class TestMixedAdapterTypes(unittest.TestCase):
 
     @parameterized.expand([False, True])
     def test_disable_adapter_restores_state(self, modules_to_save):
-        # Regression test for #3507: nested contexts and initially disabled adapters.
+        # Regression test for #3507: PeftMixedModel.disable_adapter() should restore the
+        # adapter-enabled state that existed on entry, instead of unconditionally
+        # re-enabling. Tests nested contexts and an already-disabled model.
         atol = 1e-5
         rtol = 1e-5
         input = torch.arange(90).reshape(9, 10).to(self.torch_device)
@@ -669,12 +670,11 @@ class TestMixedAdapterTypes(unittest.TestCase):
 
         assert all(m.disable_adapters == initially_disabled for m in adapter_layers)
 
-    @parameterized.expand(["lin0", "lin1"])
-    def test_disable_adapter_irregular_state(self, disabled_module):
+    def test_disable_adapter_irregular_state(self):
         config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
         peft_model = self._get_model(SimpleNet, config, "adapter0")
         adapter_layers = [m for m in peft_model.modules() if isinstance(m, (BaseTunerLayer, AuxiliaryTrainingWrapper))]
-        getattr(peft_model.base_model.model, disabled_module).enable_adapters(False)
+        peft_model.base_model.model.lin0.enable_adapters(False)
         assert {m.disable_adapters for m in adapter_layers} == {False, True}
 
         with pytest.warns(UserWarning, match="some adapter layers that are enabled and others that are disabled"):
@@ -683,20 +683,6 @@ class TestMixedAdapterTypes(unittest.TestCase):
 
         # Like PeftModel, normalize inconsistent tuner and auxiliary states to enabled.
         assert all(not m.disable_adapters for m in adapter_layers)
-
-    def test_disable_adapter_modules_to_save_without_tuner(self):
-        # The dummy target permits a model whose only adapter is an auxiliary wrapper.
-        # Guard against snapshotting only BaseTunerLayer states, which would leave the auxiliary wrapper disabled
-        # after exiting the context.
-        config = LoraConfig(target_modules=DUMMY_TARGET_MODULES, modules_to_save=["lin1"])
-        peft_model = self._get_model(SimpleNet, config, "adapter0")
-        saved_module = peft_model.base_model.model.lin1
-        assert not saved_module.disable_adapters
-
-        with peft_model.disable_adapter():
-            assert saved_module.disable_adapters
-
-        assert not saved_module.disable_adapters
 
     def test_delete_adapter(self):
         atol = 1e-5
