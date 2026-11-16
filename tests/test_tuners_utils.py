@@ -24,6 +24,7 @@ import torch
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
 from torch import nn
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import apply_activation_checkpointing
 from transformers import (
     AutoModel,
     AutoModelForCausalLM,
@@ -2847,6 +2848,23 @@ class TestTunerStateDictKeyPrefixes:
         assert "base_model.vera_B" in prefixes
         prefixes = _get_tuner_state_dict_key_prefixes(model, adapter_name="default")
         assert "base_model.vera_A.default" in prefixes
+
+    def test_prefixes_torch_wrapper_names_removed(self):
+        # The state dict keys don't contain the names of torch's wrappers, see #3876. The wrapper name is the last part
+        # of the module name if the wrapper is directly around the tuner layer, whereas a module whose name merely
+        # contains the wrapper name must be left alone.
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.my_checkpoint_wrapped_module = nn.ModuleList([nn.Linear(10, 10)])
+
+        model = get_peft_model(MyModel(), LoraConfig(target_modules=["0"]))
+        prefixes = _get_tuner_state_dict_key_prefixes(model)
+        assert "base_model.model.my_checkpoint_wrapped_module.0.lora_A" in prefixes
+
+        apply_activation_checkpointing(model, check_fn=lambda module: isinstance(module, BaseTunerLayer))
+        assert any(name.endswith("0._checkpoint_wrapped_module") for name, _ in model.named_modules())  # sanity check
+        assert _get_tuner_state_dict_key_prefixes(model) == prefixes
 
     def test_prefixes_auxiliary_modules_not_included(self):
         # auxiliary modules like ModulesToSaveWrapper are handled separately and thus not included

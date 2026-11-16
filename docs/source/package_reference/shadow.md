@@ -105,6 +105,15 @@ shadow = model.base_model.unload_shadow(copy=True)
 shadow.save_pretrained("standalone-shadow")
 ```
 
+## Benchmark overview
+
+<iframe
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=SHADOW"
+	frameborder="0"
+	width="850"
+	height="1000"
+></iframe>
+
 # API
 
 ## ShadowConfig

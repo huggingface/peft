@@ -41,6 +41,7 @@ def _prepare_model_for_gradient_checkpointing(model: nn.Module) -> None:
     if not is_activation_checkpointing(model, default=True):
         return model
 
+    # TODO: Skip this workaround for use_reentrant=False if Transformers exposes a public API to check it.
     if not (
         getattr(model, "is_loaded_in_8bit", False)
         or getattr(model, "is_loaded_in_4bit", False)

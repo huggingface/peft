@@ -43,6 +43,7 @@ from peft.utils.constants import INCLUDE_LINEAR_LAYERS_SHORTHAND
 # https://github.com/huggingface/transformers/pull/45340#issuecomment-4222734042
 _MODEL_TO_CONVERSION_PATTERN = _MODEL_TO_CONVERSION_PATTERN.copy()
 _MODEL_TO_CONVERSION_PATTERN["mixtral"] = "mixtral"
+_MODEL_TO_CONVERSION_PATTERN["qwen2_moe"] = "qwen2_moe"
 
 
 def _block_diag_3d(tensors: list[torch.Tensor]) -> torch.Tensor:
