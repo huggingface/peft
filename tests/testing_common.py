@@ -916,6 +916,111 @@ class PeftCommonTester:
                 assert not torch.allclose(logits_merged_all, logits_adapter_2, atol=atol, rtol=rtol)
                 assert not torch.allclose(logits_merged_all, logits_adapter_1, atol=atol, rtol=rtol)
 
+    @torch.inference_mode()
+    def _test_active_and_merged_adapters(self, model, inputs):
+        # This function checks multiple interactions between active and merged adapters. Note that we changed the
+        # handling of this in PEFT v1.0.
+        adapter1, adapter2 = model.peft_config
+        layers = [layer for layer in model.modules() if isinstance(layer, BaseTunerLayer)]
+
+        model.set_adapter(adapter1)
+        output1 = model(**inputs)
+        model.set_adapter(adapter2)
+        output2 = model(**inputs)
+
+        # sanity check
+        atol, rtol = 1e-4, 1e-4
+        assert not torch.allclose(output1, output2, atol=atol, rtol=rtol)
+
+        # simple case: activate and merge one adapter
+        model.set_adapter(adapter1)
+        model.merge_adapter()
+        assert model.active_adapters == [adapter1]
+        assert model.merged_adapters == [adapter1]
+        assert torch.allclose(model(**inputs), output1, atol=atol, rtol=rtol)
+
+        # a rejected merge attempt does not change the model state
+        weights = {name: tensor.clone() for name, tensor in model.state_dict().items()}
+        merged = [list(layer.merged_adapters) for layer in layers]
+        with pytest.raises(ValueError, match="Cannot merge inactive adapter"):
+            model.merge_adapter([adapter2])
+        assert model.active_adapters == [adapter1]
+        assert [layer.merged_adapters for layer in layers] == merged
+        for name, tensor in model.state_dict().items():
+            assert torch.equal(tensor, weights[name]), name
+
+        # activate and merge the other adapter
+        model.set_adapter(adapter2)
+        assert model.merged_adapters == []
+        assert torch.allclose(model(**inputs), output2, atol=atol, rtol=rtol)
+        model.merge_adapter()
+        assert model.active_adapters == [adapter2]
+        assert model.merged_adapters == [adapter2]
+        assert torch.allclose(model(**inputs), output2, atol=atol, rtol=rtol)
+        model.unmerge_adapter()
+
+        # multiple active adapters, incorrect merge attempts
+        model.base_model.set_adapter([adapter1, adapter2])
+        combined = model(**inputs)
+        # if there is no layer with overlapping adapters, a 'wrong' merge would not be rejected, as there is no conflict
+        overlapping = any({adapter1, adapter2}.issubset(layer._all_available_adapter_names()) for layer in layers)
+        if overlapping:
+            # check that merging a subset or merging in the wrong order are rejected and conserve the state
+            weights = {name: tensor.clone() for name, tensor in model.state_dict().items()}
+            for requested, error in [
+                ([adapter1], "Cannot partially merge active adapters"),
+                ([adapter2, adapter1], "Cannot merge adapters in a different order"),
+            ]:
+                with pytest.raises(ValueError, match=error):
+                    model.merge_adapter(requested)
+                assert model.active_adapters == [adapter1, adapter2]
+                assert not any(layer.merged for layer in layers)
+                for name, tensor in model.state_dict().items():
+                    assert torch.equal(tensor, weights[name]), name
+
+        # Duplicate names are rejected consistently, even for disjoint target layers or export selections.
+        weights = {name: tensor.clone() for name, tensor in model.state_dict().items()}
+        duplicates = [adapter1, adapter2, adapter1]
+        msg = re.escape(f"Adapter names must be unique. Duplicate adapter names: {[adapter1]}.")
+        with pytest.raises(ValueError, match=msg):
+            model.base_model.set_adapter(duplicates)
+        with pytest.raises(ValueError, match=msg):
+            model.merge_adapter(duplicates)
+        with pytest.raises(ValueError, match=msg):
+            model.merge_and_unload(adapter_names=duplicates)
+        assert model.active_adapters == [adapter1, adapter2]
+        assert not any(layer.merged for layer in layers)
+        for name, tensor in model.state_dict().items():
+            assert torch.equal(tensor, weights[name]), name
+
+        # multiple activate adapters, correct merge
+        model.merge_adapter()
+        assert model.active_adapters == [adapter1, adapter2]
+        assert model.merged_adapters == sorted([adapter1, adapter2])
+        assert torch.allclose(model(**inputs), combined, atol=atol, rtol=rtol)
+
+        model.unmerge_adapter()
+        assert model.active_adapters == [adapter1, adapter2]
+        assert model.merged_adapters == []
+        assert torch.allclose(model(**inputs), combined, atol=atol, rtol=rtol)
+
+        # Compute a fresh reference in the reversed order; non-commutative methods need not match `combined`.
+        model.base_model.set_adapter([adapter2, adapter1])
+        reversed_output = model(**inputs)
+        model.merge_adapter()
+        assert model.active_adapters == [adapter2, adapter1]
+        # merged_adapters always returns in sorted order
+        assert model.merged_adapters == sorted([adapter1, adapter2])
+        assert torch.allclose(model(**inputs), reversed_output, atol=atol, rtol=rtol)
+        model.unmerge_adapter()
+
+        # merge_and_unload ignores the adapters that are currently merged and uses the adapters that were passed
+        model.set_adapter(adapter1)
+        model.merge_adapter()
+        exported = model.merge_and_unload(adapter_names=[adapter2])
+        assert torch.allclose(exported(**inputs), output2, atol=atol, rtol=rtol)
+        assert not any(isinstance(layer, BaseTunerLayer) for layer in exported.modules())
+
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
         _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs)

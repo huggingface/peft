@@ -785,6 +785,19 @@ class TestDecoderModels(PeftCommonTester):
         check_beft_config(config_cls, model_id, config_kwargs)
         self._test_merge_layers_multi(model_id, config_cls, config_kwargs.copy())
 
+    def test_active_and_merged_adapters(self):
+        # The custom-model matrix covers PEFT methods; one tiny LoRA decoder checks the causal-LM wrapper and forward
+        # hooks without repeating that matrix across decoder architectures.
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
+        torch.manual_seed(0)
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+
+        config = LoraConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], init_lora_weights=False)
+        model = get_peft_model(model, config, adapter_name="adapter_1")
+        model.add_adapter("adapter_2", config)
+        self._test_active_and_merged_adapters(model.eval(), self.prepare_inputs_for_testing())
+
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_merge_layers_nan(self, model_id, config_cls, config_kwargs):

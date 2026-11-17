@@ -708,8 +708,8 @@ model.unmerge_adapter()
 > [!TIP]
 > On a quantized model, unmerging is not exact: merging re-quantizes the base weight, and repeated merge and unmerge cycles can accumulate rounding error. See [Merging adapters into quantized weights](../developer_guides/quantization#merging-adapters-into-quantized-weights).
 
-> [!WARNING]
-> If several adapters are active and only some of them are merged, the adapters that are not merged are silently not applied. This behavior will change in PEFT v1.0. See [Merging only some of the active adapters](../developer_guides/troubleshooting#merging-only-some-of-the-active-adapters).
+> [!TIP]
+> Merging requires the merged adapter to be active. Each affected layer must merge all of its applicable active adapters in active order; inactive, partial, or reordered selections raise an error. `merge_and_unload(adapter_names=...)` may export an independent selection, including inactive adapters. See [Active and merged adapters](../developer_guides/troubleshooting#relationship-between-active-adapters-and-merged-adapters) and the [v1.0 migration guide](../developer_guides/migration_1_0#active-and-merged-adapters).
 
 The [`~LoraModel.add_weighted_adapter`] function is useful for merging multiple LoRAs into a new adapter based on a user provided weighting scheme in the `weights` parameter. Below is an end-to-end example.
 
@@ -1020,7 +1020,7 @@ Using this feature has some drawbacks, namely:
 
 - It only works for inference, not for training.
 - Disabling adapters using the `with model.disable_adapter()` context takes precedence over `adapter_names`.
-- You cannot pass `adapter_names` when some adapter weights were merged with base weight using the `merge_adapter` method. Please unmerge all adapters first by calling `model.unmerge_adapter()`. Note that merging only some of the active adapters has a [similar caveat](../developer_guides/troubleshooting#merging-only-some-of-the-active-adapters) outside of `adapter_names`.
+- You cannot pass `adapter_names` when some adapter weights were merged with base weight using the `merge_adapter` method. Please unmerge all adapters first by calling `model.unmerge_adapter()`.
 - For obvious reasons, this cannot be used after calling `merge_and_unload()`, since all the LoRA adapters will be merged into the base weights in this case.
 - This feature does not currently work with DoRA, so set `use_dora=False` in your `LoraConfig` if you want to use it.
 - The `modules_to_save` feature is currently only supported for the layers of types `Linear`, `Embedding`, `Conv2d` and `Conv1d`.

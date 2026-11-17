@@ -33,6 +33,8 @@ from transformers import (
     BitsAndBytesConfig,
     GPT2Config,
     GPT2ForSequenceClassification,
+    LlamaConfig,
+    LlamaForCausalLM,
 )
 from transformers.pytorch_utils import Conv1D
 
@@ -891,6 +893,7 @@ class TestModelAndLayerStatus:
 
         # now merge "other"
         large_model.unmerge_adapter()
+        large_model.set_adapter("other")
         large_model.merge_adapter(["other"])
         layer_status = large_model.get_layer_status()
         result = [status.merged_adapters for status in layer_status]
@@ -898,7 +901,8 @@ class TestModelAndLayerStatus:
         assert result == [["other"], [], ["other"], []]
 
         # now merge both
-        large_model.merge_adapter(["default", "other"])
+        large_model.base_model.set_adapter(["other", "default"])
+        large_model.merge_adapter(["other", "default"])
         layer_status = large_model.get_layer_status()
         result = [status.merged_adapters for status in layer_status]
         # default is on layer 0, 1, and 3, other is on layer 0 and 2
@@ -1269,14 +1273,35 @@ class TestModelAndLayerStatus:
     def test_model_merged_adapters_small(self, small_model):
         model_status = small_model.get_model_status()
         assert model_status.merged_adapters == []
+        assert small_model.merged_adapters == []
 
         small_model.merge_adapter()
         model_status = small_model.get_model_status()
         assert model_status.merged_adapters == ["default"]
+        assert small_model.merged_adapters == ["default"]
 
         small_model.unmerge_adapter()
         model_status = small_model.get_model_status()
         assert model_status.merged_adapters == []
+        small_model.base_model.set_adapter([])
+        assert small_model.merged_adapters == []
+
+    @pytest.mark.parametrize(
+        "config",
+        [
+            PromptTuningConfig(task_type="CAUSAL_LM", num_virtual_tokens=2),
+            AdaptionPromptConfig(adapter_layers=1, adapter_len=2),
+        ],
+    )
+    def test_merged_adapters_without_tuner_layers(self, config):
+        # for prompt learning, model.merged_adapters should return the empty list
+        model = LlamaForCausalLM(
+            LlamaConfig(
+                vocab_size=32, hidden_size=16, intermediate_size=32, num_hidden_layers=1, num_attention_heads=2
+            )
+        )
+        model = get_peft_model(model, config)
+        assert model.merged_adapters == []
 
     def test_model_merged_adapters_large(self, large_model):
         model_status = large_model.get_model_status()
@@ -1287,14 +1312,17 @@ class TestModelAndLayerStatus:
         assert model_status.merged_adapters == ["default"]
 
         large_model.unmerge_adapter()
+        large_model.set_adapter("other")
         large_model.merge_adapter(["other"])
         model_status = large_model.get_model_status()
         assert model_status.merged_adapters == ["other"]
 
         large_model.unmerge_adapter()
+        large_model.base_model.set_adapter(["default", "other"])
         large_model.merge_adapter(["default", "other"])
         model_status = large_model.get_model_status()
         assert model_status.merged_adapters == ["default", "other"]
+        assert large_model.merged_adapters == ["default", "other"]
 
     def test_model_merged_adapters_irregular(self, large_model):
         # this is an invalid state, but we should still test it
@@ -1303,6 +1331,8 @@ class TestModelAndLayerStatus:
 
         model_status = large_model.get_model_status()
         assert model_status.merged_adapters == "irregular"
+        # model.merged_adapters always reports all the adapters that are merged into at least one layer
+        assert large_model.merged_adapters == ["default"]
 
     def test_model_requires_grad_model_small(self, small_model):
         model_status = small_model.get_model_status()
@@ -1813,8 +1843,9 @@ class TestHealthcheck:
         model.add_adapter("other", LoraConfig(target_modules=["lin0", "lin1"]))
         adapter_layers = [module for module in model.modules() if isinstance(module, BaseTunerLayer)]
         adapter_layers[0].set_adapter("other")
-        # merge an adapter, which is not advisable for training
-        model.merge_adapter(["default"])
+        # Deliberately construct an inconsistent state through the layer API; model.merge_adapter would reject this.
+        for layer in adapter_layers:
+            layer.merge(adapter_names=["default"])
 
         sink = Mock()
         model.print_healthcheck(sink=sink)

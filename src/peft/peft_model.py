@@ -1899,10 +1899,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         Merge the active adapters into the base model.
 
+        Merging preserves the active selection. Each affected layer must merge all of its applicable active adapters in
+        their active order. Invalid selections raise before any layer is merged; adapters on disjoint layers may be
+        merged separately. Use `merge_and_unload` to export an independent adapter selection.
+
         Args:
             adapter_names (`list[str]`, *optional*):
-                The list of adapter names that should be merged. If `None`, all active adapters will be merged.
-                Defaults to `None`.
+                The list of adapter names that should be merged. If `None`, all active adapters will be merged. An
+                empty list does nothing. Defaults to `None`.
             safe_merge (`bool`, *optional*):
                 If `True`, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
@@ -1930,6 +1934,20 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if force_reshard or any(isinstance(module, BaseTunerLayer) and module.merged for module in self.modules()):
             self._reshard_fsdp_modules(include_merged=True)
         self.base_model.unmerge_adapter(**kwargs)
+
+    @property
+    def merged_adapters(self) -> list[str]:
+        """Returns the name(s) of all adapters that are merged into at least one layer, sorted alphabetically.
+
+        Methods without mergeable tuner layers, including prompt learning and adaption prompt, return an empty list.
+
+        This property reports a union, not the order in which the adapters have been merged (merge order can matter for
+        numerical reasons or for PEFT methods that don't commute). Use `model.get_model_status()` to detect irregular
+        merge states, use `model.get_layer_status()` to show the merge status on a per-layer level in merge order.
+        """
+        if isinstance(self.base_model, BaseTuner):
+            return self.base_model.merged_adapters
+        return []
 
     @property
     def base_model_torch_dtype(self):

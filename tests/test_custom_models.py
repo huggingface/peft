@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import copy
+import itertools
 import json
 import os
 import platform
@@ -5662,7 +5663,7 @@ class TestLayerRepr:
         assert "default" in print_output
 
 
-class TestMultipleActiveAdapters:
+class TestMultipleActiveAdapters(PeftCommonTester):
     """
     A test class to test the functionality of multiple active adapters.
 
@@ -5680,6 +5681,7 @@ class TestMultipleActiveAdapters:
         for module in model.modules():
             if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
                 module.set_adapter(adapter_names)
+        model.base_model.active_adapter = adapter_names
 
     def resolve_model_cls(self, tuner_method):
         if tuner_method == "lora+trainable_tokens":
@@ -5801,6 +5803,58 @@ class TestMultipleActiveAdapters:
 
         assert torch.allclose(disabled_adapter_output, base_output, atol=1e-4)
 
+    @pytest.mark.parametrize(
+        "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
+    )
+    def test_active_and_merged_adapters(self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2):
+        _skip_if_merging_not_supported(test_name, config_cls, config_kwargs_1)
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
+        if config_kwargs_1.get("trainable_token_indices"):
+            pytest.skip("TrainableTokensWrapper only supports one active adapter through the model selection API")
+
+        torch.manual_seed(0)
+        model = self.resolve_model_cls(tuner_method).to(self.torch_device).eval()
+        config1 = config_cls(**set_init_weights_false(config_cls, config_kwargs_1))
+        config2 = config_cls(**set_init_weights_false(config_cls, config_kwargs_2))
+        model = get_peft_model(model, config1, adapter_name="adapter_1")
+        model.add_adapter("adapter_2", config2)
+        self._test_active_and_merged_adapters(model.eval(), self.prepare_inputs_for_testing())
+
+    @pytest.mark.parametrize(
+        "config",
+        [
+            pytest.param(OFTConfig(target_modules=["lin1"], r=2, oft_block_size=0, init_weights=False), id="oft"),
+            pytest.param(HRAConfig(target_modules=["lin1"], r=2, init_weights=False), id="hra"),
+            pytest.param(BOFTConfig(target_modules=["lin1"], boft_block_size=4, init_weights=False), id="boft"),
+        ],
+    )
+    def test_non_commutative_merge_order(self, config):
+        # Some PEFT methods are not commutative, the order of active/merged adapters changes the output
+        torch.manual_seed(0)
+        model = get_peft_model(MLP().to(self.torch_device), config, adapter_name="adapter_1")
+        model.add_adapter("adapter_2", copy.deepcopy(config))
+        model.eval()
+        inputs = torch.randn(2, 10, device=self.torch_device)
+
+        model.base_model.set_adapter(["adapter_1", "adapter_2"])
+        with torch.inference_mode():
+            output12 = model(inputs)
+        model.base_model.set_adapter(["adapter_2", "adapter_1"])
+        with torch.inference_mode():
+            output21 = model(inputs)
+        assert not torch.allclose(output12, output21, atol=1e-4, rtol=1e-4)
+
+        model.merge_adapter()
+        assert torch.allclose(model(inputs), output21, atol=1e-4, rtol=1e-4)
+        # set_adapter unmerges
+        model.base_model.set_adapter(["adapter_1", "adapter_2"])
+        model.merge_adapter()
+        assert torch.allclose(model(inputs), output12, atol=1e-4, rtol=1e-4)
+
+        # merge_and_unload ignores what is currently merged and follows the passed adapter_names
+        exported = model.merge_and_unload(adapter_names=["adapter_2", "adapter_1"])
+        assert torch.allclose(exported(inputs), output21, atol=1e-4, rtol=1e-4)
+
     def test_oft_merge_multiple_active_adapters_matches_forward(self):
         # OFT rotations compose in the opposite order on the weight than on the input, so merging
         # multiple adapters must reverse their order.
@@ -5917,6 +5971,11 @@ class TestMultipleActiveAdapters:
     def test_sequential_merge_matches_batch_merge(
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
+        # Test that merging adapter_1, then adapter_2 gives the same result as merging them both in one call. Note that
+        # sequential merging is not possible through `merge_adapter` (the 'public' API) since PEFT v1.0, as we only
+        # allow merging no adapters or exactly the merged adapters. The only exception is if the layers targeted for
+        # merging never share the same adapter, e.g. adapter_1 only applying to layer 1 and adapter_2 only applying to
+        # layer 2.
         _skip_if_merging_not_supported(test_name, config_cls, config_kwargs_1)
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
         if tuner_method == "deft":
@@ -5929,8 +5988,19 @@ class TestMultipleActiveAdapters:
         config_2 = config_cls(**config_kwargs_2)
         model = get_peft_model(model, config_1, adapter_name="adapter_1").eval()
         model.add_adapter("adapter_2", config_2)
+        self.set_multiple_active_adapters(model, ["adapter_1", "adapter_2"])
         sequential_model = copy.deepcopy(model)
         X = self.prepare_inputs_for_testing()
+
+        # Overlapping adapters must be merged together; only disjoint target layers permit sequential merges.
+        if any(
+            isinstance(layer, BaseTunerLayer)
+            and {"adapter_1", "adapter_2"}.issubset(layer._all_available_adapter_names())
+            for layer in model.modules()
+        ):
+            with pytest.raises(ValueError, match="Cannot partially merge active adapters"):
+                sequential_model.merge_adapter(["adapter_1"])
+            return
 
         model.merge_adapter(["adapter_1", "adapter_2"])
         batch_output = model(**X)
@@ -5961,9 +6031,17 @@ class TestMultipleActiveAdapters:
         config_2 = config_cls(**config_kwargs_2)
         model = get_peft_model(model, config_1, adapter_name="adapter_1").eval()
         model.add_adapter("adapter_2", config_2)
+        self.set_multiple_active_adapters(model, ["adapter_1", "adapter_2"])
 
-        model.merge_adapter(["adapter_1"])
-        model.merge_adapter(["adapter_2"])
+        if any(
+            isinstance(layer, BaseTunerLayer)
+            and {"adapter_1", "adapter_2"}.issubset(layer._all_available_adapter_names())
+            for layer in model.modules()
+        ):
+            model.merge_adapter()
+        else:
+            model.merge_adapter(["adapter_1"])
+            model.merge_adapter(["adapter_2"])
         model.unmerge_adapter()
 
         with model.disable_adapter():
@@ -9628,3 +9706,487 @@ class TestFsdp2UnshardedParams:
         assert state_dict.keys() == plain_merged_state_dict.keys()
         for name, base_weight in base_weights.items():
             assert torch.allclose(state_dict[name].full_tensor(), base_weight, atol=1e-5), name
+
+
+class TestCombineActiveAndMergedAdapters:
+    # Active adapters determines the computation. Within each layer, merge selections must include either none or all of
+    # its applicable active adapters, in the same logical order. These tests currently only check vanilla LoRA, as the
+    # logic sits one abstraction layer above the specific PEFT method.
+    torch_device = infer_device()
+    # Merging changes float32 operation order, so outputs can differ slightly even for the same adapter selection.
+    atol, rtol = 1e-5, 1e-5
+
+    @pytest.fixture
+    def X(self):
+        return torch.randn(9, 10).to(self.torch_device)
+
+    @pytest.fixture
+    def base_model(self):
+        torch.manual_seed(0)
+        return MLP().eval().to(self.torch_device)
+
+    @pytest.fixture
+    def base_output(self, base_model, X):
+        with torch.inference_mode():
+            return base_model(X)
+
+    @pytest.fixture
+    def model(self, base_model):
+        config0 = LoraConfig(init_lora_weights=False, target_modules=["lin0", "lin1"])
+        config1 = LoraConfig(init_lora_weights=False, target_modules=["lin0"])
+        config2 = LoraConfig(init_lora_weights=False, target_modules=["lin0"])
+
+        base_model = copy.deepcopy(base_model)  # ensure we don't mutate the base model
+        model = get_peft_model(base_model, config0, adapter_name="adapter0")
+        model.add_adapter("adapter1", config1)
+        model.add_adapter("adapter2", config2)
+        return model.eval()
+
+    @pytest.fixture
+    @torch.inference_mode()
+    def outputs(self, model, X, base_output):
+        names = model.peft_config.keys()
+        outputs = {(): base_output}
+        active = list(model.active_adapters)
+        # Keep separate references for each order, including when generalized to non-commutative methods.
+        for size in range(1, len(names) + 1):
+            for adapters in itertools.permutations(names, size):
+                model.base_model.set_adapter(list(adapters))
+                outputs[adapters] = model(X)
+        model.base_model.set_adapter(active)
+        return outputs
+
+    def get_tuner_layers(self, model):
+        return {
+            name: layer for name, layer in model.get_base_model().named_modules() if isinstance(layer, BaseTunerLayer)
+        }
+
+    def check_output_and_state(self, model, X, expected, active, merged):
+        assert torch.allclose(model(X), expected, atol=self.atol, rtol=self.rtol)
+        assert model.active_adapters == active
+        assert {name: layer.merged_adapters for name, layer in self.get_tuner_layers(model).items()} == merged
+        assert model.merged_adapters == sorted({adapter for adapters in merged.values() for adapter in adapters})
+
+    def snapshot_state(self, model):
+        # snapshot is a  tuple of:
+        # 0. weight clones
+        # 1. model active adapters
+        # 2. mapping of module name to its active adapters
+        # 3. mapping of module name to its merged adapters
+        return (
+            {name: tensor.detach().clone() for name, tensor in model.state_dict().items()},
+            list(model.active_adapters),
+            {name: list(layer.active_adapters) for name, layer in self.get_tuner_layers(model).items()},
+            {name: list(layer.merged_adapters) for name, layer in self.get_tuner_layers(model).items()},
+        )
+
+    def check_unchanged(self, model, snapshot_before):
+        weights_before, active_adapters_before, layer_active_mapping_before, layer_merged_mapping_before = (
+            snapshot_before
+        )
+        current = model.state_dict()
+
+        assert current.keys() == weights_before.keys()
+        for name, expected in weights_before.items():
+            assert torch.equal(current[name], expected), name
+        assert model.active_adapters == active_adapters_before
+
+        layer_active_mapping_current = {
+            name: layer.active_adapters for name, layer in self.get_tuner_layers(model).items()
+        }
+        assert layer_active_mapping_current == layer_active_mapping_before
+
+        layer_merged_mapping_current = {
+            name: layer.merged_adapters for name, layer in self.get_tuner_layers(model).items()
+        }
+        assert layer_merged_mapping_current == layer_merged_mapping_before
+
+        all_merged_adapters_before = sorted(
+            {adapter for adapters in layer_merged_mapping_before.values() for adapter in adapters}
+        )
+        assert model.merged_adapters == all_merged_adapters_before
+
+    def check_rejected_merge(self, model, X, expected, requested, msg, safe_merge):
+        before_snapshot = self.snapshot_state(model)
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            model.merge_adapter(requested, safe_merge=safe_merge)
+
+        self.check_unchanged(model, before_snapshot)
+        assert torch.allclose(model(X), expected, atol=self.atol, rtol=self.rtol)
+
+    def test_sanity_checks(self, outputs):
+        # Every selected composition must affect the output. Distinguish the references needed to detect retained
+        # or omitted adapters, without requiring different orders of commuting adapters to produce different outputs.
+        for adapters, output in outputs.items():
+            if adapters:
+                assert not torch.allclose(output, outputs[()], atol=self.atol, rtol=self.rtol), adapters
+
+        for left, right in [
+            (("adapter0",), ("adapter1",)),
+            (("adapter0",), ("adapter2",)),
+            (("adapter1",), ("adapter2",)),
+            (("adapter0", "adapter1"), ("adapter0",)),
+            (("adapter0", "adapter1"), ("adapter1",)),
+            (("adapter1", "adapter2"), ("adapter1",)),
+            (("adapter1", "adapter2"), ("adapter2",)),
+            (("adapter0", "adapter1", "adapter2"), ("adapter0", "adapter1")),
+            (("adapter0", "adapter1", "adapter2"), ("adapter0", "adapter2")),
+            (("adapter0", "adapter1", "adapter2"), ("adapter1", "adapter2")),
+        ]:
+            assert not torch.allclose(outputs[left], outputs[right], atol=self.atol, rtol=self.rtol)
+
+    @pytest.mark.parametrize(
+        "requested, duplicates",
+        [
+            pytest.param(["adapter0", "adapter1", "adapter0"], ["adapter0"], id="repeated-first"),
+            pytest.param(["adapter0", "adapter1", "adapter1"], ["adapter1"], id="repeated-last"),
+            pytest.param(
+                ["adapter1", "adapter1", "adapter0", "adapter0"], ["adapter0", "adapter1"], id="repeated-both"
+            ),
+        ],
+    )
+    @pytest.mark.parametrize("already_merged", [False, True], ids=["unmerged", "merged"])
+    @pytest.mark.parametrize("operation", ["set_adapter", "merge_adapter", "merge_and_unload"])
+    def test_duplicate_adapter_names_rejected(self, model, requested, duplicates, already_merged, operation):
+        model.base_model.set_adapter(["adapter0", "adapter1"])
+        if already_merged:
+            model.merge_adapter()
+        before = self.snapshot_state(model)
+        requires_grad = {name: parameter.requires_grad for name, parameter in model.named_parameters()}
+
+        msg = f"Adapter names must be unique. Duplicate adapter names: {duplicates}."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            if operation == "set_adapter":
+                model.base_model.set_adapter(requested)
+            else:
+                getattr(model, operation)(adapter_names=requested)
+
+        self.check_unchanged(model, before)
+        assert {name: parameter.requires_grad for name, parameter in model.named_parameters()} == requires_grad
+
+    @pytest.mark.parametrize("operation", ["merge_adapter", "merge_and_unload"])
+    def test_duplicate_default_selection_rejected(self, model, operation):
+        model.base_model.set_adapter(["adapter0", "adapter1"])
+        model.merge_adapter()
+        # Direct state manipulation can bypass set_adapter; default merge selections still need validation.
+        model.base_model.active_adapter = ["adapter0", "adapter1", "adapter0"]
+        before = self.snapshot_state(model)
+
+        msg = "Adapter names must be unique. Duplicate adapter names: ['adapter0']."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            getattr(model, operation)()
+
+        self.check_unchanged(model, before)
+
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    @pytest.mark.parametrize("use_default_selection", [False, True])
+    @pytest.mark.parametrize(
+        "active, merged",
+        [
+            (["adapter0"], {"lin0": ["adapter0"], "lin1": ["adapter0"]}),
+            (["adapter1"], {"lin0": ["adapter1"], "lin1": []}),
+            (["adapter0", "adapter1"], {"lin0": ["adapter0", "adapter1"], "lin1": ["adapter0"]}),
+            (["adapter1", "adapter0"], {"lin0": ["adapter1", "adapter0"], "lin1": ["adapter0"]}),
+            (
+                ["adapter0", "adapter1", "adapter2"],
+                {"lin0": ["adapter0", "adapter1", "adapter2"], "lin1": ["adapter0"]},
+            ),
+            (
+                ["adapter2", "adapter1", "adapter0"],
+                {"lin0": ["adapter2", "adapter1", "adapter0"], "lin1": ["adapter0"]},
+            ),
+        ],
+    )
+    def test_merge_and_unmerge_active_adapters(
+        self, model, outputs, X, active, merged, use_default_selection, safe_merge
+    ):
+        model.base_model.set_adapter(active)
+        requested = None if use_default_selection else active
+        model.merge_adapter(requested, safe_merge=safe_merge)
+        self.check_output_and_state(model, X, outputs[tuple(active)], active, merged)
+
+        # Exercise unmerge directly, before a disabled forward has a chance to unmerge implicitly.
+        model.unmerge_adapter()
+        self.check_output_and_state(model, X, outputs[tuple(active)], active, {"lin0": [], "lin1": []})
+        model.base_model.set_adapter([])
+        self.check_output_and_state(model, X, outputs[()], [], {"lin0": [], "lin1": []})
+
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    @pytest.mark.parametrize("already_merged", [False, True])
+    @pytest.mark.parametrize(
+        "active, requested, inactive",
+        [
+            (["adapter0"], ["adapter1"], ["adapter1"]),
+            (["adapter1"], ["adapter0"], ["adapter0"]),
+            (["adapter0"], ["adapter0", "adapter1"], ["adapter1"]),
+            (["adapter0", "adapter1"], ["adapter1", "adapter2"], ["adapter2"]),
+            ([], ["adapter1"], ["adapter1"]),
+        ],
+    )
+    def test_reject_inactive_adapters(
+        self, model, outputs, X, active, requested, inactive, already_merged, safe_merge
+    ):
+        model.base_model.set_adapter(active)
+        if already_merged and active:
+            model.merge_adapter(active)
+        msg = (
+            f"Cannot merge inactive adapter(s) {inactive}. Active adapters are {active}. "
+            "Activate the adapters with set_adapter() before merging."
+        )
+        self.check_rejected_merge(model, X, outputs[tuple(active)], requested, msg, safe_merge)
+
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    @pytest.mark.parametrize("already_merged", [False, True])
+    @pytest.mark.parametrize(
+        "active, requested",
+        [
+            (["adapter0", "adapter1"], ["adapter0"]),
+            (["adapter0", "adapter1"], ["adapter1"]),
+            (["adapter1", "adapter0"], ["adapter0"]),
+            (["adapter0", "adapter1", "adapter2"], ["adapter0", "adapter1"]),
+        ],
+    )
+    def test_reject_partial_merge(self, model, outputs, X, active, requested, already_merged, safe_merge):
+        model.base_model.set_adapter(active)
+        if already_merged:
+            model.merge_adapter(active)
+        msg = (
+            f"Cannot partially merge active adapters in layer 'lin0': requested {requested}, "
+            f"but active adapters are {active}."
+        )
+        self.check_rejected_merge(model, X, outputs[tuple(active)], requested, msg, safe_merge)
+
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    @pytest.mark.parametrize("already_merged", [False, True])
+    @pytest.mark.parametrize(
+        "active, requested",
+        [
+            (["adapter0", "adapter1"], ["adapter1", "adapter0"]),
+            (["adapter0", "adapter1", "adapter2"], ["adapter2", "adapter1", "adapter0"]),
+        ],
+    )
+    def test_reject_different_merge_order(self, model, outputs, X, active, requested, already_merged, safe_merge):
+        # LoRA could commute, but the API consistently requires the active composition order within each layer.
+        model.base_model.set_adapter(active)
+        if already_merged:
+            model.merge_adapter(active)
+        msg = (
+            "Cannot merge adapters in a different order from the active adapters in layer 'lin0': requested "
+            f"{requested}, but active adapters are {active}."
+        )
+        self.check_rejected_merge(model, X, outputs[tuple(active)], requested, msg, safe_merge)
+
+    @pytest.mark.parametrize("active", [["adapter0"], ["adapter1"], ["adapter0", "adapter1"]])
+    def test_disable_merged_adapters_restores_selected_output(self, model, outputs, X, active):
+        model.base_model.set_adapter(active)
+        model.merge_adapter()
+        with model.disable_adapter():
+            assert torch.allclose(model(X), outputs[()], atol=self.atol, rtol=self.rtol)
+            assert model.active_adapters == active
+
+        # Disabling may unmerge; restoring the selected computation does not require restoring merged state.
+        assert torch.allclose(model(X), outputs[tuple(active)], atol=self.atol, rtol=self.rtol)
+        assert model.active_adapters == active
+
+    @pytest.mark.parametrize("use_public_api", [False, True])
+    def test_switch_and_merge_adapter(self, model, outputs, X, use_public_api):
+        # set_adapter(0), merge_adapter(0), set_adapter(1), merge_adapter(1) is a valid sequence.
+        set_adapter = model.set_adapter if use_public_api else model.base_model.set_adapter
+        set_adapter("adapter0")
+        model.merge_adapter(["adapter0"])
+        self.check_output_and_state(
+            model, X, outputs[("adapter0",)], ["adapter0"], {"lin0": ["adapter0"], "lin1": ["adapter0"]}
+        )
+
+        set_adapter("adapter1")
+        self.check_output_and_state(model, X, outputs[("adapter1",)], ["adapter1"], {"lin0": [], "lin1": []})
+        model.merge_adapter(["adapter1"])
+        self.check_output_and_state(model, X, outputs[("adapter1",)], ["adapter1"], {"lin0": ["adapter1"], "lin1": []})
+
+    def test_switch_and_merge_multiple_adapters(self, model, outputs, X):
+        # Same as test_switch_and_merge_adapter but with multiple adapters
+        model.base_model.set_adapter(["adapter0", "adapter1"])
+        model.merge_adapter()
+        model.base_model.set_adapter(["adapter1", "adapter2"])
+        self.check_output_and_state(
+            model, X, outputs[("adapter1", "adapter2")], ["adapter1", "adapter2"], {"lin0": [], "lin1": []}
+        )
+        model.merge_adapter()
+        self.check_output_and_state(
+            model,
+            X,
+            outputs[("adapter1", "adapter2")],
+            ["adapter1", "adapter2"],
+            {"lin0": ["adapter1", "adapter2"], "lin1": []},
+        )
+
+    @pytest.mark.parametrize("active", [["adapter0"], ["adapter0", "adapter1"], ["adapter1", "adapter0"]])
+    @pytest.mark.parametrize("use_default_selection", [False, True])
+    def test_repeated_merge_is_noop(self, model, outputs, X, active, use_default_selection):
+        model.base_model.set_adapter(active)
+        requested = None if use_default_selection else active
+        model.merge_adapter(requested)
+        before = self.snapshot_state(model)
+        with pytest.warns(UserWarning, match="All adapters are already merged, nothing to do"):
+            model.merge_adapter(requested)
+        self.check_unchanged(model, before)
+        assert torch.allclose(model(X), outputs[tuple(active)], atol=self.atol, rtol=self.rtol)
+
+    @pytest.mark.parametrize(
+        "active, already_merged",
+        [([], False), (["adapter0"], False), (["adapter0", "adapter1"], False), (["adapter0", "adapter1"], True)],
+    )
+    def test_empty_merge_selection_is_noop(self, model, outputs, X, active, already_merged):
+        model.base_model.set_adapter(active)
+        if already_merged:
+            model.merge_adapter()
+        before = self.snapshot_state(model)
+        model.merge_adapter([])
+        self.check_unchanged(model, before)
+        assert torch.allclose(model(X), outputs[tuple(active)], atol=self.atol, rtol=self.rtol)
+
+    def test_default_merge_without_active_adapters_is_noop(self, model, outputs, X):
+        model.base_model.set_adapter([])
+        before = self.snapshot_state(model)
+        model.merge_adapter()
+        self.check_unchanged(model, before)
+        self.check_output_and_state(model, X, outputs[()], [], {"lin0": [], "lin1": []})
+
+    @pytest.fixture
+    def disjoint_model(self, base_model):
+        config0 = LoraConfig(init_lora_weights=False, target_modules=["lin0"])
+        config1 = LoraConfig(init_lora_weights=False, target_modules=["lin1"])
+        model = get_peft_model(copy.deepcopy(base_model), config0, adapter_name="adapter0")
+        model.add_adapter("adapter1", config1)
+        return model.eval()
+
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    @pytest.mark.parametrize(
+        "requested, merged",
+        [
+            (["adapter0"], {"lin0": ["adapter0"], "lin1": []}),
+            (["adapter1"], {"lin0": [], "lin1": ["adapter1"]}),
+            (["adapter1", "adapter0"], {"lin0": ["adapter0"], "lin1": ["adapter1"]}),
+        ],
+    )
+    def test_merge_disjoint_adapters(self, disjoint_model, X, requested, merged, safe_merge):
+        # there is no requirement for the active or merged adapters to live on the same layers
+        model = disjoint_model
+        active = ["adapter0", "adapter1"]
+        model.base_model.set_adapter(active)
+        with torch.inference_mode():
+            expected = model(X)
+        model.merge_adapter(requested, safe_merge=safe_merge)
+        self.check_output_and_state(model, X, expected, active, merged)
+        model.unmerge_adapter()
+        self.check_output_and_state(model, X, expected, active, {"lin0": [], "lin1": []})
+
+    def test_sequential_merge_of_disjoint_adapters(self, disjoint_model, X):
+        # special case for models with disjoint target layers: since there is no overlap, it *is* possible to merge a
+        # subset of adapters
+        model = disjoint_model
+        active = ["adapter0", "adapter1"]
+        model.base_model.set_adapter(active)
+        with torch.inference_mode():
+            expected = model(X)
+
+        # this would not work if the same layers were targeted
+        model.merge_adapter(["adapter0"])
+        self.check_output_and_state(model, X, expected, active, {"lin0": ["adapter0"], "lin1": []})
+        model.merge_adapter(["adapter1"])
+        self.check_output_and_state(model, X, expected, active, {"lin0": ["adapter0"], "lin1": ["adapter1"]})
+        model.unmerge_adapter()
+        self.check_output_and_state(model, X, expected, active, {"lin0": [], "lin1": []})
+
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    @pytest.mark.parametrize(
+        "active, requested, msg",
+        [
+            (
+                ["adapter0", "adapter1"],
+                ["adapter0"],
+                (
+                    "Cannot partially merge active adapters in layer 'lin1': requested ['adapter0'], "
+                    "but active adapters are ['adapter0', 'adapter1']."
+                ),
+            ),
+            (
+                ["adapter0", "adapter1"],
+                ["adapter1", "adapter0"],
+                (
+                    "Cannot merge adapters in a different order from the active adapters in layer 'lin1': "
+                    "requested ['adapter1', 'adapter0'], but active adapters are ['adapter0', 'adapter1']. "
+                    "Pass adapter_names=['adapter0', 'adapter1']"
+                ),
+            ),
+            (
+                ["adapter0"],
+                ["adapter0", "adapter1"],
+                "Cannot merge inactive adapter(s) ['adapter1']. Active adapters are ['adapter0'].",
+            ),
+        ],
+    )
+    def test_invalid_later_layer_does_not_merge_earlier_layers(
+        self, base_model, X, active, requested, msg, safe_merge
+    ):
+        # lin0's applicable selection is valid in every case, but lin1 contains an invalid selection. Validation must
+        # finish across the entire model before even lin0 is merged.
+        config0 = LoraConfig(init_lora_weights=False, target_modules=["lin0", "lin1"])
+        config1 = LoraConfig(init_lora_weights=False, target_modules=["lin1"])
+        model = get_peft_model(copy.deepcopy(base_model), config0, adapter_name="adapter0")
+        model.add_adapter("adapter1", config1)
+        model.eval()
+        model.base_model.set_adapter(active)
+        with torch.inference_mode():
+            expected = model(X)
+        self.check_rejected_merge(model, X, expected, requested, msg, safe_merge)
+
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    @pytest.mark.parametrize("already_merged", [False, True])
+    @pytest.mark.parametrize(
+        "requested",
+        [
+            None,
+            [],
+            ["adapter1"],
+            ["adapter0", "adapter1"],
+            ["adapter1", "adapter0"],
+            ["adapter0", "adapter1", "adapter2"],
+        ],
+    )
+    def test_export_uses_its_own_selection(self, model, outputs, X, requested, already_merged, safe_merge):
+        # adapter0 also affects lin1, which adapter1 does not target. Exporting only adapter1 must remove that
+        # contribution too, even when adapter0 was already merged into both layers.
+        model.set_adapter("adapter0")
+        if already_merged:
+            model.merge_adapter(["adapter0"])
+        selected = ("adapter0",) if requested is None else tuple(requested)
+        exported = model.merge_and_unload(adapter_names=requested, safe_merge=safe_merge)
+        assert torch.allclose(exported(X), outputs[selected], atol=self.atol, rtol=self.rtol)
+        assert not any(isinstance(layer, BaseTunerLayer) for layer in exported.modules())
+
+    def test_export_defaults_to_multiple_active_adapters(self, model, outputs, X):
+        model.base_model.set_adapter(["adapter0", "adapter1"])
+        exported = model.merge_and_unload()
+        assert torch.allclose(exported(X), outputs[("adapter0", "adapter1")], atol=self.atol, rtol=self.rtol)
+        assert not any(isinstance(layer, BaseTunerLayer) for layer in exported.modules())
+
+    @pytest.mark.parametrize("requested", [[], ["adapter1"]])
+    def test_export_selects_modules_to_save(self, base_model, base_output, X, requested):
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_lora_weights=False)
+        model = get_peft_model(copy.deepcopy(base_model), config, adapter_name="adapter0")
+        model.add_adapter("adapter1", copy.deepcopy(config))
+        # ensure modules_to_save layer is not identical
+        for parameter in model.base_model.model.lin1.modules_to_save["adapter1"].parameters():
+            nn.init.normal_(parameter, std=0.1)
+
+        model.eval()
+        model.set_adapter("adapter1")
+        with torch.inference_mode():
+            expected = model(X) if requested else base_output
+
+        model.set_adapter("adapter0")
+        model.merge_adapter()
+        exported = model.merge_and_unload(adapter_names=requested)
+        assert torch.allclose(exported(X), expected, atol=self.atol, rtol=self.rtol)
+        assert not any(isinstance(layer, AuxiliaryTrainingWrapper) for layer in exported.modules())
