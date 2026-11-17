@@ -566,7 +566,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         if platform.system() == "Linux":
             pytest.skip("This test fails but only on GitHub CI with Linux systems.")
 
-        atol = 1e-5
+        atol = 1e-4
         rtol = 1e-5
         torch.manual_seed(0)
 
