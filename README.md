@@ -36,7 +36,7 @@ Install PEFT from pip:
 pip install peft
 ```
 
-Prepare a model for training with a PEFT method such as LoRA by wrapping the base model and PEFT configuration with `get_peft_model`. For the bigscience/mt0-large model, you're only training 0.19% of the parameters!
+Prepare a model for training with a PEFT method such as LoRA by wrapping the base model and PEFT configuration with `get_peft_model`. For the Qwen/Qwen2.5-3B-Instruct model, you're only training 0.1193% of the parameters!
 
 ```python
 import torch

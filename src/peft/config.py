@@ -34,10 +34,10 @@ from .utils import CONFIG_NAME, PeftType, TaskType
 MIN_EXPECTED_CONFIG_KEYS = {"peft_type"}
 
 # The adapter_config.json is written with sorted keys, except for the dicts stored under these keys, whose order has to
-# survive a save/load round trip. For rank_pattern and alpha_pattern, the order matters because when more than one key
-# matches a module, the first one wins. If another config argument needs its order preserved, add it here and extend
-# this comment.
-CONFIG_KEYS_WITH_PRESERVED_ORDER = {"rank_pattern", "alpha_pattern"}
+# survive a save/load round trip. For rank_pattern, alpha_pattern and paca_indices_pattern, the order matters because
+# when more than one key matches a module, the first one wins. If another config argument needs its order preserved,
+# add it here and extend this comment.
+CONFIG_KEYS_WITH_PRESERVED_ORDER = {"rank_pattern", "alpha_pattern", "paca_indices_pattern"}
 
 
 def _check_and_remove_unused_kwargs(cls, kwargs):
@@ -118,6 +118,14 @@ class PeftConfigMixin(PushToHubMixin):
             raise ValueError(
                 f"Invalid task type: '{self.task_type}'. Must be one of the following task types: {', '.join(TaskType)}."
             )
+
+        # `layers_to_transform` is silently ignored when `target_modules` is a str (a regex or "all-linear")
+        if (
+            isinstance(getattr(self, "target_modules", None), str)
+            and getattr(self, "layers_to_transform", None) is not None
+        ):
+            raise ValueError("`layers_to_transform` cannot be used when `target_modules` is a str.")
+
         if self.peft_version is None:
             self.peft_version = self._get_peft_version()
 

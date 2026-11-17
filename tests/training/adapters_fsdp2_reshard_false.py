@@ -78,9 +78,14 @@ def get_full_tensor(tensor):
     return tensor.detach().clone()
 
 
-def train_step(model, optimizer, input_ids, ref_logits=None):
+def train_step(model, optimizer, input_ids, ref_logits=None, reference_in_step=False):
     optimizer.zero_grad()
     output = model(input_ids, labels=input_ids)
+    if reference_in_step:
+        # the reference pass between the forward and the backward runs on the parameters that the forward left
+        # registered
+        with torch.no_grad(), model.disable_adapter():
+            ref_logits = model(input_ids).logits
     loss = output.loss
     if ref_logits is not None:
         # the KL term to the logits of the reference pass makes the loss depend on that pass, so the comparison with
@@ -113,9 +118,10 @@ def test_disable_adapter_keeps_adapters_trainable(device, mesh, input_ids):
         assert num_updated == len(lora_params), f"step {step}: {num_updated}/{len(lora_params)} LoRA params updated"
 
 
-def test_training_matches_unsharded_model(device, mesh, input_ids):
-    # an RL-like loop: one reference pass with the adapters disabled, followed by two training steps with a KL term;
-    # every rank uses the same batch, so the FSDP2 run has to match the unsharded model
+def test_training_matches_unsharded_model(device, mesh, input_ids, reference_in_step):
+    # an RL-like loop with a KL term to a reference pass with the adapters disabled: either one reference pass followed
+    # by two training steps, or a reference pass in every training step; every rank uses the same batch, so the FSDP2
+    # run has to match the unsharded model
     results = []
     for model_mesh in (mesh, None):
         model = get_model(device, model_mesh)
@@ -123,14 +129,16 @@ def test_training_matches_unsharded_model(device, mesh, input_ids):
         optimizer = torch.optim.SGD(lora_params, lr=LEARNING_RATE)
         losses = []
         for _ in range(STEPS // 2):
-            with torch.no_grad(), model.disable_adapter():
-                ref_logits = model(input_ids).logits
+            ref_logits = None
+            if not reference_in_step:
+                with torch.no_grad(), model.disable_adapter():
+                    ref_logits = model(input_ids).logits
             for _ in range(2):
-                losses.append(train_step(model, optimizer, input_ids, ref_logits=ref_logits))
+                losses.append(train_step(model, optimizer, input_ids, ref_logits, reference_in_step=reference_in_step))
         results.append((losses, [get_full_tensor(param) for param in lora_params]))
 
     (fsdp_losses, fsdp_params), (losses, params) = results
-    log(f"losses with FSDP2: {fsdp_losses}, without: {losses}")
+    log(f"reference_in_step={reference_in_step}: losses with FSDP2: {fsdp_losses}, without: {losses}")
     torch.testing.assert_close(fsdp_losses, losses, rtol=1e-4, atol=1e-5)
     torch.testing.assert_close(fsdp_params, params, rtol=1e-4, atol=1e-5)
 
@@ -147,7 +155,8 @@ def main():
     input_ids = torch.randint(0, 128, (4, 16), generator=torch.Generator().manual_seed(0)).to(device)
 
     test_disable_adapter_keeps_adapters_trainable(device, mesh, input_ids)
-    test_training_matches_unsharded_model(device, mesh, input_ids)
+    test_training_matches_unsharded_model(device, mesh, input_ids, reference_in_step=False)
+    test_training_matches_unsharded_model(device, mesh, input_ids, reference_in_step=True)
     log("All checks passed")
     dist.destroy_process_group()
 

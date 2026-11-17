@@ -841,6 +841,14 @@ model = get_peft_model(model, lora_config)
 
 Saving and loading work as usual via `save_pretrained` / `from_pretrained`. PEFT gathers the sharded adapter weights back to full tensors before saving, so checkpoints are portable and independent of the number of devices used during training.
 
+If you apply tensor parallelism without a TP plan, e.g. with PyTorch's `parallelize_module`, PEFT sizes the LoRA weights of a sharded `nn.Linear` to its local shard if the weight's device mesh has a dimension named `"tp"`, and to the full layer shape otherwise (as with FSDP2). PEFT does not add TP hooks to these LoRA weights or gather them when saving. If your TP mesh dimension has a different name, add it before creating the PEFT model:
+
+```py
+from peft.utils.integrations import TpMeshDimRegistry
+
+TpMeshDimRegistry.register("tp_dim")
+```
+
 
 ## Inference
 
@@ -871,6 +879,7 @@ The tokenizer is the base model's tokenizer. Use `add_special_tokens=False` to a
 * aLoRA weights cannot be merged into the base model by definition, since the adapter weights are selectively applied to a subset of tokens. Attempts to merge will throw errors.
 * Beam search is not yet supported.
 * It is generally not recommended to add new tokens to the tokenizer that are not present in the base model. This can complicate the target use case of both the base model and adapter model operating on overlapping context. You can workaround this by adding [trainable tokens](../package_reference/trainable_tokens) to the base model prior to training the adapter.
+* aLoRA can sometimes be used as a standin for [Gated LoRA](https://huggingface.co/papers/2507.11851) (popular in some multi-token prediction implementations) since you can either use custom tokens to steer the activation of the adapter (i.e. the gating) or provide the aLoRA offsets yourself. The only difference is that once the adapter is active, there is no way to disable it until the sequence ends.
 
 #### Choice of invocation sequence and SFT design
 
@@ -1190,6 +1199,13 @@ To encode general knowledge, GenKnowSub subtracts the average of the provided ge
 #### LoftQConfig
 
 [[autodoc]] tuners.lora.config.LoftQConfig
+
+
+### PiSSA
+
+#### replace_lora_weights_pissa
+
+[[autodoc]] utils.loftq_utils.replace_lora_weights_pissa
 
 
 ### Eva

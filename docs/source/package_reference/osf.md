@@ -211,7 +211,8 @@ OSF can be combined with other techniques:
 
 ```python
 # Use with gradient checkpointing for memory efficiency
-model.gradient_checkpointing_enable()
+# note: use `model.gradient_checkpointing_enable()` for older Transformers versions
+model.activation_checkpointing_enable()
 
 # Apply weight decay selectively (regularizes low-rank factors to limit drift/overfitting in continual updates; keep small)
 optimizer = torch.optim.AdamW([
