@@ -145,15 +145,21 @@ class TestZeroEmbeddingCheck:
         assert not self.get_hooks(model)
 
     def test_reports_keyword_call(self, base_model, input_ids):
+        # Transformers models call the embedding with positional ids, but custom code may use `embedding(input=ids)`.
+        # A forward hook only sees keyword arguments when registered with `with_kwargs=True`; without it, such calls
+        # would never be checked.
         model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]), runtime_checks="raise").train()
         with pytest.raises(RuntimeError, match=self.MATCH):
             model.get_input_embeddings()(input=input_ids)
 
     def test_removed_after_max_batches_with_unsupported_calls(self, base_model):
-        # calls the check cannot inspect still count, so that the hook does not stay attached forever
+        # Calls the check cannot inspect still count, so that the hook does not stay attached forever. Calling the
+        # hook directly with no input ids and no tensor output simulates such a call: it returns early without
+        # checking anything, but still counts as a training batch.
         model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]), runtime_checks="raise").train()
         embedding = model.get_input_embeddings()
         [hook] = self.get_hooks(model)
+        # after one call fewer than the limit, the hook is still attached; the next call removes it
         for _ in range(MAX_CHECKED_BATCHES - 1):
             hook(embedding, (), {}, None)
         assert self.get_hooks(model)
@@ -161,7 +167,9 @@ class TestZeroEmbeddingCheck:
         assert not self.get_hooks(model)
 
     def test_ignores_pad_token_of_text_config(self, base_model, input_ids):
-        # multimodal models store the ids of the language model in config.text_config
+        # Multimodal models store the token ids of the language model in config.text_config. The tokens 5 and 6 have
+        # zero rows: 5 is set as the pad token in text_config only and 6 as the image token in the main config. If
+        # text_config were not read, token 5 would be reported and the forward call would raise.
         text_config = copy.deepcopy(base_model.config)
         text_config.pad_token_id = 5
         base_model.config.text_config = text_config
