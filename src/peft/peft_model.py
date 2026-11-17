@@ -1893,11 +1893,28 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self._reshard_fsdp_modules()
                 self.base_model.enable_adapter_layers()
 
+    def _check_merge_allowed(self) -> None:
+        """Raise an error if the active PEFT method does not support merging."""
+        if self.active_peft_config.is_prompt_learning:
+            raise TypeError(
+                f"Merging is not supported for prompt learning methods like {self.active_peft_config.peft_type.value}."
+            )
+        if self.active_peft_config.is_adaption_prompt:
+            raise TypeError("Merging is not supported for adaption prompt.")
+
     def merge_adapter(
         self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False, **kwargs: Any
     ) -> None:
         """
         Merge the active adapters into the base model.
+
+        Merging is supported by most PEFT methods that add weights to the base model, like LoRA, IA³, or OFT. For
+        prompt learning methods (e.g. prompt tuning) and for adaption prompt, merging is not supported and a
+        `TypeError` is raised.
+
+        Note: Even PEFT methods that generally support merging can raise an error for certain model or layer
+        configurations, e.g. a `ValueError` for gptq-quantized models, a `NotImplementedError` for LoRA on `_ConvNd`
+        layers with `groups > 1`, or an `AttributeError` for LoRA on Eetq layers.
 
         Args:
             adapter_names (`list[str]`, *optional*):
@@ -1908,6 +1925,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
         """
+        self._check_merge_allowed()
         # The merge has to end up in the weights that FSDP2 keeps, i.e. the shards. A forward with
         # `reshard_after_forward=False` leaves the unsharded parameters registered, and a merge into those is dropped
         # by the next reshard, see #3800. Resharding is safe even if a layer is already merged, because the merge is
@@ -1919,12 +1937,20 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         Unmerge the adapters from the base model.
 
+        Unmerging is supported by most PEFT methods that add weights to the base model, like LoRA, IA³, or OFT. For
+        prompt learning methods (e.g. prompt tuning) and for adaption prompt, unmerging is not supported and a
+        `TypeError` is raised.
+
+        Note: Even PEFT methods that generally support unmerging can raise an error for certain layer types, e.g. an
+        `AttributeError` for LoRA on Eetq layers or a `NotImplementedError` for unmerging LoRA from INC layers.
+
         Args:
             force_reshard (`bool`, *optional*):
                 Whether to reshard the FSDP2 modules even if no merged adapter layer was detected. This can be used to
                 avoid scanning the whole model for merged layers when the caller has already established that there is
                 at least one. Defaults to `False`.
         """
+        self._check_merge_allowed()
         # The unmerge has to end up in the shards as well, see merge_adapter. Resharding a merged layer is safe here
         # because the merge is in the sharded parameters.
         if force_reshard or any(isinstance(module, BaseTunerLayer) and module.merged for module in self.modules()):
