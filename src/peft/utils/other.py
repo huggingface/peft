@@ -218,9 +218,6 @@ def prepare_model_for_kbit_training(
         )
         activation_checkpointing_kwargs = gradient_checkpointing_kwargs
 
-    if activation_checkpointing_kwargs is None:
-        activation_checkpointing_kwargs = {}
-
     for name, param in model.named_parameters():
         # freeze base model's layers
         param.requires_grad = False
@@ -257,8 +254,9 @@ def prepare_model_for_kbit_training(
         or is_hqq_quantized
         or is_torchao_quantized
     ) and use_gradient_checkpointing:
-        # When having `use_reentrant=False` + gradient_checkpointing, there is no need for this hack
-        if "use_reentrant" not in activation_checkpointing_kwargs or activation_checkpointing_kwargs["use_reentrant"]:
+        # Make sure that at least one of the model inputs requires a gradient when gradient checkpointing
+        # and `use_reentrant=True` is used (a requirement by torch.utils.checkpoint).
+        if activation_checkpointing_kwargs is not None and activation_checkpointing_kwargs.get("use_reentrant", False):
             # For backward compatibility
             if hasattr(model, "enable_input_require_grads"):
                 model.enable_input_require_grads()
@@ -279,7 +277,7 @@ def prepare_model_for_kbit_training(
             _supports_gc_kwargs = "gradient_checkpointing_kwargs" in list(
                 inspect.signature(model.gradient_checkpointing_enable).parameters
             )
-            if not _supports_gc_kwargs and len(activation_checkpointing_kwargs) > 0:
+            if not _supports_gc_kwargs and activation_checkpointing_kwargs:
                 warnings.warn(
                     "gradient_checkpointing_kwargs / activation_checkpointing_kwargs is not supported in this "
                     "version of transformers. The passed kwargs will be ignored."

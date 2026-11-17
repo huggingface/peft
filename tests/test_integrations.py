@@ -514,6 +514,12 @@ class TestTransformersV5:
     }
     _moe_dense_shared_kwargs = {
         "qwen3_moe": {"num_experts": 4, "num_experts_per_tok": 2, "mlp_only_layers": [0]},
+        "qwen2_moe": {
+            "num_experts": 4,
+            "num_experts_per_tok": 2,
+            "mlp_only_layers": [0],
+            "shared_expert_intermediate_size": 16,
+        },
         "qwen3_next": {
             "num_experts": 4,
             "num_experts_per_tok": 2,
@@ -617,3 +623,21 @@ class TestTransformersV5:
         for layer_prefix in ["model.layers.0.mlp", "model.layers.1.mlp.shared_experts"]:
             for proj in ["gate_proj", "up_proj", "down_proj"]:
                 assert f"{layer_prefix}.{proj}" in targeted_modules
+
+    def test_qwen2_moe_all_linear_save_load_roundtrip(self, tmp_path):
+        # https://github.com/huggingface/peft/issues/3801
+        # qwen2_moe was dropped from transformers' conversion mapping, so "all-linear" silently skipped its experts.
+        inputs = torch.arange(10).view(1, -1)
+        model = self._get_tiny_moe_model("qwen2_moe")
+        peft_model = get_peft_model(model, LoraConfig(r=2, target_modules="all-linear", init_lora_weights=False))
+        assert {"gate.weight", "gate_up_proj", "down_proj"} <= set(peft_model.peft_config["default"].target_parameters)
+        with torch.inference_mode():
+            logits_before = peft_model(inputs).logits
+        peft_model.save_pretrained(tmp_path)
+
+        reloaded = PeftModel.from_pretrained(self._get_tiny_moe_model("qwen2_moe"), tmp_path)
+        with torch.inference_mode():
+            logits_after = reloaded(inputs).logits
+
+        assert torch.allclose(logits_before, logits_after, atol=1e-5, rtol=1e-5)
+        assert set(reloaded.targeted_parameter_names) == set(peft_model.targeted_parameter_names)

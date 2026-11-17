@@ -76,7 +76,12 @@ from peft import (
 )
 from peft.utils import activation_checkpointing_enable
 
-from .testing_common import CONV1D_UNSUPPORTED_CONFIGS, PeftCommonTester, skip_non_prompt_learning
+from .testing_common import (
+    CONV1D_UNSUPPORTED_CONFIGS,
+    PeftCommonTester,
+    _skip_if_merging_not_supported,
+    skip_non_prompt_learning,
+)
 from .testing_utils import device_count, hub_online_once, load_dataset_english_quotes, set_init_weights_false
 
 
@@ -786,6 +791,18 @@ class TestDecoderModels(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         check_beft_config(config_cls, model_id, config_kwargs)
         self._test_merge_layers_nan(model_id, config_cls, config_kwargs.copy())
+
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16], ids=["fp32", "bf16", "fp16"])
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_get_additive_delta_corresponds_to_merged_weight(self, model_id, config_cls, config_kwargs, dtype):
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        check_beft_config(config_cls, model_id, config_kwargs)
+        self._test_get_additive_delta_corresponds_to_merged_weight(
+            model_id, config_cls, config_kwargs.copy(), dtype=dtype
+        )
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
@@ -1561,6 +1578,27 @@ class TestDecoderModels(PeftCommonTester):
             msg = "Setting `requires_grad` is not supported for prompt learning methods like"
             with pytest.raises(TypeError, match=msg):
                 model.set_requires_grad(adapter_names="adpater0")
+
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_merge_adapter_prompt_learning_raises(self, config_cls, config_kwargs):
+        # Test that for prompt learning, calling merge_adapter or unmerge_adapter raises an error with an appropriate
+        # error message instead of an AttributeError from the underlying Transformers model.
+        model_id = PEFT_DECODER_MODELS_TO_TEST[0]  # it's enough to test this with one model
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        if not config.is_prompt_learning:
+            pytest.skip("This test is only for prompt learning methods.")
+
+        with hub_online_once(model_id + config_kwargs.get("tokenizer_name_or_path", "")):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            model = get_peft_model(model, config)
+            msg = "Merging is not supported for prompt learning methods like"
+            with pytest.raises(TypeError, match=msg):
+                model.merge_adapter()
+            with pytest.raises(TypeError, match=msg):
+                model.unmerge_adapter()
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)

@@ -56,6 +56,10 @@ class TestShardedBaseLayerShapes:
         * PyTorch's parallelize_module() shards the base weights without setting a Transformers TP plan. The shape
           tests check that adapters use local dimensions for registered TP mesh names and full dimensions otherwise.
           PEFT does not apply Transformers TP hooks to these adapters.
+
+    Note: Don't overly parametrize the tests, as each individual test case incurs an overhead from creating and
+    destroying the process group. Instead, pass a list of test cases to `_run_worker`, which are all run within the
+    same process group. These test cases should be able to run without affecting each other, e.g. via side effects.
     """
 
     @pytest.fixture
@@ -78,17 +82,28 @@ class TestShardedBaseLayerShapes:
         return checkpoint
 
     @staticmethod
-    def _run_worker(rank, init_file, worker_fn, args):
+    def _run_worker(rank, init_file, worker_fn, cases):
         # Transformers reads the rank from the environment when it builds its TP device map
         os.environ.update(RANK=str(rank), LOCAL_RANK=str(rank), WORLD_SIZE="2")
         dist.init_process_group("gloo", init_method=f"file://{init_file}", rank=rank, world_size=2)
         try:
-            worker_fn(*args)
+            # Note: Run cases in a loop instead of running separate parametrized tests to save the time for test setup
+            # and teardown, which is signifcant. For this to work, the cases should be able to run without affecting one
+            # another.
+            for args in cases:
+                # ensure that rng is reset for each test case
+                with torch.random.fork_rng(devices=[]):
+                    try:
+                        worker_fn(*args)
+                    except Exception as exc:
+                        exc.add_note(f"{worker_fn.__name__} parameters: {args!r}")
+                        raise
         finally:
             dist.destroy_process_group()
 
-    def _spawn(self, tmp_path, worker_fn, *args):
-        mp.spawn(self._run_worker, args=(str(tmp_path / "dist_init"), worker_fn, args), nprocs=2, join=True)
+    def _spawn(self, tmp_path, worker_fn, cases):
+        # Each test owns its workers and rendezvous file, including under xdist; only its parameter cases share them.
+        mp.spawn(self._run_worker, args=(str(tmp_path / "dist_init"), worker_fn, cases), nprocs=2, join=True)
 
     @staticmethod
     def fsdp2_lora_shapes_injected_after_sharding(model_id, mesh_shape, mesh_dim_names):
@@ -145,7 +160,6 @@ class TestShardedBaseLayerShapes:
         with PyTorch's parallelize_module().
         """
         if register_mesh_dim:
-            # The spawned process only runs this check, so the change doesn't reach other tests
             TpMeshDimRegistry.register(mesh_dim_name)
 
         mesh = init_device_mesh("cpu", (2,), mesh_dim_names=(mesh_dim_name,))
@@ -322,35 +336,24 @@ class TestShardedBaseLayerShapes:
             for rank, other in enumerate(gathered):
                 torch.testing.assert_close(weight, other, rtol=0, atol=0, msg=f"{name} differs from rank {rank}")
 
-    @pytest.mark.parametrize(
-        "mesh_shape, mesh_dim_names",
-        [((2,), None), ((2,), ("fsdp",)), ((2,), ("dp",)), ((1, 2), ("dp_replicate", "dp_shard"))],
-        ids=["unnamed", "fsdp", "dp", "hsdp"],
-    )
-    def test_fsdp2_lora_shapes_injected_after_sharding(self, tmp_path, model_checkpoint, mesh_shape, mesh_dim_names):
-        self._spawn(
-            tmp_path, self.fsdp2_lora_shapes_injected_after_sharding, model_checkpoint, mesh_shape, mesh_dim_names
-        )
+    def test_fsdp2_lora_shapes_injected_after_sharding(self, tmp_path, model_checkpoint):
+        cases = [
+            (model_checkpoint, (2,), None),
+            (model_checkpoint, (2,), ("fsdp",)),
+            (model_checkpoint, (2,), ("dp",)),
+            (model_checkpoint, (1, 2), ("dp_replicate", "dp_shard")),
+        ]
+        self._spawn(tmp_path, self.fsdp2_lora_shapes_injected_after_sharding, cases)
 
-    @pytest.mark.parametrize(
-        "mesh_dim_name, register_mesh_dim",
-        [("tp", False), ("random_name", False), ("random_name", True)],
-    )
-    @pytest.mark.parametrize("embedding_style", [RowwiseParallel, ColwiseParallel], ids=["vocab", "hidden"])
-    def test_pytorch_tp_lora_adapter_shapes(
-        self, tmp_path, model_config, mesh_dim_name, register_mesh_dim, embedding_style
-    ):
-        self._spawn(
-            tmp_path,
-            self.pytorch_tp_lora_adapter_shapes,
-            model_config,
-            mesh_dim_name,
-            register_mesh_dim,
-            embedding_style,
-        )
+    def test_pytorch_tp_lora_adapter_shapes(self, tmp_path, model_config):
+        # Run all unregistered-name checks before registration, which stays local to the spawned workers.
+        cases = [
+            (model_config, mesh_dim_name, register_mesh_dim, embedding_style)
+            for mesh_dim_name, register_mesh_dim in [("tp", False), ("random_name", False), ("random_name", True)]
+            for embedding_style in (RowwiseParallel, ColwiseParallel)
+        ]
+        self._spawn(tmp_path, self.pytorch_tp_lora_adapter_shapes, cases)
 
-    @pytest.mark.parametrize("embedding_plan", ["embedding_rowwise", "embedding_colwise"])
-    @pytest.mark.parametrize("mesh_dim_names", [None, ("tp",)])
     @pytest.mark.skipif(
         packaging.version.parse(transformers.__version__) < packaging.version.parse("5.21.0"),
         reason="Embedding TP styles require transformers >= 5.21",
@@ -358,19 +361,14 @@ class TestShardedBaseLayerShapes:
     @pytest.mark.skipif(
         infer_device() != "cpu", reason="Transformers builds the TP mesh on the accelerator if there is one"
     )
-    def test_transformers_tp_loss_and_gradients_match(
-        self, tmp_path, model_checkpoint, mesh_dim_names, embedding_plan
-    ):
-        self._spawn(
-            tmp_path,
-            self.transformers_tp_lora_loss_and_gradients_match,
-            model_checkpoint,
-            mesh_dim_names,
-            embedding_plan,
-        )
+    def test_transformers_tp_loss_and_gradients_match(self, tmp_path, model_checkpoint):
+        cases = [
+            (model_checkpoint, mesh_dim_names, embedding_plan)
+            for mesh_dim_names in (None, ("tp",))
+            for embedding_plan in ("embedding_rowwise", "embedding_colwise")
+        ]
+        self._spawn(tmp_path, self.transformers_tp_lora_loss_and_gradients_match, cases)
 
-    @pytest.mark.parametrize("embedding_plan", ["embedding_rowwise", "embedding_colwise"])
-    @pytest.mark.parametrize("init_lora_weights", [True, False, "gaussian"], ids=["default", "nonzero", "gaussian"])
     @pytest.mark.skipif(
         packaging.version.parse(transformers.__version__) < packaging.version.parse("5.21.0"),
         reason="Embedding TP styles require transformers >= 5.21",
@@ -378,16 +376,13 @@ class TestShardedBaseLayerShapes:
     @pytest.mark.skipif(
         infer_device() != "cpu", reason="Transformers builds the TP mesh on the accelerator if there is one"
     )
-    def test_transformers_tp_replicated_weights_match(
-        self, tmp_path, model_checkpoint, embedding_plan, init_lora_weights
-    ):
-        self._spawn(
-            tmp_path,
-            self.transformers_tp_replicated_weights_match,
-            model_checkpoint,
-            embedding_plan,
-            init_lora_weights,
-        )
+    def test_transformers_tp_replicated_weights_match(self, tmp_path, model_checkpoint):
+        cases = [
+            (model_checkpoint, embedding_plan, init_lora_weights)
+            for init_lora_weights in (True, False, "gaussian")
+            for embedding_plan in ("embedding_rowwise", "embedding_colwise")
+        ]
+        self._spawn(tmp_path, self.transformers_tp_replicated_weights_match, cases)
 
 
 def test_tp_mesh_dim_registry(monkeypatch):
