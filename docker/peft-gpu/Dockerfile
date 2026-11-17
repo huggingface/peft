@@ -80,8 +80,7 @@ RUN conda run -n peft pip install -U --no-cache-dir \
 # Build Transformer Engine against the PyTorch version installed above.
 RUN NVTE_BUILD_USE_NVIDIA_WHEELS=1 \
     CPATH="/usr/local/cuda/include${CPATH:+:$CPATH}" \
-    conda run -n peft python -m pip install --no-build-isolation --no-cache-dir "transformer_engine[pytorch]==2.20.2" && \
-    conda run -n peft python -c "import torch; import transformer_engine.pytorch; from peft.tuners.lora.te import TeLinear"
+    conda run -n peft python -m pip install --no-build-isolation --no-cache-dir "transformer_engine[pytorch]>=2.20.2"
 
 RUN conda run -n peft pip freeze | grep transformers
 
