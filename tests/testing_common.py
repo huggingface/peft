@@ -923,10 +923,16 @@ class PeftCommonTester:
         adapter1, adapter2 = model.peft_config
         layers = [layer for layer in model.modules() if isinstance(layer, BaseTunerLayer)]
 
+        def get_output(model):
+            output = model(**inputs)
+            if hasattr(output, "logits"):
+                output = output.logits
+            return output
+
         model.set_adapter(adapter1)
-        output1 = model(**inputs)
+        output1 = get_output(model)
         model.set_adapter(adapter2)
-        output2 = model(**inputs)
+        output2 = get_output(model)
 
         # sanity check
         atol, rtol = 1e-4, 1e-4
@@ -937,7 +943,7 @@ class PeftCommonTester:
         model.merge_adapter()
         assert model.active_adapters == [adapter1]
         assert model.merged_adapters == [adapter1]
-        assert torch.allclose(model(**inputs), output1, atol=atol, rtol=rtol)
+        assert torch.allclose(get_output(model), output1, atol=atol, rtol=rtol)
 
         # a rejected merge attempt does not change the model state
         weights = {name: tensor.clone() for name, tensor in model.state_dict().items()}
@@ -952,16 +958,16 @@ class PeftCommonTester:
         # activate and merge the other adapter
         model.set_adapter(adapter2)
         assert model.merged_adapters == []
-        assert torch.allclose(model(**inputs), output2, atol=atol, rtol=rtol)
+        assert torch.allclose(get_output(model), output2, atol=atol, rtol=rtol)
         model.merge_adapter()
         assert model.active_adapters == [adapter2]
         assert model.merged_adapters == [adapter2]
-        assert torch.allclose(model(**inputs), output2, atol=atol, rtol=rtol)
+        assert torch.allclose(get_output(model), output2, atol=atol, rtol=rtol)
         model.unmerge_adapter()
 
         # multiple active adapters, incorrect merge attempts
         model.base_model.set_adapter([adapter1, adapter2])
-        combined = model(**inputs)
+        combined = get_output(model)
         # if there is no layer with overlapping adapters, a 'wrong' merge would not be rejected, as there is no conflict
         overlapping = any({adapter1, adapter2}.issubset(layer._all_available_adapter_names()) for layer in layers)
         if overlapping:
@@ -997,28 +1003,28 @@ class PeftCommonTester:
         model.merge_adapter()
         assert model.active_adapters == [adapter1, adapter2]
         assert model.merged_adapters == sorted([adapter1, adapter2])
-        assert torch.allclose(model(**inputs), combined, atol=atol, rtol=rtol)
+        assert torch.allclose(get_output(model), combined, atol=atol, rtol=rtol)
 
         model.unmerge_adapter()
         assert model.active_adapters == [adapter1, adapter2]
         assert model.merged_adapters == []
-        assert torch.allclose(model(**inputs), combined, atol=atol, rtol=rtol)
+        assert torch.allclose(get_output(model), combined, atol=atol, rtol=rtol)
 
         # Compute a fresh reference in the reversed order; non-commutative methods need not match `combined`.
         model.base_model.set_adapter([adapter2, adapter1])
-        reversed_output = model(**inputs)
+        reversed_output = get_output(model)
         model.merge_adapter()
         assert model.active_adapters == [adapter2, adapter1]
         # merged_adapters always returns in sorted order
         assert model.merged_adapters == sorted([adapter1, adapter2])
-        assert torch.allclose(model(**inputs), reversed_output, atol=atol, rtol=rtol)
+        assert torch.allclose(get_output(model), reversed_output, atol=atol, rtol=rtol)
         model.unmerge_adapter()
 
         # merge_and_unload ignores the adapters that are currently merged and uses the adapters that were passed
         model.set_adapter(adapter1)
         model.merge_adapter()
         exported = model.merge_and_unload(adapter_names=[adapter2])
-        assert torch.allclose(exported(**inputs), output2, atol=atol, rtol=rtol)
+        assert torch.allclose(get_output(exported), output2, atol=atol, rtol=rtol)
         assert not any(isinstance(layer, BaseTunerLayer) for layer in exported.modules())
 
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
