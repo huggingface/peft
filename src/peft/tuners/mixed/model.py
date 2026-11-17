@@ -26,6 +26,7 @@ from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
     _check_adapters_not_merged,
+    _check_unique_adapter_names,
     _delete_auxiliary_adapter,
 )
 from peft.utils import (
@@ -204,6 +205,7 @@ class MixedModel(BaseTuner):
         return new_module
 
     def set_adapter(self, adapter_name: Union[str, list[str]], inference_mode: bool = False) -> None:
+        _check_unique_adapter_names(adapter_name)
         _set_adapter(self, adapter_name, inference_mode=inference_mode)  # handle auxiliary modules
         for module in self.model.modules():
             if isinstance(module, Layers):
@@ -234,6 +236,12 @@ class MixedModel(BaseTuner):
         if merge:
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge layers when the model is gptq quantized")
+
+            # Export selects its own composition. Remove previous merges so excluded adapters and their order do not
+            # carry over into the exported weights.
+            for module in self.model.modules():
+                if isinstance(module, Layers) and module.merged:
+                    module.unmerge()
 
         def merge_recursively(module):
             # helper function to recursively merge the base_layer of the target
