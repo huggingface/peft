@@ -14,11 +14,13 @@
 
 import copy
 from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 import torch
 from torch import nn
+from torch.utils.checkpoint import checkpoint
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForQuestionAnswering,
@@ -45,6 +47,7 @@ from peft.utils.other import (
     ModulesToSaveWrapper,
     _get_module_names_tied_with_embedding,
     _get_no_split_modules,
+    infer_device,
     prepare_model_for_kbit_training,
 )
 
@@ -1178,6 +1181,23 @@ class TestPrepareModelForKbitTraining:
             prepare_model_for_kbit_training(fp16_model, use_gradient_checkpointing=False, auto_clear_cache=False)
         mock_empty_cache.assert_not_called()
 
+    def test_gradient_checkpointing_defaults_to_non_reentrant(self):
+        # We want the default to be use_reentrant=False
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+
+        with patch("transformers.modeling_utils.checkpoint", wraps=checkpoint) as mock_checkpoint:
+            # Exercise k-bit checkpointing setup without requiring a quantization backend.
+            with patch.object(model, "is_loaded_in_4bit", True, create=True):
+                prepare_model_for_kbit_training(model)
+            model = get_peft_model(model, LoraConfig())
+            model.train()
+            model(input_ids=torch.tensor([[1, 2, 3]]), use_cache=False)
+
+        assert mock_checkpoint.call_count == 2  # 2 layers
+        assert all(call.kwargs.get("use_reentrant") is False for call in mock_checkpoint.call_args_list)
+
 
 # The task-type subclasses that add their head to modules_to_save. One tiny BERT checkpoint covers all three, since the
 # auto classes build the matching head from the same config.
@@ -1216,3 +1236,30 @@ class TestTaskTypeModulesToSave:
 
         assert user_list == ["my_head"]
         assert model.peft_config["other"].modules_to_save == ["my_head"] + head_names
+
+
+class TestInferDevice:
+    """Verify `infer_device` checks `torch.accelerator` backends (such as `torch_tpu`) before CPU fallback."""
+
+    def test_infer_device_torch_accelerator_tpu(self, monkeypatch):
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        if hasattr(torch.backends, "mps"):
+            monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
+        monkeypatch.setattr("peft.utils.other.mlu_available", False)
+        monkeypatch.setattr("peft.utils.other.is_xpu_available", lambda: False)
+        monkeypatch.setattr("peft.utils.other.is_npu_available", lambda: False)
+
+        class _FakeAccelerator:
+            @staticmethod
+            def is_available():
+                return True
+
+            @staticmethod
+            def current_accelerator():
+                return SimpleNamespace(type="tpu")
+
+        monkeypatch.setattr(torch, "accelerator", _FakeAccelerator, raising=False)
+        assert infer_device() == "tpu"
+
+        monkeypatch.setattr(_FakeAccelerator, "is_available", staticmethod(lambda: False))
+        assert infer_device() == "cpu"

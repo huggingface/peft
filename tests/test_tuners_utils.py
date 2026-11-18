@@ -24,6 +24,7 @@ import torch
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
 from torch import nn
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import apply_activation_checkpointing
 from transformers import (
     AutoModel,
     AutoModelForCausalLM,
@@ -40,9 +41,12 @@ from peft import (
     IA3Config,
     LoHaConfig,
     LoraConfig,
+    MultitaskPromptTuningConfig,
     NoMatchingPeftModuleError,
     PeftError,
     PeftModel,
+    PrefixTuningConfig,
+    PromptEncoderConfig,
     PromptTuningConfig,
     VeraConfig,
     get_layer_status,
@@ -1734,6 +1738,15 @@ class TestHealthcheck:
     and get_layer status, which are already extensively covered in TestModelAndLayerStatus.
     """
 
+    PROMPT_MODEL_ID = "peft-internal-testing/tiny-random-LlamaForCausalLM"
+    PROMPT_HEALTHCHECK_CASES = [
+        (PromptTuningConfig, {"num_virtual_tokens": 4}, "PROMPT_TUNING"),
+        (PrefixTuningConfig, {"num_virtual_tokens": 4}, "PREFIX_TUNING"),
+        (PromptEncoderConfig, {"num_virtual_tokens": 4}, "P_TUNING"),
+        (MultitaskPromptTuningConfig, {"num_virtual_tokens": 4}, "MULTITASK_PROMPT_TUNING"),
+        (AdaptionPromptConfig, {"adapter_layers": 1, "adapter_len": 2}, "ADAPTION_PROMPT"),
+    ]
+
     def get_model(self):
         class SmallModel(nn.Module):
             def __init__(self):
@@ -1747,6 +1760,10 @@ class TestHealthcheck:
         # small rank or else number of trainable parameters exceeds pre-configured threshold for warning
         config = LoraConfig(target_modules=["lin0", "lin1"], r=4)
         return get_peft_model(self.get_model(), config)
+
+    def get_tiny_llama_model(self):
+        with hub_online_once(self.PROMPT_MODEL_ID):
+            return AutoModelForCausalLM.from_pretrained(self.PROMPT_MODEL_ID)
 
     def test_healthcheck_returns_json_serializable_report(self):
         model = self.get_peft_model()
@@ -1883,7 +1900,7 @@ class TestHealthcheck:
             healthcheck = model.healthcheck()
 
             assert healthcheck["is_ready"] is False
-            expected_findings = {"NO_TRAINABLE_PARAMETERS", "ADAPTERS_DISABLED", "ACTIVE_ADAPTERS_NOT_TRAINABLE"}
+            expected_findings = {"TOO_FEW_TRAINABLE_PARAMETERS", "ADAPTERS_DISABLED", "ACTIVE_ADAPTERS_NOT_TRAINABLE"}
             assert {finding["code"] for finding in healthcheck["findings"]} == expected_findings
 
     def test_zero_trainable_parameters_are_flagged(self):
@@ -1894,7 +1911,7 @@ class TestHealthcheck:
         healthcheck = model.healthcheck()
 
         assert healthcheck["is_ready"] is False
-        expected_findings = {"NO_TRAINABLE_PARAMETERS", "ACTIVE_ADAPTERS_NOT_TRAINABLE"}
+        expected_findings = {"TOO_FEW_TRAINABLE_PARAMETERS", "ACTIVE_ADAPTERS_NOT_TRAINABLE"}
         assert {finding["code"] for finding in healthcheck["findings"]} == expected_findings
 
     def test_high_trainable_parameter_fraction_is_flagged(self):
@@ -1999,6 +2016,76 @@ class TestHealthcheck:
             assert healthcheck["adapter_configurations"]["default"]["modules_to_save"] == ["embed_tokens"]
             assert healthcheck["model_runtime"]["parameter_devices"] == ["cpu"]
             assert healthcheck["findings"] == []
+
+    @pytest.mark.parametrize("config_cls, config_kwargs, peft_type", PROMPT_HEALTHCHECK_CASES)
+    def test_healthcheck_prompt_learning(self, config_cls, config_kwargs, peft_type):
+        base_model = self.get_tiny_llama_model()
+        base_params = sum(parameter.numel() for parameter in base_model.parameters())
+        config = config_cls(task_type="CAUSAL_LM", **config_kwargs)
+        model = get_peft_model(base_model, config)
+
+        healthcheck = model.healthcheck()
+        json.dumps(healthcheck)  # does not raise
+
+        assert set(healthcheck) == {
+            "is_ready",
+            "environment",
+            "summary",
+            "adapter_configurations",
+            "model_runtime",
+            "adapter_state",
+            "findings",
+        }
+        assert healthcheck["is_ready"] is True
+        assert healthcheck["summary"]["model_id"] == self.PROMPT_MODEL_ID
+        assert healthcheck["summary"]["base_model_type"] == "LlamaForCausalLM"
+        assert healthcheck["summary"]["peft_types"] == {"default": peft_type}
+        if peft_type == "ADAPTION_PROMPT":
+            assert healthcheck["summary"]["adapter_model_type"] == "AdaptionPromptModel"
+        else:
+            assert "adapter_model_type" not in healthcheck["summary"]
+        assert healthcheck["summary"]["trainable_params"] > 0
+        assert healthcheck["summary"]["trainable_params"] == healthcheck["summary"]["total_params"] - base_params
+        assert healthcheck["summary"]["total_params"] > base_params
+        assert "num_adapter_layers" not in healthcheck["summary"]
+        assert "adapter_layer_types" not in healthcheck["summary"]
+        assert healthcheck["adapter_state"] == {
+            "active_adapters": ["default"],
+            "available_adapters": ["default"],
+        }
+        assert healthcheck["adapter_configurations"]["default"]["task_type"] == "CAUSAL_LM"
+        assert healthcheck["model_runtime"]["parameter_devices"] == ["cpu"]
+        assert healthcheck["findings"] == []
+
+    @pytest.mark.parametrize("config_cls, config_kwargs, peft_type", PROMPT_HEALTHCHECK_CASES)
+    def test_print_healthcheck_prompt_learning(self, config_cls, config_kwargs, peft_type):
+        config = config_cls(task_type="CAUSAL_LM", **config_kwargs)
+        model = get_peft_model(self.get_tiny_llama_model(), config)
+        trainable_params, total_params = model.get_nb_trainable_parameters()
+
+        sink = Mock()
+        model.print_healthcheck(sink=sink)
+        sink.assert_called_once()
+        output = sink.call_args.args[0]
+
+        assert "PEFT healthcheck" in output
+        assert f"default ({peft_type})" in output
+        assert f"trainable: {trainable_params:,}" in output
+        assert f"total: {total_params:,}" in output
+        assert "adapter layers:" not in output
+        assert "Layer types:" not in output
+
+    @pytest.mark.parametrize("config_cls, config_kwargs, peft_type", PROMPT_HEALTHCHECK_CASES)
+    def test_healthcheck_prompt_learning_with_findings(self, config_cls, config_kwargs, peft_type):
+        base_model = self.get_tiny_llama_model()
+        config = config_cls(task_type="CAUSAL_LM", **config_kwargs)
+        model = get_peft_model(base_model, config)
+        model.requires_grad_(False)
+        healthcheck = model.healthcheck()
+
+        assert healthcheck["summary"]["trainable_params"] == 0
+        assert healthcheck["is_ready"] is False
+        assert {finding["code"] for finding in healthcheck["findings"]} == {"TOO_FEW_TRAINABLE_PARAMETERS"}
 
     # randomly initialized classifier head, since the checkpoint is a causal LM
     _TASK_HEAD_MODEL_ID = "peft-internal-testing/tiny-random-OPTForCausalLM"
@@ -2847,6 +2934,23 @@ class TestTunerStateDictKeyPrefixes:
         assert "base_model.vera_B" in prefixes
         prefixes = _get_tuner_state_dict_key_prefixes(model, adapter_name="default")
         assert "base_model.vera_A.default" in prefixes
+
+    def test_prefixes_torch_wrapper_names_removed(self):
+        # The state dict keys don't contain the names of torch's wrappers, see #3876. The wrapper name is the last part
+        # of the module name if the wrapper is directly around the tuner layer, whereas a module whose name merely
+        # contains the wrapper name must be left alone.
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.my_checkpoint_wrapped_module = nn.ModuleList([nn.Linear(10, 10)])
+
+        model = get_peft_model(MyModel(), LoraConfig(target_modules=["0"]))
+        prefixes = _get_tuner_state_dict_key_prefixes(model)
+        assert "base_model.model.my_checkpoint_wrapped_module.0.lora_A" in prefixes
+
+        apply_activation_checkpointing(model, check_fn=lambda module: isinstance(module, BaseTunerLayer))
+        assert any(name.endswith("0._checkpoint_wrapped_module") for name, _ in model.named_modules())  # sanity check
+        assert _get_tuner_state_dict_key_prefixes(model) == prefixes
 
     def test_prefixes_auxiliary_modules_not_included(self):
         # auxiliary modules like ModulesToSaveWrapper are handled separately and thus not included

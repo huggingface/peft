@@ -345,6 +345,9 @@ class Linear(LoKrLayer):
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
         return True
 
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        return self.get_delta_weight(adapter_name)
+
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "lokr." + rep
@@ -486,4 +489,4 @@ def make_kron(w1, w2, scale=1.0):
     w2 = w2.contiguous()
     rebuild = torch.kron(w1, w2)
 
-    return rebuild * scale
+    return rebuild.mul_(scale)

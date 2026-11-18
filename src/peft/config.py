@@ -118,6 +118,14 @@ class PeftConfigMixin(PushToHubMixin):
             raise ValueError(
                 f"Invalid task type: '{self.task_type}'. Must be one of the following task types: {', '.join(TaskType)}."
             )
+
+        # `layers_to_transform` is silently ignored when `target_modules` is a str (a regex or "all-linear")
+        if (
+            isinstance(getattr(self, "target_modules", None), str)
+            and getattr(self, "layers_to_transform", None) is not None
+        ):
+            raise ValueError("`layers_to_transform` cannot be used when `target_modules` is a str.")
+
         if self.peft_version is None:
             self.peft_version = self._get_peft_version()
 

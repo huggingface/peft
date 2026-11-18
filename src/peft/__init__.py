@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.21.3.dev0"
+__version__ = "0.21.4.dev0"
 
 from .auto import (
     MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
@@ -178,6 +178,7 @@ from .utils import (
     load_peft_weights,
     prepare_model_for_kbit_training,
     replace_lora_weights_loftq,
+    replace_lora_weights_pissa,
     set_base_model_state_dict,
     set_peft_model_state_dict,
     shift_tokens_right,
@@ -338,6 +339,7 @@ __all__ = [
     "preprocess_loraga",
     "prompt_embeddings_from_past_key_values",
     "replace_lora_weights_loftq",
+    "replace_lora_weights_pissa",
     "save_as_lora",
     "set_base_model_state_dict",
     "set_peft_model_state_dict",
