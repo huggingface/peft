@@ -2397,6 +2397,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
         base_layer = self.get_base_layer()
         weight = base_layer.in_proj_weight
         # FSDP2 tracks parameter identities across module traversals. Only restore weights that merging replaced.
+        # For example, two iterations of `self.named_modules()` would otherwise lead to different module identities.
         if not isinstance(weight, nn.Parameter):
             del base_layer.in_proj_weight
             base_layer.register_parameter(
