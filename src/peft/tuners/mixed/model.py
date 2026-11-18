@@ -241,11 +241,9 @@ class MixedModel(BaseTuner):
         unmerges outermost first, which is the inverse.
         """
         self._check_merge_allowed()
-        tuner_layers = [module for module in self.model.modules() if isinstance(module, BaseTunerLayer)]
-        # tuner layers that are the base_layer of another tuner layer are merged as part of the outermost layer's chain
-        nested = {id(module.base_layer) for module in tuner_layers if hasattr(module, "base_layer")}
-        for module in tuner_layers:
-            if id(module) in nested:
+        for name, module in self.model.named_modules():
+            # nested tuner layers (the base_layer of another tuner layer) are merged as part of the outermost layer's chain
+            if not isinstance(module, BaseTunerLayer) or name.endswith(".base_layer"):
                 continue
             for layer in _get_nested_tuner_layers(module):
                 with onload_layer(layer):
