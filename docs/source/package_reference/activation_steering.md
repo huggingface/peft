@@ -119,25 +119,65 @@ For a complete script using Qwen 3.5 4B, check [this example](https://github.com
 
 ## Finding neurons
 
-Without a `steering_pattern`, every input channel of the targeted projections gets a dose of zero, which leaves the model unchanged. [`~tuners.activation_steering.select_neurons`] then scores all doses at once by the gradient of a loss, keeps the best ones, and removes all others in place, so that the saved adapter stays small:
+Without a `steering_pattern`, every input channel of the targeted projections gets a dose of zero, which leaves the model unchanged. [`~tuners.activation_steering.select_neurons`] then scores all doses at once by the gradient of a loss, keeps the best ones, and removes all others in place, so that the saved adapter stays small. The following example looks for neurons that make Qwen3.5-0.8B talk like a pirate, using a few example replies:
 
 ```python
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from peft import ActivationSteeringConfig, TaskType, get_peft_model
 from peft.tuners.activation_steering import calibrate_activation_steering, select_neurons
 
+
+model_id = "Qwen/Qwen3.5-0.8B"
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+base_model = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.bfloat16, device_map="auto")
+num_layers = base_model.config.get_text_config().num_hidden_layers
 config = ActivationSteeringConfig(
     task_type=TaskType.CAUSAL_LM,
     target_modules=["down_proj"],
-    # e.g. leave out the last 2 of the 32 layers
-    layers_to_transform=list(range(30)),
+    # leave out the last 2 layers, whose neurons mostly push single tokens
+    layers_to_transform=list(range(num_layers - 2)),
 )
 model = get_peft_model(base_model, config)
+
+calibration_text = (
+    "The river runs past the village and through the fields. "
+    "At the market, people trade fruit, bread, and stories from their travels. "
+    "A programmer writes a function to sort a list of numbers."
+)
+inputs = tokenizer(calibration_text, return_tensors="pt").to(model.device)
 calibrate_activation_steering(model, {**inputs, "use_cache": False})
+
+# examples of the desired behavior: prompts with replies in the target style
+examples = [
+    ("Tell me about your weekend.", "Arr, me weekend be grand, matey! I sailed the seas and counted me gold."),
+    ("How do I reverse a list in Python?", "Arr, ye slice it with [::-1], matey, and the list sails backwards!"),
+    ("What is the weather like today?", "Arr, the skies be grey and the wind be howlin', me hearty!"),
+    ("Can you recommend a book?", "Aye, matey! Treasure Island be the finest tale for any landlubber."),
+]
+
+
+def tokenize(prompt, reply):
+    prompt_text = tokenizer.apply_chat_template(
+        [{"role": "user", "content": prompt}], tokenize=False, add_generation_prompt=True, enable_thinking=False
+    )
+    prompt_ids = tokenizer(prompt_text, add_special_tokens=False).input_ids
+    reply_ids = tokenizer(reply + "<|im_end|>", add_special_tokens=False).input_ids
+    # only the reply tokens count in the loss
+    labels = [-100] * len(prompt_ids) + reply_ids
+    return {
+        "input_ids": torch.tensor([prompt_ids + reply_ids], device=model.device),
+        "labels": torch.tensor([labels], device=model.device),
+    }
+
+
+batches = [tokenize(prompt, reply) for prompt, reply in examples]
 
 
 def train_step():
-    # examples of the desired behavior, e.g. replies in the target style, with the prompt tokens masked in the labels
-    for batch in behavior_batches:
-        model(**batch).loss.backward()
+    for batch in batches:
+        model(**batch, use_cache=False).loss.backward()
 
 
 # by default, keep 8 neurons, each starting at a dose of 0.1 with the sign that lowers the loss
