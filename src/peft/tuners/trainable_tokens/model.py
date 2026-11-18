@@ -95,6 +95,17 @@ class TrainableTokensModel(BaseTuner):
                             tied_adapter=tied_adapter,
                         )
 
+    def _get_module_names_tied_with_embedding(self) -> list[str]:
+        tied_weights_module_names = super()._get_module_names_tied_with_embedding()
+        # Dict-based tied metadata can resolve to the base layer of an existing token wrapper.
+        # Target the wrapper itself so the tied replacement does not nest another adapter inside it.
+        for index, name in enumerate(tied_weights_module_names):
+            if name.endswith(".base_layer"):
+                parent, _, _ = _get_submodules(self.model, name)
+                if isinstance(parent, TrainableTokensLayer):
+                    tied_weights_module_names[index] = name.rpartition(".")[0]
+        return tied_weights_module_names
+
     def _get_tied_target_modules(self, *args, **kwargs):
         # Normally this method would return the layers that target tied layers.
         #

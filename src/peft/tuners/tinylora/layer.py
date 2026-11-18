@@ -45,7 +45,8 @@ class TinyLoraLayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weights
     # Note: tinylora_v is a reference to the per-adapter ParameterDict (shared across layers in the same group)
     adapter_layer_names = ("tinylora_v",)
-    other_param_names = ("tinylora_A", "tinylora_B", "tinylora_P")
+    # Keep the per-adapter dropout visible to BaseTunerLayer's shared inference-mode handling.
+    other_param_names = ("tinylora_A", "tinylora_B", "tinylora_P", "tinylora_dropout")
 
     def __init__(self, base_layer: nn.Module, layer_idx: int, **kwargs):
         self.base_layer = base_layer
@@ -130,6 +131,9 @@ class TinyLoraLayer(BaseTunerLayer):
 
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
         return True
+
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        return self.get_delta_weight(adapter_name)
 
     def _get_layer_seed(self, adapter_name: str, base_seed: int) -> int:
         """Get a deterministic seed for this layer's projection matrices."""

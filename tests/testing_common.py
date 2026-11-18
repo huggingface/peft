@@ -32,10 +32,15 @@ from safetensors.torch import load_file, save_file
 
 from peft import (
     AdaLoraConfig,
+    BeftConfig,
     BOFTConfig,
+    C3AConfig,
     CPTConfig,
+    DeloraConfig,
+    GloraConfig,
     GraloraConfig,
     HiraConfig,
+    HRAConfig,
     IA3Config,
     LilyConfig,
     LNTuningConfig,
@@ -43,15 +48,20 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     MissConfig,
+    OFTConfig,
     OSFConfig,
+    PacaConfig,
     PeftModel,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptLearningConfig,
     PromptTuningConfig,
+    PsoftConfig,
     PveraConfig,
     RoadConfig,
     ShadowConfig,
+    ShiraConfig,
+    SupertuningConfig,
     UniLoraConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -74,10 +84,37 @@ from peft.utils import (
     ModulesToSaveWrapper,
     TrainableTokensWrapper,
     _get_submodules,
+    activation_checkpointing_enable,
     infer_device,
 )
 
 from .testing_utils import get_state_dict, hub_online_once
+
+
+# PEFT methods that don't support transformers' Conv1D layers (used by GPT2)
+CONV1D_UNSUPPORTED_CONFIGS = (
+    BeftConfig,
+    BOFTConfig,
+    C3AConfig,
+    DeloraConfig,
+    GloraConfig,
+    HRAConfig,
+    LoHaConfig,
+    LoKrConfig,
+    MissConfig,
+    OFTConfig,
+    OSFConfig,
+    PacaConfig,
+    PsoftConfig,
+    RoadConfig,
+    ShiraConfig,
+    SupertuningConfig,
+)
+
+
+def skip_non_prompt_learning(config_cls):
+    if not issubclass(config_cls, PromptLearningConfig):
+        pytest.skip("Skip tests that are not prompt learning")
 
 
 def _skip_if_merging_not_supported(model_id, config_cls, config_kwargs):
@@ -105,7 +142,7 @@ def _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs):
     if "gpt2" not in model_id.lower():
         return
 
-    if config_cls not in (IA3Config, LoHaConfig, LoKrConfig, LoraConfig):
+    if config_cls in CONV1D_UNSUPPORTED_CONFIGS:
         pytest.skip("This PEFT method does not support Conv1D layers, skipping this test.")
 
 
@@ -362,6 +399,51 @@ class PeftCommonTester:
 
                 self.check_modelcard(tmp_dirname, model)
                 self.check_config_json(tmp_dirname, model)
+
+    def _test_save_pretrained_failure(self, model_id, config_cls, config_kwargs, tmp_path):
+        # Regression for #3854: a config-write failure must not change the live inference flag.
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+            model = get_peft_model(model, config)
+            inference_mode = object()
+            config.inference_mode = inference_mode
+            failed_save_dir = tmp_path / "failed"
+            # A directory occupying the config filename forces an actual config-write error.
+            (failed_save_dir / "adapter_config.json").mkdir(parents=True)
+            with pytest.raises(OSError):
+                model.save_pretrained(failed_save_dir)
+            assert config.inference_mode is inference_mode
+
+            successful_save_dir = tmp_path / "successful"
+            model.save_pretrained(successful_save_dir)
+            assert config.inference_mode is inference_mode
+            with open(successful_save_dir / "adapter_config.json", encoding="utf-8") as file:
+                assert json.load(file)["inference_mode"] is True
+
+    def _test_load_no_warning(self, model_id, config_cls, config_kwargs, recwarn, tmp_path):
+        # A valid checkpoint must load without any warning about missing or unexpected adapter keys, whether it is
+        # loaded through `from_pretrained` or `load_adapter`. This guards against false alarms in the adapter key check
+        # for every PEFT method (see issue 3804).
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+            model = get_peft_model(model, config)
+            model = model.to(self.torch_device)
+            model.save_pretrained(tmp_path)
+
+            base_model = self.transformers_class.from_pretrained(model_id)
+            recwarn.clear()
+            model = PeftModel.from_pretrained(base_model, tmp_path)
+            assert not any("adapter keys" in str(rec.message) for rec in recwarn)
+
+            if issubclass(config_cls, ShadowConfig) and config_kwargs.get("task_type") == "SEQ_CLS":
+                # ShadowPEFT explicitly rejects multiple adapters when sequence classification is present
+                return
+
+            recwarn.clear()
+            model.load_adapter(tmp_path, adapter_name="other")
+            assert not any("adapter keys" in str(rec.message) for rec in recwarn)
 
     def _test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs, safe_serialization=True):
         if issubclass(config_cls, AdaLoraConfig):
@@ -693,7 +775,7 @@ class PeftCommonTester:
             atol, rtol = 1e-4, 1e-4
             if self.torch_device in ["mlu"]:
                 atol, rtol = 1e-3, 1e-3  # MLU
-            if model_id == "trl-internal-testing/tiny-GptOssForCausalLM":
+            if model_id == "peft-internal-testing/tiny-GptOssForCausalLM":
                 # this tolerance issue with the target_parameters test only occurs on CI with transformers v5
                 atol, rtol = 1e-3, 1e-3
             if config.peft_type in ("ADALORA", "OFT"):
@@ -708,7 +790,7 @@ class PeftCommonTester:
                 atol, rtol = 0.3, 0.01
             if (config.peft_type == "OFT") and not is_decoder:
                 atol, rtol = 0.3, 0.01
-            if model_id == "trl-internal-testing/tiny-Llama4ForCausalLM":
+            if model_id == "peft-internal-testing/tiny-Llama4ForCausalLM":
                 # also getting larger errors here, not exactly sure why
                 atol, rtol = 0.3, 0.01
             assert torch.allclose(logits, logits_merged, atol=atol, rtol=rtol)
@@ -776,6 +858,11 @@ class PeftCommonTester:
 
             torch.manual_seed(1)
             model.add_adapter("adapter-2", config)
+            # Saved modules must differ so exporting an inactive adapter also checks which copy is retained.
+            for module in model.modules():
+                if isinstance(module, ModulesToSaveWrapper):
+                    for parameter in module.modules_to_save["adapter-2"].parameters():
+                        torch.nn.init.normal_(parameter, std=0.1)
             model.set_adapter("adapter-2")
             model.eval()
 
@@ -804,14 +891,6 @@ class PeftCommonTester:
 
             model_copy = copy.deepcopy(model)
             model_copy_2 = copy.deepcopy(model)
-            model_merged_all = model.merge_and_unload(adapter_names=["adapter-2", "default"])
-
-            with torch.inference_mode():
-                logits_merged_all = model_merged_all(**dummy_input)[0]
-
-            assert not torch.allclose(logits_merged_all, logits_adapter_2, atol=atol, rtol=rtol)
-            assert not torch.allclose(logits_merged_all, logits_adapter_1, atol=atol, rtol=rtol)
-
             model_merged_adapter_2 = model_copy.merge_and_unload(adapter_names=["adapter-2"])
 
             with torch.inference_mode():
@@ -825,6 +904,17 @@ class PeftCommonTester:
                 logits_merged_adapter_default = model_merged_adapter_default(**dummy_input)[0]
 
             assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=atol, rtol=rtol)
+
+            if any(isinstance(module, ModulesToSaveWrapper) for module in model.modules()):
+                with pytest.raises(ValueError, match="Only one adapter"):
+                    model.merge_and_unload(adapter_names=["adapter-2", "default"])
+            else:
+                model_merged_all = model.merge_and_unload(adapter_names=["adapter-2", "default"])
+                with torch.inference_mode():
+                    logits_merged_all = model_merged_all(**dummy_input)[0]
+
+                assert not torch.allclose(logits_merged_all, logits_adapter_2, atol=atol, rtol=rtol)
+                assert not torch.allclose(logits_merged_all, logits_adapter_1, atol=atol, rtol=rtol)
 
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
@@ -883,7 +973,7 @@ class PeftCommonTester:
             if self.torch_device in ["mlu"]:
                 atol, rtol = 1e-3, 1e-3  # MLU
 
-            conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
+            conv_ids = ["Conv2d", "Conv3d", "Conv3d1x1", "Conv2d2"]
             if (
                 issubclass(config_cls, (IA3Config, LoraConfig, HiraConfig)) and model_id in conv_ids
             ):  # more instability with Conv
@@ -912,6 +1002,160 @@ class PeftCommonTester:
 
                 # serializing with safetensors works
                 save_file(model_unloaded.state_dict(), os.path.join(tmp_dirname, "model.safetensors"))
+
+    def _test_get_additive_delta_corresponds_to_merged_weight(self, model_id, config_cls, config_kwargs, dtype):
+        # This test checks that the get_additive_delta method really returns the weight delta between the base weight
+        # and the merged weight. For many PEFT methods, this is trivial, as _get_additive_delta ==
+        # get_delta_weight, but for some they differ, e.g. for multiplicative methods like OFT.
+        if (config_cls == MissConfig) and (config_kwargs.get("init_weights") == "bat"):
+            pytest.skip(reason="Test requires non-zero init but MiSS is using 'bat' init")
+
+        torch.manual_seed(0)
+        atol = rtol = {torch.float32: 1e-5, torch.bfloat16: 1e-2, torch.float16: 2e-3}[dtype]
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id, dtype=dtype)
+            config = config_cls(
+                base_model_name_or_path=model_id,
+                **config_kwargs,
+            )
+            model = model.to(self.torch_device)
+            state_dict_before = {k: v.clone() for k, v in model.state_dict().items()}
+
+            # don't autocast adapter dtype so that we can test lower precision floats
+            peft_model = get_peft_model(model, config, autocast_adapter_dtype=False)
+            if not peft_model.supports_lora_conversion():
+                pytest.skip(f"{config.peft_type} does not support LoRA conversion.")
+
+            # Collect the additive deltas BEFORE merging, as get_additive_delta raises an error while adapters are
+            # merged (the return value would depend on the currently merged weights). Iterating over model instead of
+            # peft_model means the module names are not prefixed with the PEFT prefix.
+            additive_deltas = {}
+            for name, module in model.named_modules():
+                if isinstance(module, BaseTunerLayer):
+                    additive_deltas[name] = module.get_additive_delta()
+
+            peft_model.merge_adapter()
+            # take the state_dict from model and not peft_model so that we don't have to strip the PEFT prefix
+            state_dict_after = model.state_dict()
+
+            no_tuner_layer_found = True
+            for name, module in model.named_modules():
+                if not isinstance(module, BaseTunerLayer):
+                    continue
+
+                key_before = f"{name}.weight"
+                key_after = f"{name}.base_layer.weight"
+                weight_before = state_dict_before.get(key_before)
+                weight_after = state_dict_after.get(key_after)
+                if (weight_before is None) or (weight_after is None):
+                    continue
+
+                no_tuner_layer_found = False
+                delta_weight_expected = weight_after - weight_before
+                # The additive delta should be a floating point tensor, not the dtype of the base weight. This matters
+                # e.g. for quantized base weights, whose dtype is not a floating point type and thus must not be used
+                # for the additive delta.
+                assert additive_deltas[name].dtype.is_floating_point
+                additive_delta = additive_deltas[name].to(delta_weight_expected.dtype)
+                assert torch.allclose(additive_delta, delta_weight_expected, atol=atol, rtol=rtol)
+
+            # sanity check
+            if no_tuner_layer_found:
+                raise ValueError("This test could not identify any tuner layers")
+
+    def _get_mergeable_tuner_layers(self, model):
+        layers = []
+        for module in model.modules():
+            if not isinstance(module, BaseTunerLayer):
+                continue
+            # skip base layers that keep their weights under other names, such as nn.MultiheadAttention with its
+            # in_proj_weight, since there is no single weight tensor to compare before and after the merge
+            base_layer = module.get_base_layer()
+            if not isinstance(getattr(base_layer, "weight", None), torch.Tensor):
+                continue
+            layers.append(module)
+        return layers
+
+    def _assert_base_layer_unchanged(self, layer, orig_weight, orig_bias):
+        base_layer = layer.get_base_layer()
+        assert torch.equal(base_layer.weight, orig_weight)
+        if orig_bias is not None:
+            assert torch.equal(base_layer.bias, orig_bias)
+        assert not layer.merged
+
+    def _test_safe_merge_broken_adapter_leaves_base_layer_unchanged(self, model_id, config_cls, config_kwargs):
+        # A non-finite adapter must make safe_merge raise before anything is written to the base layer.
+        if issubclass(config_cls, LNTuningConfig):
+            pytest.skip("LN tuning swaps the layer on merge, so there is no merged tensor to validate.")
+        torch.manual_seed(0)
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(**config_kwargs)
+            model = get_peft_model(model.to(self.torch_device), config)
+
+        layers = [
+            layer
+            for layer in self._get_mergeable_tuner_layers(model)
+            if any(param.requires_grad for param in layer.parameters())
+        ]
+        if not layers:
+            pytest.skip("No mergeable tuner layers in this model.")
+
+        # Only the first layer that merge_adapter visits is poisoned, by setting one value in each of that layer's
+        # adapter parameters to NaN, so the merge fails before any layer is merged. This only covers the layer that
+        # fails the check: if a later layer failed instead, the layers before it would already be merged, since
+        # merge_adapter does not roll them back.
+        layer = layers[0]
+        with torch.no_grad():
+            for param in layer.parameters():
+                if param.requires_grad:
+                    param.view(-1)[0] = float("nan")
+        base_layer = layer.get_base_layer()
+        orig_weight = base_layer.weight.detach().clone()
+        orig_bias = base_layer.bias.detach().clone() if getattr(base_layer, "bias", None) is not None else None
+
+        with pytest.raises(ValueError, match="NaNs detected"):
+            model.merge_adapter(safe_merge=True)
+        self._assert_base_layer_unchanged(layer, orig_weight, orig_bias)
+
+    def _test_safe_merge_non_finite_bias_leaves_base_layer_unchanged(self, model_id, config_cls, config_kwargs):
+        # A non-finite merged bias must be caught before the merged weight is written. The bias is poisoned in the
+        # base layer so the weight stays finite and passes its own check first, which is exactly the situation where
+        # an implementation that commits the weight before validating the bias leaves the layer half merged.
+        if issubclass(config_cls, LNTuningConfig):
+            pytest.skip("LN tuning swaps the layer on merge, so there is no merged tensor to validate.")
+        torch.manual_seed(0)
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(**config_kwargs)
+            model = get_peft_model(model.to(self.torch_device), config)
+
+        layers = [
+            layer
+            for layer in self._get_mergeable_tuner_layers(model)
+            if getattr(layer.get_base_layer(), "bias", None) is not None
+        ]
+        if not layers:
+            pytest.skip("No mergeable tuner layers with a bias in this model.")
+
+        layer = layers[0]
+        base_layer = layer.get_base_layer()
+        with torch.no_grad():
+            base_layer.bias.view(-1)[0] = float("inf")
+        orig_weight = base_layer.weight.detach().clone()
+        orig_bias = base_layer.bias.detach().clone()
+
+        try:
+            model.merge_adapter(safe_merge=True)
+        except ValueError as exc:
+            assert "NaNs detected" in str(exc)
+            self._assert_base_layer_unchanged(layer, orig_weight, orig_bias)
+        else:
+            # no error is only acceptable if this method does not merge the bias at all
+            assert torch.equal(base_layer.bias, orig_bias)
 
     def _test_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
         # Test for mixing different adapters in a single batch by passing the adapter_names argument
@@ -1353,7 +1597,7 @@ class PeftCommonTester:
 
             # grads with gradient checkpointing
             model.prepare_model_for_gradient_checkpointing(model)
-            model.gradient_checkpointing_enable({"use_reentrant": use_reentrant})
+            activation_checkpointing_enable(model, {"use_reentrant": use_reentrant})
 
             grads_checkpointing = get_grads()
 
@@ -1865,7 +2109,9 @@ class PeftCommonTester:
             if hasattr(model, "generate"):
                 # let's check the scores, not the output ids, since the latter can easily be identical even if the
                 # weights are slightly changed
-                output = model.generate(**input, return_dict_in_generate=True, output_scores=True).scores[0]
+                output = model.generate(
+                    **input, max_new_tokens=1, return_dict_in_generate=True, output_scores=True
+                ).scores[0]
                 # take element 0, as output is a tuple
             else:
                 output = model(**input)
@@ -1918,7 +2164,7 @@ class PeftCommonTester:
                 assert (output_before != output_peft_disabled).float().mean() < 1e-4
             else:
                 atol, rtol = 1e-6, 1e-6
-                if (platform.system() == "Windows") and (model_id == "trl-internal-testing/tiny-Llama4ForCausalLM"):
+                if (platform.system() == "Windows") and (model_id == "peft-internal-testing/tiny-Llama4ForCausalLM"):
                     # for some reason, Windows CI fails with stricter tolerance
                     atol, rtol = 1e-5, 1e-5
 
@@ -2000,7 +2246,7 @@ class PeftCommonTester:
             model = get_peft_model(model, config).eval()
 
             if not model.supports_lora_conversion():
-                return
+                pytest.skip(f"{config_cls.__name__} does not support LoRA conversion")
             if ("OPT" in model_id) and ("fc1" in config.target_modules):
                 # the fc1 and fc2 layers in OPT have size (16, 4), thus choose smaller rank
                 rank = 4

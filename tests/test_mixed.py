@@ -33,7 +33,9 @@ from peft import (
     LoraConfig,
     OFTConfig,
     PeftMixedModel,
+    PeftModel,
     PrefixTuningConfig,
+    ShiraConfig,
     get_peft_model,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
@@ -179,6 +181,25 @@ class TestMixedAdapterTypes(unittest.TestCase):
         if is_commutative:
             assert torch.allclose(output_mixed_reversed, output_mixed_01, atol=atol, rtol=rtol)
             assert torch.allclose(output_mixed_reversed, output_mixed_10, atol=atol, rtol=rtol)
+
+    def test_inference_mode_controls_mixed_adapter_dropouts(self):
+        model = get_peft_model(
+            SimpleNet(),
+            LoraConfig(target_modules=["lin0"], lora_dropout=0.5),
+            adapter_name="adapter_lora",
+            mixed=True,
+        )
+        model.add_adapter("adapter_oft", OFTConfig(target_modules=["lin1"], module_dropout=0.5, oft_block_size=20))
+        model.set_adapter(["adapter_lora", "adapter_oft"], inference_mode=True)
+
+        assert not model.base_model.model.lin0.lora_dropout["adapter_lora"].training
+        assert not model.base_model.model.lin1.oft_dropout["adapter_oft"].training
+        assert model.base_model.model.lin0.training
+        assert model.base_model.model.lin1.training
+
+        model.set_adapter(["adapter_lora", "adapter_oft"], inference_mode=False)
+        assert model.base_model.model.lin0.lora_dropout["adapter_lora"].training
+        assert model.base_model.model.lin1.oft_dropout["adapter_oft"].training
 
     def _check_merging(self, model_cls, config0, config1, input):
         # Ensure that when merging mixed adapters, the result is the same as when applying the adapters separately.
@@ -588,6 +609,81 @@ class TestMixedAdapterTypes(unittest.TestCase):
         assert torch.isfinite(output_unloaded).all()
         assert torch.allclose(output_base, output_unloaded, atol=atol, rtol=rtol)
 
+    @parameterized.expand([False, True])
+    def test_disable_adapter_restores_state(self, modules_to_save):
+        # Regression test for #3507: PeftMixedModel.disable_adapter() should restore the
+        # adapter-enabled state that existed on entry, instead of unconditionally
+        # re-enabling. Tests nested contexts and an already-disabled model.
+        atol = 1e-5
+        rtol = 1e-5
+        input = torch.arange(90).reshape(9, 10).to(self.torch_device)
+
+        config = LoraConfig(
+            r=4,
+            lora_alpha=4,
+            target_modules=["lin0"],
+            modules_to_save=["lin1"] if modules_to_save else None,
+            init_lora_weights=False,
+        )
+        peft_model = self._get_model(SimpleNet, config, "adapter0", seed=0)
+        adapter_layers = [m for m in peft_model.modules() if isinstance(m, (BaseTunerLayer, AuxiliaryTrainingWrapper))]
+
+        output_adapter = peft_model(input)
+
+        with peft_model.disable_adapter():
+            output_base = peft_model(input)
+            with peft_model.disable_adapter():
+                assert all(m.disable_adapters for m in adapter_layers)
+                assert torch.allclose(peft_model(input), output_base, atol=atol, rtol=rtol)
+            output_after_inner = peft_model(input)
+            assert all(m.disable_adapters for m in adapter_layers)
+
+        assert all(not m.disable_adapters for m in adapter_layers)
+        assert torch.allclose(peft_model(input), output_adapter, atol=atol, rtol=rtol)
+
+        assert not torch.allclose(output_adapter, output_base, atol=atol, rtol=rtol)
+        assert torch.allclose(output_after_inner, output_base, atol=atol, rtol=rtol)
+        assert not torch.allclose(output_after_inner, output_adapter, atol=atol, rtol=rtol)
+
+        peft_model.base_model.disable_adapter_layers()
+        assert all(m.disable_adapters for m in adapter_layers)
+        with peft_model.disable_adapter():
+            assert all(m.disable_adapters for m in adapter_layers)
+        assert all(m.disable_adapters for m in adapter_layers)
+        assert torch.allclose(peft_model(input), output_base, atol=atol, rtol=rtol)
+
+    @parameterized.expand(itertools.product([False, True], [False, True]))
+    def test_disable_adapter_restores_state_after_exception(self, initially_disabled, modules_to_save):
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"] if modules_to_save else None)
+        peft_model = self._get_model(SimpleNet, config, "adapter0")
+        adapter_layers = [m for m in peft_model.modules() if isinstance(m, (BaseTunerLayer, AuxiliaryTrainingWrapper))]
+        if initially_disabled:
+            peft_model.base_model.disable_adapter_layers()
+
+        with pytest.raises(RuntimeError, match="outer context"):
+            with peft_model.disable_adapter():
+                with pytest.raises(RuntimeError, match="inner context"):
+                    with peft_model.disable_adapter():
+                        raise RuntimeError("inner context")
+                assert all(m.disable_adapters for m in adapter_layers)
+                raise RuntimeError("outer context")
+
+        assert all(m.disable_adapters == initially_disabled for m in adapter_layers)
+
+    def test_disable_adapter_irregular_state(self):
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = self._get_model(SimpleNet, config, "adapter0")
+        adapter_layers = [m for m in peft_model.modules() if isinstance(m, (BaseTunerLayer, AuxiliaryTrainingWrapper))]
+        peft_model.base_model.model.lin0.enable_adapters(False)
+        assert {m.disable_adapters for m in adapter_layers} == {False, True}
+
+        with pytest.warns(UserWarning, match="some adapter layers that are enabled and others that are disabled"):
+            with peft_model.disable_adapter():
+                assert all(m.disable_adapters for m in adapter_layers)
+
+        # Like PeftModel, normalize inconsistent tuner and auxiliary states to enabled.
+        assert all(not m.disable_adapters for m in adapter_layers)
+
     def test_delete_adapter(self):
         atol = 1e-5
         rtol = 1e-5
@@ -906,3 +1002,74 @@ class TestMixedAdapterTypes(unittest.TestCase):
             assert torch.isfinite(output01_loaded).all()
             assert not torch.allclose(output0_save, output01_loaded, atol=atol, rtol=rtol)
             assert not torch.allclose(output1_save, output01_loaded, atol=atol, rtol=rtol)
+
+
+class TestMixedAdapterLoading:
+    @pytest.mark.parametrize("is_trainable", [False, True])
+    @pytest.mark.parametrize(
+        "config",
+        [
+            LoraConfig(target_modules=["lin0"], init_lora_weights=False),
+            LoHaConfig(target_modules=["lin0"], init_weights=False),
+            LoKrConfig(target_modules=["lin0"], init_weights=False),
+            AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
+            ShiraConfig(target_modules=["lin0"], r=2, init_weights=False),
+            LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_lora_weights=False),
+        ],
+        ids=["lora", "loha", "lokr", "adalora", "shira", "modules_to_save"],
+    )
+    def test_from_pretrained_trainability(self, tmp_path, config, is_trainable):
+        # Regression for #3823: PeftMixedModel must preserve requires_grad just as PeftModel does.
+        base_model = SimpleNet()
+        saved_model = get_peft_model(copy.deepcopy(base_model), config)
+        saved_model.save_pretrained(tmp_path)
+
+        regular_model = PeftModel.from_pretrained(copy.deepcopy(base_model), tmp_path, is_trainable=is_trainable)
+        mixed_model = PeftMixedModel.from_pretrained(copy.deepcopy(base_model), tmp_path, is_trainable=is_trainable)
+
+        expected = {name: param.requires_grad for name, param in regular_model.named_parameters()}
+        actual = {name: param.requires_grad for name, param in mixed_model.named_parameters()}
+        assert actual == expected
+        assert mixed_model.active_adapters == ["default"]
+        assert mixed_model.peft_config["default"].inference_mode == (not is_trainable)
+        inputs = torch.ones(2, 10)
+        torch.testing.assert_close(mixed_model(inputs), regular_model(inputs))
+
+    @pytest.mark.parametrize("first_trainable", [False, True])
+    @pytest.mark.parametrize("second_trainable", [False, True])
+    @pytest.mark.parametrize("modules_to_save", [None, ["lin1"]])
+    @pytest.mark.parametrize("second_config_class", [LoHaConfig, OFTConfig])
+    def test_load_adapter_preserves_trainability(
+        self, tmp_path, first_trainable, second_trainable, modules_to_save, second_config_class
+    ):
+        # first_trainable=True leaves the first adapter trainable except for lora_A, frozen below; False freezes it all.
+        # second_trainable sets requires_grad for the second adapter, which stays inactive in both cases.
+        # Vary modules_to_save and the second adapter type for coverage.
+        base_model = SimpleNet()
+
+        first_config = LoraConfig(target_modules=["lin0"], modules_to_save=modules_to_save, init_lora_weights=False)
+        first_model = get_peft_model(copy.deepcopy(base_model), first_config)
+        first_model.save_pretrained(tmp_path / "first")
+
+        second_config = second_config_class(
+            target_modules=["lin0"], modules_to_save=modules_to_save, init_weights=False
+        )
+        second_model = get_peft_model(copy.deepcopy(base_model), second_config)
+        second_model.save_pretrained(tmp_path / "second")
+
+        model = PeftMixedModel.from_pretrained(copy.deepcopy(base_model), tmp_path / "first")
+        model.set_adapter("default", inference_mode=not first_trainable)
+        # Loading must also preserve a caller's freeze on one parameter of an otherwise trainable adapter.
+        model.base_model.model.lin0.lora_A["default"].weight.requires_grad_(False)
+        existing = [(param, param.requires_grad) for param in model.parameters()]
+        inputs = torch.ones(2, 10)
+        expected_output = model(inputs)
+
+        model.load_adapter(tmp_path / "second", "second", is_trainable=second_trainable)
+
+        assert all(param.requires_grad == requires_grad for param, requires_grad in existing)
+        second_parameters = [param for name, param in model.named_parameters() if "second" in name.split(".")]
+        assert second_parameters
+        assert all(param.requires_grad == second_trainable for param in second_parameters)
+        assert model.active_adapters == ["default"]
+        torch.testing.assert_close(model(inputs), expected_output)

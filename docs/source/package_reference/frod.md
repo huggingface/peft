@@ -63,7 +63,7 @@ peft_config = FrodConfig(
 )
 
 model = get_peft_model(model, peft_config)
-model.print_trainable_parameters()
+model.print_healthcheck()
 ```
 
 ## FrodConfig

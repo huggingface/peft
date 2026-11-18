@@ -271,3 +271,18 @@ class TestFrod:
         inputs = torch.randn(5, 10).to(dtype)
         output = peft_model(inputs)
         assert output.dtype == dtype
+
+
+@pytest.mark.skipif(not torch.backends.mps.is_available(), reason="requires MPS")
+def test_frod_on_mps():
+    # MPS has no float64: FRoD's initial decomposition must not cast to float64 before moving the weights to CPU.
+    # With default initialization, the adapter reconstructs the base weights, so outputs match the base model.
+    torch.manual_seed(0)
+    base = MLP().to("mps").eval()
+    x = torch.randn(4, 10, device="mps")
+    with torch.no_grad():
+        expected = base(x)
+
+    model = get_peft_model(base, FrodConfig(target_modules=["lin1", "lin2"])).eval()
+    with torch.no_grad():
+        torch.testing.assert_close(model(x), expected, atol=1e-4, rtol=1e-4)
