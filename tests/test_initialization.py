@@ -1264,6 +1264,46 @@ class TestLoraInitialization:
                 tmp_path / "olora-model", path_initial_model_for_weight_conversion=tmp_path / "init-model"
             )
 
+    @pytest.mark.parametrize("init_lora_weights", ["pissa", "olora"])
+    def test_lora_conversion_with_modules_to_save(self, tmp_path, init_lora_weights):
+        class DummyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(16, 16)
+                self.head = nn.Linear(16, 2)
+
+            def forward(self, x):
+                return self.head(self.linear(x))
+
+        model = DummyModel().to(self.torch_device)
+        data = torch.randn(2, 16, device=self.torch_device)
+
+        config = LoraConfig(
+            init_lora_weights=init_lora_weights,
+            target_modules=["linear"],
+            modules_to_save=["head"],
+            r=8,
+        )
+        peft_model = get_peft_model(deepcopy(model), config)
+        peft_model.save_pretrained(tmp_path / "init-model")
+        peft_model.peft_config["default"].init_lora_weights = init_lora_weights
+
+        peft_model.base_model.model.linear.lora_B["default"].weight.data *= 2.0
+        peft_model.base_model.model.head.modules_to_save["default"].weight.data += 0.5
+        output_before = peft_model(data)
+
+        peft_model.save_pretrained(
+            tmp_path / "converted-model",
+            path_initial_model_for_weight_conversion=tmp_path / "init-model",
+        )
+
+        model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "converted-model")
+        output_after = model_converted(data)
+
+        tol = MUTATED_BASE_TOL
+        assert torch.allclose(output_before, output_after, atol=tol, rtol=tol)
+        assert hasattr(model_converted.base_model.model.head, "modules_to_save")
+
     @pytest.mark.parametrize(
         "config_kwargs, should_warn",
         [
