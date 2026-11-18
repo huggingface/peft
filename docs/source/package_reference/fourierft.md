@@ -33,7 +33,6 @@ FourierFT may be useful when reducing the number of trainable adapter parameters
 
 The FourierFT paper reports comparable or better results than LoRA in its evaluated language-understanding, text-generation, instruction-tuning, and image-classification experiments, with fewer trainable parameters in those configurations. These results are task-specific; they do not guarantee that FourierFT will outperform LoRA on a different model or dataset.
 
-In PEFT, FourierFT currently does not support quantized layers. Check that your model's target layers are supported before choosing it.
 
 The abstract from the paper is:
 
