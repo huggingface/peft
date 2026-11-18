@@ -6,6 +6,8 @@
     title: Quicktour
   - local: install
     title: Installation
+  - local: developer_guides/migration_1_0
+    title: Migrating to PEFT 1.0
 
 - title: Guides
   sections:

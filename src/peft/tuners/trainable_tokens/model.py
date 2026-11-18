@@ -27,6 +27,18 @@ class TrainableTokensModel(BaseTuner):
     prefix: str = "trainable_tokens_"
     tuner_layer_cls = TrainableTokensLayer
 
+    def supports_multiple_active_adapters(self, adapter_names: list[str]) -> bool:
+        # only supports multiple active adapters if their token indices don't intersect
+        for module in self.model.modules():
+            if isinstance(module, TrainableTokensLayer):
+                indices = set()
+                for name in adapter_names:
+                    token_indices = set(module.token_indices.get(name, []))
+                    if indices.intersection(token_indices):
+                        return False
+                    indices.update(token_indices)
+        return True
+
     def _prepare_adapter_config(self, peft_config, model_config):
         # target_modules can be none which prompts us to infer the embedding layer name ourselves.
         if peft_config.target_modules is None:
