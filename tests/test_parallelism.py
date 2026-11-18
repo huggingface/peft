@@ -91,6 +91,8 @@ class TestShardedBaseLayerShapes:
             # Note: Run cases in a loop instead of running separate parametrized tests to save the time for test setup
             # and teardown, which is signifcant. For this to work, the cases should be able to run without affecting one
             # another.
+            if cases is None:
+                cases = [[]]
             for args in cases:
                 # ensure that rng is reset for each test case
                 with torch.random.fork_rng(devices=[]):
@@ -102,7 +104,7 @@ class TestShardedBaseLayerShapes:
         finally:
             dist.destroy_process_group()
 
-    def _spawn(self, tmp_path, worker_fn, cases):
+    def _spawn(self, tmp_path, worker_fn, cases=None):
         # Each test owns its workers and rendezvous file, including under xdist; only its parameter cases share them.
         mp.spawn(self._run_worker, args=(str(tmp_path / "dist_init"), worker_fn, cases), nprocs=2, join=True)
 
