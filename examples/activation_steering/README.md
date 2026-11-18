@@ -1,6 +1,6 @@
 # Activation steering with Qwen3.5-4B
 
-This example applies configurable neuron interventions to [Qwen/Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B). The default is the original two-neuron recipe: zero-based layer 13, neuron 7956 at dose -1, and layer 14, neuron 8949 at dose +1.
+This example applies configurable neuron interventions to [Qwen/Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B). The default is the original two-neuron recipe: layer 13, neuron 7956 at dose -1, and layer 14, neuron 8949 at dose +1.
 
 Sources:
 
@@ -14,7 +14,7 @@ Install PEFT from this checkout and a Transformers version supporting Qwen3.5. R
 
 Each preset has an `adapter_config.json` under `presets/`. These contain configuration only; calibrate a preset to create its adapter checkpoint before generation. The additional recipes encode the supplied suggestions from [this tweet](https://x.com/_lyraaaa_/status/2113887372610077136).
 
-| Preset                                                       | Interventions (zero-based layer and neuron, signed dose)                       |
+| Preset                                                       | Interventions (layer and neuron, signed dose)                                  |
 |--------------------------------------------------------------|--------------------------------------------------------------------------------|
 | [evil](presets/evil/adapter_config.json)                     | L13 N7956 -1; L14 N8949 +1                                                     |
 | [sarcastiqwen](presets/sarcastiqwen/adapter_config.json)     | L15 N3920 +1                                                                   |
@@ -98,7 +98,7 @@ config = ActivationSteeringConfig(
 )
 ```
 
-You can change the projection names, zero-based neuron indices, and signed doses to define your intervention. The neurons of these Qwen MLPs are the input channels of `mlp.down_proj`. A scalar `init_val` broadcasts over the indices, or provide a list with one dose per index. `dose_unit="residual_stream"` measures the doses in units of the residual stream, as neuron-explorer does, so that its doses keep their meaning; the presets set it too.
+You can change the projection names, neuron indices, and signed doses to define your intervention. The neurons of these Qwen MLPs are the input channels of `mlp.down_proj`. A scalar `init_val` broadcasts over the indices, or provide a list with one dose per index. `dose_unit="residual_stream"` measures the doses in units of the residual stream, as neuron-explorer does, so that its doses keep their meaning; the presets set it too.
 
 ### 2. Create and calibrate the PEFT model
 
