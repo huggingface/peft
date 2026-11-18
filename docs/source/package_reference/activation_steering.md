@@ -186,6 +186,38 @@ print(model.peft_config["default"].steering_pattern)
 model.save_pretrained("path/to/checkpoint")
 ```
 
+The saved adapter loads like any other PEFT adapter. Generating with and without it shows the effect of the selected neurons:
+
+```python
+from peft import PeftModel
+
+base_model = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.bfloat16, device_map="auto")
+model = PeftModel.from_pretrained(base_model, "path/to/checkpoint").eval()
+
+inputs = tokenizer.apply_chat_template(
+    [{"role": "user", "content": "Tell me about your weekend."}],
+    tokenize=True,
+    return_dict=True,
+    return_tensors="pt",
+    add_generation_prompt=True,
+    enable_thinking=False,
+).to(model.device)
+prompt_length = inputs.input_ids.shape[1]
+generation_kwargs = {
+    "max_new_tokens": 64,
+    "do_sample": False,
+    "eos_token_id": tokenizer.convert_tokens_to_ids(["<|endoftext|>", "<|im_end|>"]),
+    "pad_token_id": tokenizer.pad_token_id,
+}
+
+with torch.inference_mode():
+    steered = model.generate(**inputs, **generation_kwargs)
+    with model.disable_adapter():
+        unsteered = model.generate(**inputs, **generation_kwargs)
+print("steered:", tokenizer.decode(steered[0, prompt_length:], skip_special_tokens=True))
+print("unsteered:", tokenizer.decode(unsteered[0, prompt_length:], skip_special_tokens=True))
+```
+
 Each kept neuron starts at a dose of `init_val`, with the sign that lowers the loss. The selection is first-order: each kept neuron helps on its own, but the effect of several neurons together is not the sum of their effects. The kept doses are regular trainable parameters, so they can be refined with any training loop, e.g. [`~transformers.Trainer`], before saving. A loss term that keeps the outputs on unrelated prompts close to those of the base model, computed under `model.disable_adapter()`, can limit side effects. With gradient checkpointing, run the backward pass of each steered forward pass before the next one, since the recomputation uses the attention mask of the most recent model call. Call `select_neurons` before creating the optimizer.
 
 # API
