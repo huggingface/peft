@@ -600,7 +600,7 @@ class TestTargetParameters:
         model = get_peft_model(MyModule(), config)
         lin = model.base_model.model.lin.get_base_layer()
         nn.utils.parametrize.register_parametrization(lin, "other_weight", MyParametrization())
-        with pytest.raises(ValueError, match="Cannot merge adapters into `other_weight`"):
+        with pytest.raises(ValueError, match=r"`lin\.base_layer\.other_weight`"):
             model.merge_adapter()
         assert torch.all(lin.other_weight == 1)
 

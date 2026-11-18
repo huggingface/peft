@@ -2800,7 +2800,9 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_merge_into_parametrized_base_layer_raises(self, test_name, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
         if model_id == "MHA":
-            pytest.skip("LoRA on MultiheadAttention manages out_proj itself, which fails with a parametrization.")
+            pytest.skip(
+                "LoRA on MultiheadAttention cannot handle parametrized weights, as it deletes and re-registers them."
+            )
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_into_parametrized_base_layer_raises(model_id, config_cls, config_kwargs)
 
@@ -2809,6 +2811,18 @@ class TestPeftCustomModel(PeftCommonTester):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_with_other_parametrized_tensor_works(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_get_merge_targets_returns_merged_tensors(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_get_merge_targets_returns_merged_tensors(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("config_kwargs", [{"config_C": "none", "config_D_E": "none"}, {"config_A_B": "none"}])
+    def test_glora_get_merge_targets_follow_paths(self, config_kwargs):
+        # GLoRA only changes the weight or the bias if the corresponding paths are used
+        config_kwargs = {"target_modules": ["lin0"], **config_kwargs}
+        self._test_get_merge_targets_returns_merged_tensors("MLP", GloraConfig, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_safe_merge_non_finite_bias_leaves_base_layer_unchanged(
@@ -5780,6 +5794,19 @@ class TestMultipleActiveAdapters:
             disabled_adapter_output = peft_model(**X)
 
         assert torch.allclose(disabled_adapter_output, base_output, atol=1e-4)
+
+    def test_merge_with_parametrized_weight_in_layer_of_other_adapter(self):
+        # Only the layers that an adapter is merged into are checked for parametrized tensors, so a parametrized weight
+        # in a layer that only has another adapter must not prevent merging.
+        torch.manual_seed(0)
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0"], init_lora_weights=False), "adapter0")
+        model.add_adapter("adapter1", LoraConfig(target_modules=["lin1"], init_lora_weights=False))
+        torch.nn.utils.parametrizations.weight_norm(model.base_model.model.lin1.get_base_layer())
+
+        model.merge_adapter(adapter_names=["adapter0"])  # must not raise
+        assert model.base_model.model.lin0.merged
+        with pytest.raises(ValueError, match=r"`lin1\.base_layer\.weight`"):
+            model.merge_adapter(adapter_names=["adapter1"])
 
     def test_oft_merge_multiple_active_adapters_matches_forward(self):
         # OFT rotations compose in the opposite order on the weight than on the input, so merging
@@ -9216,6 +9243,22 @@ class TestFsdp2UnshardedParams:
         assert len(params) == 4
         assert all(isinstance(param, DTensor) for param in params)
         return params
+
+    def test_merge_into_parametrized_weight_raises(self):
+        # The check for parametrized tensors before merging must also work when the weights are sharded DTensors.
+        from torch.distributed.fsdp import fully_shard
+
+        torch.manual_seed(0)
+        base_model = MLP()
+        torch.nn.utils.parametrizations.weight_norm(base_model.lin1)
+        model = get_peft_model(base_model, LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False))
+        fully_shard(model, mesh=init_device_mesh("cpu", (1,)))
+        assert isinstance(model.base_model.model.lin0.base_layer.weight, DTensor)
+
+        with pytest.raises(ValueError, match=r"`lin1\.base_layer\.weight`"):
+            model.merge_adapter()
+        # lin0 comes before lin1, but nothing is merged, since the check runs before merging
+        assert not model.base_model.model.lin0.merged
 
     @pytest.mark.parametrize("reshard_after_forward", [False, None])
     def test_disable_adapter_after_backward(self, reshard_after_forward):

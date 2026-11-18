@@ -679,10 +679,14 @@ class BaseTuner(nn.Module, ABC):
         """
         cast_adapter_dtype(self.model, adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
 
-    def _check_merge_allowed(self):
+    def _check_merge_allowed(self, adapter_names: Optional[list[str]] = None):
         """Helper method to check whether the adapter can be merged.
 
         Raise a ValueError if it is not possible to merge the adapter with the given configuration.
+
+        Args:
+            adapter_names (`list[str]`, *optional*):
+                The names of the adapters that will be merged. If `None`, the active adapters will be merged.
         """
         example_code = textwrap.dedent(
             """
@@ -715,6 +719,35 @@ class BaseTuner(nn.Module, ABC):
                 + example_code
             )
 
+        # A parametrized tensor is recomputed on every access, so merging into it would be silently lost. Check all
+        # layers before merging, so that the model is not left half-merged when one of them is parametrized.
+        parametrized_targets = {}
+        named_modules = list(self.model.named_modules())
+        module_names = {id(module): name for name, module in named_modules}
+        for module_name, module in named_modules:
+            if not isinstance(module, BaseTunerLayer):
+                continue
+            available_adapters = module._all_available_adapter_names()
+            adapters_to_merge = module.active_adapters if adapter_names is None else adapter_names
+            adapters_to_merge = [
+                name for name in adapters_to_merge if name in available_adapters and name not in module.merged_adapters
+            ]
+            if not adapters_to_merge:
+                continue
+            base_layer = module.get_base_layer()
+            for target in module.get_merge_targets(adapters_to_merge):
+                if nn.utils.parametrize.is_parametrized(base_layer, target):
+                    # nested tuner layers share a base layer, so only report each tensor once
+                    base_layer_name = module_names.get(id(base_layer), module_name)
+                    parametrized_targets.setdefault((id(base_layer), target), f"`{base_layer_name}.{target}`")
+        if parametrized_targets:
+            raise ValueError(
+                "Cannot merge the adapters because the following tensors that they would be merged into are "
+                f"parametrized: {', '.join(parametrized_targets.values())}. A parametrized tensor is recomputed on "
+                "every access, so the merge would be silently lost. Remove the parametrizations first, e.g. with "
+                "`torch.nn.utils.parametrize.remove_parametrizations(module, tensor_name, leave_parametrized=True)`."
+            )
+
     def _unload_and_optionally_merge(
         self,
         merge: bool = True,
@@ -723,7 +756,7 @@ class BaseTuner(nn.Module, ABC):
         adapter_names: Optional[list[str]] = None,
     ) -> None:
         if merge:
-            self._check_merge_allowed()
+            self._check_merge_allowed(adapter_names=adapter_names)
             if adapter_names:
                 # Reject ambiguous saved-module selections before merging or unloading any layers.
                 for module in self.model.modules():
@@ -1411,7 +1444,7 @@ class BaseTuner(nn.Module, ABC):
         #   safe_merge, adapter_names
         # This is not so nice but this method here started with only adapter_names, thus putting safe_merge first would
         # be a backwards incompatible change.
-        self._check_merge_allowed()
+        self._check_merge_allowed(adapter_names=adapter_names)
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
                 with onload_layer(module):
@@ -2040,6 +2073,20 @@ class BaseTunerLayer(ABC):
     def unmerge(self) -> None:
         raise NotImplementedError
 
+    def get_merge_targets(self, adapter_names: list[str]) -> list[str]:
+        """
+        Return the names of the tensors of the base layer that merging the given adapters writes into.
+
+        Before merging, it is checked that none of these tensors is parametrized, because the merge would be silently
+        lost otherwise. Names of tensors that the base layer does not have, like `bias` for a layer without bias, are
+        ignored. Override this method if the layer merges into tensors other than `weight`.
+
+        Args:
+            adapter_names (`list[str]`):
+                The names of the adapters that will be merged into this layer.
+        """
+        return ["weight"]
+
     @property
     def merged(self) -> bool:
         return bool(self.merged_adapters)
@@ -2596,16 +2643,12 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
     return peft_config
 
 
-def check_adapters_to_merge(
-    module: BaseTunerLayer, adapter_names: Optional[list[str]] = None, merge_into: Optional[str] = "weight"
-) -> list[str]:
+def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list[str]] = None) -> list[str]:
     """
     Helper function to check which adapters should be merged.
 
     Only return those adapters that are not already merged. Give a warning if some or all of the adapters are already
-    merged. Raise an error if `merge_into`, the name of the base layer tensor that the adapters are merged into, is
-    parametrized, since the merged weights would be silently discarded. Pass `merge_into=None` if merging does not
-    write into a tensor of the base layer.
+    merged.
 
     """
     if adapter_names is None:
@@ -2624,16 +2667,6 @@ def check_adapters_to_merge(
             )
         else:
             warnings.warn("All adapters are already merged, nothing to do.")
-
-    if adapter_names and (merge_into is not None):
-        base_layer = module.get_base_layer()
-        if nn.utils.parametrize.is_parametrized(base_layer, merge_into):
-            raise ValueError(
-                f"Cannot merge adapters into `{merge_into}` of {type(base_layer).__name__} because it is parametrized: "
-                "the merged weights would be silently lost, as a parametrized tensor is recomputed on every access. "
-                "Remove the parametrization first, e.g. with "
-                f"`torch.nn.utils.parametrize.remove_parametrizations(layer, '{merge_into}', leave_parametrized=True)`."
-            )
 
     return adapter_names
 

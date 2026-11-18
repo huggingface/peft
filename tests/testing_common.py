@@ -1066,35 +1066,42 @@ class PeftCommonTester:
         self._assert_base_layer_unchanged(layer, orig_weight, orig_bias)
 
     def _test_merge_into_parametrized_base_layer_raises(self, model_id, config_cls, config_kwargs):
-        # When the tensor that the adapters are merged into is parametrized, merging would write into a tensor that the
-        # parametrization recomputes on every access, so the base layer would silently stay unchanged. Merging must
-        # raise instead.
-        if issubclass(config_cls, LNTuningConfig):
-            pytest.skip("LN tuning swaps the layer on merge, so there is no merged tensor to write.")
-
+        # A parametrized tensor is recomputed on every access, so merging into it would be silently lost. Merging must
+        # raise instead, before any layer is merged, so that the model is not left half-merged.
         torch.manual_seed(0)
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
             config = config_cls(**config_kwargs)
             model = get_peft_model(model.to(self.torch_device), config)
 
-        layers = self._get_mergeable_tuner_layers(model)
-        if not layers:
-            pytest.skip("No mergeable tuner layers in this model.")
+        candidates = []
+        for layer in self._get_mergeable_tuner_layers(model):
+            base_layer = layer.get_base_layer()
+            targets = layer.get_merge_targets(layer.active_adapters)
+            targets = [target for target in targets if getattr(base_layer, target, None) is not None]
+            if targets:
+                candidates.append((layer, targets))
+        if not candidates:
+            pytest.skip("No tuner layer in this model merges into a tensor of its base layer.")
 
-        layer = layers[0]
+        # take the last layer, so that without a check before merging, the other layers would already be merged
+        layer, targets = candidates[-1]
         base_layer = layer.get_base_layer()
-        # BEFT merges into the bias, LoRA with target_parameters into the targeted parameter, the rest into the weight
-        if issubclass(config_cls, BeftConfig):
-            merge_into = "bias"
-        else:
-            merge_into = getattr(layer, "parameter_name", "weight")
-        torch.nn.utils.parametrize.register_parametrization(base_layer, merge_into, _NeutralParametrization())
+        for target in targets:
+            torch.nn.utils.parametrize.register_parametrization(base_layer, target, _NeutralParametrization())
         orig_weight = base_layer.weight.detach().clone()
         orig_bias = base_layer.bias.detach().clone() if getattr(base_layer, "bias", None) is not None else None
+        tuner_layers = [module for module in model.modules() if isinstance(module, BaseTunerLayer)]
 
-        with pytest.raises(ValueError, match=f"Cannot merge adapters into `{merge_into}`"):
+        with pytest.raises(ValueError, match=rf"\.{targets[0]}`"):
             model.merge_adapter()
+        assert not any(module.merged for module in tuner_layers)
+
+        with pytest.raises(ValueError, match=rf"\.{targets[0]}`"):
+            model.merge_and_unload()
+        # nothing was merged or unloaded
+        assert [module for module in model.modules() if isinstance(module, BaseTunerLayer)] == tuner_layers
+        assert not any(module.merged for module in tuner_layers)
         self._assert_base_layer_unchanged(layer, orig_weight, orig_bias)
 
     def _test_merge_with_other_parametrized_tensor_works(self, model_id, config_cls, config_kwargs):
@@ -1112,15 +1119,42 @@ class PeftCommonTester:
         layer = layers[0]
         base_layer = layer.get_base_layer()
         base_layer.register_parameter("other", torch.nn.Parameter(torch.zeros(1, device=self.torch_device)))
-        param_names = ["other"]
-        if issubclass(config_cls, (BeftConfig, LNTuningConfig)):
-            # BEFT only merges into the bias and LN tuning swaps the layer, so they don't merge into the weight either
-            param_names.append("weight")
-        for param_name in param_names:
-            torch.nn.utils.parametrize.register_parametrization(base_layer, param_name, _NeutralParametrization())
+        targets = layer.get_merge_targets(layer.active_adapters)
+        for name, _ in list(base_layer.named_parameters(recurse=False)):
+            if name not in targets:
+                torch.nn.utils.parametrize.register_parametrization(base_layer, name, _NeutralParametrization())
 
         model.merge_adapter()  # must not raise
         assert layer.merged
+
+    def _test_get_merge_targets_returns_merged_tensors(self, model_id, config_cls, config_kwargs):
+        # The check for parametrized tensors before merging relies on get_merge_targets, so it must return exactly the
+        # tensors of the base layer that merging changes.
+        torch.manual_seed(0)
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(**config_kwargs)
+            model = get_peft_model(model.to(self.torch_device), config)
+        with torch.no_grad():
+            # make sure that merging changes the base layer, even for adapters that are initialized as an identity
+            for param in model.parameters():
+                if param.requires_grad:
+                    param.add_(0.1 * torch.randn_like(param))
+
+        expected_targets, tensors_before = {}, {}
+        for layer in model.modules():
+            if isinstance(layer, BaseTunerLayer):
+                base_layer = layer.get_base_layer()
+                tensors = {name: param.detach().clone() for name, param in base_layer.named_parameters(recurse=False)}
+                tensors_before[layer] = (base_layer, tensors)
+                expected_targets[layer] = set(layer.get_merge_targets(layer.active_adapters)) & set(tensors)
+        if not tensors_before:
+            pytest.skip("No tuner layers in this model.")
+
+        model.merge_adapter()
+        for layer, (base_layer, tensors) in tensors_before.items():
+            changed = {name for name, tensor in tensors.items() if not torch.equal(getattr(base_layer, name), tensor)}
+            assert changed == expected_targets[layer]
 
     def _test_safe_merge_non_finite_bias_leaves_base_layer_unchanged(self, model_id, config_cls, config_kwargs):
         # A non-finite merged bias must be caught before the merged weight is written. The bias is poisoned in the

@@ -232,6 +232,7 @@ class MixedModel(BaseTuner):
         adapter_names: Optional[list[str]] = None,
     ):
         if merge:
+            self._check_merge_allowed(adapter_names=adapter_names)
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge layers when the model is gptq quantized")
 

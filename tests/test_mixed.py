@@ -928,6 +928,19 @@ class TestMixedAdapterTypes(unittest.TestCase):
             assert not torch.allclose(output0_save, output01_loaded, atol=atol, rtol=rtol)
             assert not torch.allclose(output1_save, output01_loaded, atol=atol, rtol=rtol)
 
+    def test_merge_and_unload_with_parametrized_weight_raises(self):
+        # Mixed models have their own merge_and_unload, which must also check for parametrized tensors before merging.
+        config0 = LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False)
+        config1 = LoHaConfig(target_modules=["lin0", "lin1"], init_weights=False)
+        peft_model = self._get_model(SimpleNet, config0, "adapter0")
+        peft_model.add_adapter("adapter1", config1)
+        peft_model.set_adapter(["adapter0", "adapter1"])
+        torch.nn.utils.parametrizations.weight_norm(peft_model.base_model.model.lin1.get_base_layer())
+
+        with pytest.raises(ValueError, match=r"`lin1\.base_layer\.base_layer\.weight`"):
+            peft_model.merge_and_unload()
+        assert not any(module.merged for module in peft_model.modules() if isinstance(module, BaseTunerLayer))
+
 
 class TestMixedAdapterLoading:
     @pytest.mark.parametrize("is_trainable", [False, True])
