@@ -224,6 +224,8 @@ class SVDConv2d(nn.Module, AdaLoraLayer):
         inference_mode = config.inference_mode
         if r < 0:
             raise ValueError(f"`r` should be a positive integer or 0, but the value passed is {r}")
+        if self.get_base_layer().groups > 1:
+            raise ValueError("AdaLoRA does not support Conv2d layers with groups > 1.")
 
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
@@ -332,14 +334,7 @@ class SVDConv2d(nn.Module, AdaLoraLayer):
                 delta_w = (lora_B @ (lora_A * lora_E) * scaling / ranknum).reshape(base.weight.shape)
                 # Use in-place add so result keeps its original dtype (matches SVDLinear);
                 # otherwise result would be upcast to lora_A.dtype and break subsequent fp16/bf16 ops.
-                result += nn.functional.conv2d(
-                    dropout(x),
-                    delta_w,
-                    stride=base.stride,
-                    padding=base.padding,
-                    dilation=base.dilation,
-                    groups=base.groups,
-                )
+                result += base._conv_forward(dropout(x), delta_w, None)
         return result
 
     def __repr__(self) -> str:

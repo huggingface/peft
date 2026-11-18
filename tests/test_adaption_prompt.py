@@ -58,6 +58,20 @@ class TestAdaptionPrompt:
         assert hasattr(model, "push_to_hub")
 
     @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    def test_merge_adapter_raises(self, model_id):
+        # Adaption prompt does not support merging; check that a helpful error is raised instead of an
+        # AttributeError from the underlying Transformers model.
+        with hub_online_once(model_id):
+            config = AdaptionPromptConfig(adapter_layers=1, adapter_len=4, task_type="CAUSAL_LM")
+            model = get_peft_model(self.transformers_class.from_pretrained(model_id), config)
+
+            msg = "Merging is not supported for adaption prompt"
+            with pytest.raises(TypeError, match=msg):
+                model.merge_adapter()
+            with pytest.raises(TypeError, match=msg):
+                model.unmerge_adapter()
+
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
     def test_prepare_for_training(self, model_id):
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
