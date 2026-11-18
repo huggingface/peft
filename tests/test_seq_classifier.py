@@ -54,6 +54,7 @@ from peft import (
     WaveFTConfig,
     get_peft_model,
 )
+from peft.import_utils import get_transformers_cache_name
 from peft.utils.other import ModulesToSaveWrapper
 
 from .testing_common import PeftCommonTester
@@ -478,7 +479,7 @@ class TestSequenceClassificationModels(PeftCommonTester):
     def test_forward_with_labels(self, model_id, config_cls, config_kwargs):
         # Check the full forward pass including the loss computation. This is especially relevant for prompt learning
         # methods, whose sequence classification forward (including the _prefix_tuning_forward fallback for models whose
-        # forward does not accept past_key_values) is implemented in PeftModelForSequenceClassification itself.
+        # forward does not explicitly accept a cache) is implemented in PeftModelForSequenceClassification itself.
         _skip_encoder_models(model_id, config_cls)
         with hub_online_once(model_id):
             # MPS can abort when MSE mixes bfloat16 predictions with float32 targets. Match the float32 regression
@@ -557,8 +558,8 @@ class TestSequenceClassificationModels(PeftCommonTester):
         "problem_type", ["regression", "single_label_classification", "multi_label_classification"]
     )
     def test_prefix_tuning_legacy_forward_loss_branches(self, problem_type):
-        # BertForSequenceClassification.forward does not accept past_key_values, so prefix tuning takes the legacy code
-        # path in PeftModelForSequenceClassification._prefix_tuning_forward, which calls the transformer backbone
+        # BertForSequenceClassification.forward does not explicitly accept a cache, so prefix tuning takes the legacy
+        # code path in PeftModelForSequenceClassification._prefix_tuning_forward, which calls the transformer backbone
         # directly and computes the loss inline. Check that inline loss computation for all problem types.
         model_id = "peft-internal-testing/tiny-random-BertForSequenceClassification"
         num_labels = 1 if problem_type == "regression" else 3
@@ -567,7 +568,7 @@ class TestSequenceClassificationModels(PeftCommonTester):
                 model_id, num_labels=num_labels, problem_type=problem_type, ignore_mismatched_sizes=True
             )
         # ensure that this test actually covers the legacy code path
-        assert "past_key_values" not in inspect.signature(base_model.forward).parameters
+        assert get_transformers_cache_name() not in inspect.signature(base_model.forward).parameters
 
         config = PrefixTuningConfig(task_type="SEQ_CLS", num_virtual_tokens=4)
         model = get_peft_model(base_model, config).to(self.torch_device)
