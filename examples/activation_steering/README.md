@@ -156,7 +156,6 @@ They can also load it directly with `PeftModel` and generate:
 ```python
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
-from transformers.utils import logging
 
 from peft import PeftConfig, PeftModel
 

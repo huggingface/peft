@@ -43,7 +43,6 @@ from peft.tuners.activation_steering import calibrate_activation_steering
 
 model_id = "Qwen/Qwen3.5-4B"
 config = ActivationSteeringConfig(
-    base_model_name_or_path=model_id,
     task_type=TaskType.CAUSAL_LM,
     steering_pattern={"layers.15.mlp.down_proj": {"indices": [3920], "init_val": 0.5}},
     dose_unit="residual_stream",
@@ -76,14 +75,12 @@ Others can then use this adapter like this:
 ```python
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
-from transformers.utils import logging
 
-from peft import PeftConfig, PeftModel
+from peft import PeftModel
 
 set_seed(42)
 model_id = "Qwen/Qwen3.5-4B"
 adapter_id = "your-username/qwen3.5-4b-my-intervention"
-config = PeftConfig.from_pretrained(adapter_id)
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 base_model = AutoModelForCausalLM.from_pretrained(
     model_id,
@@ -128,7 +125,6 @@ Without a `steering_pattern`, every input channel of the targeted projections ge
 from peft.tuners.activation_steering import calibrate_activation_steering, select_neurons
 
 config = ActivationSteeringConfig(
-    base_model_name_or_path=model_id,
     task_type=TaskType.CAUSAL_LM,
     target_modules=["down_proj"],
     # e.g. leave out the last 2 of the 32 layers
