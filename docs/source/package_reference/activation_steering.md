@@ -31,6 +31,8 @@ A neuron is an input channel of a linear (or `Conv1D`) projection, typically an 
 
 ## Example
 
+The following example steers a single neuron of Qwen3.5-4B, the input channel 3920 of `layers.15.mlp.down_proj`, with a dose of 0.5 in units of the residual stream. Calibration measures this unit on a short text, after which the adapter is saved and shared on the Hub:
+
 ```python
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
