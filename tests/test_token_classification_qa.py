@@ -13,9 +13,14 @@
 
 import pytest
 import torch
-from transformers import AutoModelForQuestionAnswering, AutoModelForTokenClassification
+from transformers import (
+    AutoModelForQuestionAnswering,
+    AutoModelForTokenClassification,
+    BertConfig,
+    BertForQuestionAnswering,
+)
 
-from peft import BOFTConfig, IA3Config, LoraConfig, VeraConfig
+from peft import BOFTConfig, IA3Config, LoraConfig, PromptTuningConfig, VeraConfig, get_peft_model
 
 from .testing_common import PeftCommonTester
 
@@ -81,3 +86,58 @@ class TestQuestionAnsweringModels(PeftCommonTester):
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_add_adapter_no_autocast_adapter_dtype(self, model_id, config_cls, config_kwargs, dtype):
         self._test_add_adapter_no_autocast_adapter_dtype(model_id, config_cls, config_kwargs.copy(), dtype=dtype)
+
+    def get_bert_qa_model(self):
+        # BERT uses token_type_ids (segment embeddings) and position_ids, which are relevant for extractive QA
+        config = BertConfig(
+            vocab_size=100,
+            hidden_size=32,
+            num_hidden_layers=2,
+            num_attention_heads=4,
+            intermediate_size=37,
+            type_vocab_size=2,
+            max_position_embeddings=64,
+        )
+        torch.manual_seed(0)
+        return BertForQuestionAnswering(config).eval().to(self.torch_device)
+
+    def get_bert_qa_inputs(self):
+        torch.manual_seed(0)
+        input_ids = torch.randint(5, 100, (2, 10))
+        return {
+            "input_ids": input_ids.to(self.torch_device),
+            "attention_mask": torch.ones_like(input_ids).to(self.torch_device),
+            "token_type_ids": torch.tensor([[0] * 4 + [1] * 6, [0] * 5 + [1] * 5]).to(self.torch_device),
+            "position_ids": (torch.arange(10).unsqueeze(0).expand(2, -1) + 3).to(self.torch_device),
+        }
+
+    @pytest.mark.parametrize("input_name", ["token_type_ids", "position_ids"])
+    def test_token_type_ids_and_position_ids_are_passed_to_base_model(self, input_name):
+        # PeftModelForQuestionAnswering.forward takes token_type_ids and position_ids as named arguments, check that
+        # they reach the base model, see #3857. LoRA is enough here, as all non-prompt-learning methods share this path.
+        model = self.get_bert_qa_model()
+        inputs = self.get_bert_qa_inputs()
+        kwargs = {"input_ids": inputs["input_ids"], "attention_mask": inputs["attention_mask"]}
+        with torch.inference_mode():
+            output_base = model(**kwargs, **{input_name: inputs[input_name]}).start_logits
+            output_base_without = model(**kwargs).start_logits
+        # sanity check: the input changes the output of the base model
+        assert not torch.allclose(output_base, output_base_without)
+
+        config = LoraConfig(task_type="QUESTION_ANS", target_modules=["query", "value"])
+        model = get_peft_model(model, config).eval()  # LoRA is initialized as identity transform
+        with torch.inference_mode():
+            output_peft = model(**kwargs, **{input_name: inputs[input_name]}).start_logits
+        assert torch.allclose(output_peft, output_base, atol=1e-4, rtol=1e-4)
+
+    def test_prompt_learning_uses_token_type_ids(self):
+        # For prompt learning, token_type_ids are padded for the virtual tokens and passed to the base model
+        model = self.get_bert_qa_model()
+        inputs = self.get_bert_qa_inputs()
+        config = PromptTuningConfig(task_type="QUESTION_ANS", num_virtual_tokens=4)
+        model = get_peft_model(model, config).eval()
+        kwargs = {"input_ids": inputs["input_ids"], "attention_mask": inputs["attention_mask"]}
+        with torch.inference_mode():
+            output_with = model(**kwargs, token_type_ids=inputs["token_type_ids"]).start_logits
+            output_without = model(**kwargs).start_logits
+        assert not torch.allclose(output_with, output_without)
