@@ -81,6 +81,8 @@ python examples/activation_steering/qwen3_5.py generate --no-do-sample
 
 ## Create and share your own intervention
 
+This section is for interventions where you already know which neurons to steer and by how much. Otherwise, start with [Find the neurons for a new behavior](#find-the-neurons-for-a-new-behavior).
+
 A calibrated intervention is a regular PEFT adapter checkpoint. Recipients need this PEFT checkout, or a release containing `ActivationSteeringConfig`, and a Transformers version supporting Qwen3.5.
 
 ### 1. Define the intervention
