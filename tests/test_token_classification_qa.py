@@ -91,8 +91,11 @@ class TestPrefixTuning:
         [(AutoModelForTokenClassification, "TOKEN_CLS"), (AutoModelForQuestionAnswering, "QUESTION_ANS")],
     )
     def test_prefix_tuning_forward_with_labels(self, model_id, model_cls, task_type):
-        # These heads delegate cache handling to their backbone; exercises PEFT's prefix-tuning signature checks in
-        # _prefix_tuning_forward
+        # For these task types, prefix tuning inspects the forward signature to determine where to pass the prefix
+        # cache. This can be the forward of the task model but it can also be the forward of the backbone as a
+        # fallback. As past_key_values was renamed in Transformers to cache, we need to ensure that the signature check
+        # is updated in all places (see #4165). This test ensures that we cover this by using models that hit the
+        # fallback.
         with hub_online_once(model_id):
             base_model = model_cls.from_pretrained(model_id, num_labels=2, ignore_mismatched_sizes=True)
             config = PrefixTuningConfig(task_type=task_type, num_virtual_tokens=4)
