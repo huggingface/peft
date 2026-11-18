@@ -119,7 +119,7 @@ For a complete script using Qwen 3.5 4B, check [this example](https://github.com
 
 ## Finding neurons
 
-Without a `steering_pattern`, every input channel of the targeted projections gets a dose of zero, which leaves the model unchanged. [`~tuners.activation_steering.select_neurons`] then scores all doses at once by the gradient of a loss, keeps the best ones, and removes all others in place, so that the saved adapter stays small. The following example looks for neurons that make Qwen3.5-0.8B talk like a pirate, using a few example replies:
+Without a `steering_pattern`, every input channel of the targeted projections gets a dose of zero, which leaves the model unchanged. [`~tuners.activation_steering.select_neurons`] then scores all doses at once by the gradient of a loss, keeps the best ones, and removes all others in place, so that the saved adapter stays small. The following example looks for neurons that make Qwen3.5-0.8B reply in German. The examples of this behavior are the model's own replies when a system prompt asks for it, so that the selected neurons take the place of the system prompt:
 
 ```python
 import torch
@@ -132,6 +132,54 @@ from peft.tuners.activation_steering import calibrate_activation_steering, selec
 model_id = "Qwen/Qwen3.5-0.8B"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 base_model = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.bfloat16, device_map="auto")
+eos_token_id = tokenizer.convert_tokens_to_ids(["<|endoftext|>", "<|im_end|>"])
+
+
+def tokenize_chat(messages):
+    return tokenizer.apply_chat_template(
+        messages,
+        tokenize=True,
+        return_dict=True,
+        return_tensors="pt",
+        add_generation_prompt=True,
+        enable_thinking=False,
+    ).to(base_model.device)
+
+
+# examples of the desired behavior: the model's own replies when a system prompt asks for it
+instruction = {"role": "system", "content": "Always reply in German, whatever language the user writes in."}
+prompts = [
+    "Tell me about your weekend.",
+    "How do I reverse a list in Python?",
+    "What is the weather like today?",
+    "Can you recommend a book?",
+    "What should I cook for dinner?",
+    "Explain what a black hole is.",
+    "Give me a tip for staying focused.",
+    "What is your favorite season and why?",
+]
+batches = []
+for prompt in prompts:
+    question = {"role": "user", "content": prompt}
+    instructed = tokenize_chat([instruction, question])
+    with torch.no_grad():
+        output = base_model.generate(
+            **instructed,
+            max_new_tokens=48,
+            do_sample=False,
+            eos_token_id=eos_token_id,
+            pad_token_id=tokenizer.pad_token_id,
+        )
+    reply_ids = output[:, instructed.input_ids.shape[1] :]
+    # the same reply without the system prompt; only the reply tokens count in the loss
+    prompt_ids = tokenize_chat([question]).input_ids
+    batches.append(
+        {
+            "input_ids": torch.cat([prompt_ids, reply_ids], dim=1),
+            "labels": torch.cat([torch.full_like(prompt_ids, -100), reply_ids], dim=1),
+        }
+    )
+
 num_layers = base_model.config.get_text_config().num_hidden_layers
 config = ActivationSteeringConfig(
     task_type=TaskType.CAUSAL_LM,
@@ -149,39 +197,14 @@ calibration_text = (
 inputs = tokenizer(calibration_text, return_tensors="pt").to(model.device)
 calibrate_activation_steering(model, {**inputs, "use_cache": False})
 
-# examples of the desired behavior: prompts with replies in the target style
-examples = [
-    ("Tell me about your weekend.", "Arr, me weekend be grand, matey! I sailed the seas and counted me gold."),
-    ("How do I reverse a list in Python?", "Arr, ye slice it with [::-1], matey, and the list sails backwards!"),
-    ("What is the weather like today?", "Arr, the skies be grey and the wind be howlin', me hearty!"),
-    ("Can you recommend a book?", "Aye, matey! Treasure Island be the finest tale for any landlubber."),
-]
-
-
-def tokenize(prompt, reply):
-    prompt_text = tokenizer.apply_chat_template(
-        [{"role": "user", "content": prompt}], tokenize=False, add_generation_prompt=True, enable_thinking=False
-    )
-    prompt_ids = tokenizer(prompt_text, add_special_tokens=False).input_ids
-    reply_ids = tokenizer(reply + "<|im_end|>", add_special_tokens=False).input_ids
-    # only the reply tokens count in the loss
-    labels = [-100] * len(prompt_ids) + reply_ids
-    return {
-        "input_ids": torch.tensor([prompt_ids + reply_ids], device=model.device),
-        "labels": torch.tensor([labels], device=model.device),
-    }
-
-
-batches = [tokenize(prompt, reply) for prompt, reply in examples]
-
 
 def train_step():
     for batch in batches:
         model(**batch, use_cache=False).loss.backward()
 
 
-# by default, keep 8 neurons, each starting at a dose of 0.1 with the sign that lowers the loss
-select_neurons(model, train_step)
+# keep 4 neurons, each starting at a dose of 0.5 with the sign that lowers the loss
+select_neurons(model, train_step, num_neurons=4, init_val=0.5)
 print(model.peft_config["default"].steering_pattern)
 model.save_pretrained("path/to/checkpoint")
 ```
@@ -194,19 +217,12 @@ from peft import PeftModel
 base_model = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.bfloat16, device_map="auto")
 model = PeftModel.from_pretrained(base_model, "path/to/checkpoint").eval()
 
-inputs = tokenizer.apply_chat_template(
-    [{"role": "user", "content": "Tell me about your weekend."}],
-    tokenize=True,
-    return_dict=True,
-    return_tensors="pt",
-    add_generation_prompt=True,
-    enable_thinking=False,
-).to(model.device)
+inputs = tokenize_chat([{"role": "user", "content": "How do I make a cup of tea?"}])
 prompt_length = inputs.input_ids.shape[1]
 generation_kwargs = {
     "max_new_tokens": 64,
     "do_sample": False,
-    "eos_token_id": tokenizer.convert_tokens_to_ids(["<|endoftext|>", "<|im_end|>"]),
+    "eos_token_id": eos_token_id,
     "pad_token_id": tokenizer.pad_token_id,
 }
 
@@ -218,7 +234,7 @@ print("steered:", tokenizer.decode(steered[0, prompt_length:], skip_special_toke
 print("unsteered:", tokenizer.decode(unsteered[0, prompt_length:], skip_special_tokens=True))
 ```
 
-Each kept neuron starts at a dose of `init_val`, with the sign that lowers the loss. The selection is first-order: each kept neuron helps on its own, but the effect of several neurons together is not the sum of their effects. The gradient ranks the neurons, but it shows neither the dose at which the behavior appears nor the side effects, so choosing among the candidates is largely trial and error. Compare generations with and without the adapter, as above, on prompts for the behavior and on unrelated prompts, and try other values of `num_neurons` and `init_val`. The useful doses lie in a narrow range: replies that repeat themselves are a sign that the doses are too large. To try a subset of the selected neurons, create an adapter whose `steering_pattern` contains only their entries of the printed pattern, with the same `dose_unit`, and calibrate it.
+Each kept neuron starts at a dose of `init_val`, with the sign that lowers the loss. The selection is first-order: each kept neuron helps on its own, but the effect of several neurons together is not the sum of their effects. The gradient ranks the neurons, but it shows neither the dose at which the behavior appears nor the side effects, so choosing among the candidates is largely trial and error. Compare generations with and without the adapter, as above, on prompts for the behavior and on unrelated prompts, and try other values of `num_neurons` and `init_val`. The useful doses lie in a narrow range: in this example, a dose of 0.3 turns about 7 in 10 replies into German, and a dose of 0.7 nearly all of them, but makes some replies repeat themselves. Examples in the model's own words, as above, tend to work better than hand-written ones, since the loss also rewards the other ways in which hand-written replies differ from the model's, such as their length and wording, and the selected neurons may change those instead. To try a subset of the selected neurons, create an adapter whose `steering_pattern` contains only their entries of the printed pattern, with the same `dose_unit`, and calibrate it.
 
 The kept doses are regular trainable parameters, so they can also be refined with any training loop, e.g. [`~transformers.Trainer`], before saving. A loss term that keeps the outputs on unrelated prompts close to those of the base model, computed under `model.disable_adapter()`, can limit side effects. With gradient checkpointing, run the backward pass of each steered forward pass before the next one, since the recomputation uses the attention mask of the most recent model call. Call `select_neurons` before creating the optimizer.
 
