@@ -2765,30 +2765,7 @@ class TestPeftCustomModel(PeftCommonTester):
             config_kwargs["r"] = 1
             # Use exact Cayley so approximation error cannot affect the padding assertions.
             config_kwargs["use_cayley_neumann"] = False
-            # OFT currently rejects Conv2d dilation > 1 and nonzero padding.
-            if base.conv2d.dilation != (1, 1):
-                with pytest.raises(ValueError, match="Conv2d with dilation > 1 is not supported by OFT"):
-                    get_peft_model(base, config_cls(**config_kwargs))
-                return
-            if base.conv2d.padding != "valid":
-                with pytest.raises(ValueError, match="Conv2d with non-zero padding is not supported by OFT"):
-                    get_peft_model(base, config_cls(**config_kwargs))
-                return
-        if (config_cls is BOFTConfig and base.conv2d.kernel_size[0] != base.conv2d.kernel_size[1]) or (
-            config_cls is OFTConfig and init_weights and base.conv2d.kernel_size != (1, 1)
-        ):
-            # Known BOFT non-square kernel (#4152) and OFT Conv2d forward (#3829) bugs.
-            # OFT's native-output comparison only applies to identity initialization.
-            request.node.add_marker(
-                pytest.mark.xfail(
-                    reason=(
-                        "BOFT non-square kernels: https://github.com/huggingface/peft/issues/4152; "
-                        "OFT Conv2d forward correctness: https://github.com/huggingface/peft/issues/3829"
-                    ),
-                    strict=True,
-                    raises=(ValueError, RuntimeError) if config_cls is BOFTConfig else AssertionError,
-                )
-            )
+
         model = get_peft_model(base, config_cls(**config_kwargs)).eval()
         output = model(inputs)
         conv_output = model.get_base_model().conv2d(inputs)
