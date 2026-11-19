@@ -14,11 +14,39 @@
 
 from __future__ import annotations
 
+import operator
 from dataclasses import dataclass, field
 from typing import Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
+
+
+def _validate_token_indices(token_indices: list[int]) -> list[int]:
+    """Reject token index lists that can never be written into an embedding matrix.
+
+    An empty list still lets the adapter be created, but the layer ends up with a `(0, embed_dim)` delta and the first
+    forward dies inside `index_copy_` with "Expected a long tensor for index, but got Float" - an error that mentions
+    neither `token_indices` nor `TrainableTokens`. Non-integer entries fail the same way, so both are caught here.
+
+    The returned list contains plain Python ints, which also keeps `to_dict()` serializable when users pass e.g. numpy
+    integers.
+    """
+    if not token_indices:
+        raise ValueError(
+            "`token_indices` must contain at least one token index. Pass the indices of the tokens you want to train, "
+            "e.g. `token_indices=[0, 1]`."
+        )
+
+    try:
+        indices = [operator.index(index) for index in token_indices]
+    except TypeError:
+        raise ValueError(f"`token_indices` must only contain integers, got {token_indices!r}.") from None
+
+    if any(index < 0 for index in indices):
+        raise ValueError(f"`token_indices` must not contain negative values, got {token_indices!r}.")
+
+    return indices
 
 
 @dataclass
@@ -35,9 +63,10 @@ class TrainableTokensConfig(PeftConfig):
 
     Args:
         token_indices (`list[int]`):
-            List of integers, signifying the indices of the tokens you want to be trainable. To find the index of a
-            token with a tokenizer, you can tokenize the string and look at the returned `input_ids`. The closer the
-            amount of indices is to the total amount of tokens, the less efficient this method gets.
+            List of integers, signifying the indices of the tokens you want to be trainable. Must not be empty. To
+            find the index of a token with a tokenizer, you can tokenize the string and look at the returned
+            `input_ids`. The closer the amount of indices is to the total amount of tokens, the less efficient this
+            method gets.
         target_modules (`Optional[Union[list[str], str]]`):
             List of module names or regex expression of the module names to replace with our `TrainableTokensLayer`. If
             not defined, it will attempt to get the model's input embedding layer if the model has a
@@ -87,3 +116,4 @@ class TrainableTokensConfig(PeftConfig):
     def __post_init__(self):
         super().__post_init__()
         self.peft_type = PeftType.TRAINABLE_TOKENS
+        self.token_indices = _validate_token_indices(self.token_indices)

@@ -133,6 +133,25 @@ class TestTrainableTokens:
             trainable_tokens_layer.trainable_tokens_delta[adapter_name].data
         )
 
+    @pytest.mark.parametrize("token_indices", [[], (), None])
+    def test_empty_token_indices_is_rejected(self, token_indices):
+        # without the check the config is accepted, the layer builds a (0, embed_dim) delta, and the first forward
+        # dies inside index_copy_ with "Expected a long tensor for index, but got Float"
+        with pytest.raises(ValueError) as e:
+            TrainableTokensConfig(target_modules=["embed_tokens"], token_indices=token_indices)
+        assert "at least one token index" in str(e.value)
+
+    @pytest.mark.parametrize("token_indices", [[0.5], ["1"], [0, None]])
+    def test_non_integer_token_indices_is_rejected(self, token_indices):
+        with pytest.raises(ValueError) as e:
+            TrainableTokensConfig(target_modules=["embed_tokens"], token_indices=token_indices)
+        assert "must only contain integers" in str(e.value)
+
+    def test_negative_token_indices_is_rejected(self):
+        with pytest.raises(ValueError) as e:
+            TrainableTokensConfig(target_modules=["embed_tokens"], token_indices=[0, -1])
+        assert "negative" in str(e.value)
+
     @pytest.mark.parametrize("standalone", [True, False])
     def test_linear_output_preserves_bias(self, standalone):
         base_model = ModelWithOutputHeadBias().eval()
