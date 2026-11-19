@@ -583,14 +583,14 @@ class TestMixedAdapterTypes(unittest.TestCase):
         config2 = AdaLoraConfig(r=4, lora_alpha=4, target_modules=["lin1"], init_lora_weights=False, total_step=1)
         peft_model.add_adapter("adapter2", config2)
 
-        # OFT is not commutative with the other adapters, add it before adapter3 so that it is in the middle of lin0
-        config4 = OFTConfig(target_modules=["lin0"], init_weights=False, r=0, oft_block_size=2)
-        peft_model.add_adapter("adapter4", config4)
-
-        config3 = LoKrConfig(r=4, alpha=4, target_modules=["lin0", "lin1"], init_weights=False)
+        # OFT is not commutative with the other adapters, add it before adapter4 so that it is in the middle of lin0
+        config3 = OFTConfig(target_modules=["lin0"], init_weights=False, r=0, oft_block_size=2)
         peft_model.add_adapter("adapter3", config3)
 
-        peft_model.set_adapter(["adapter0", "adapter1", "adapter2", "adapter4", "adapter3"])
+        config4 = LoKrConfig(r=4, alpha=4, target_modules=["lin0", "lin1"], init_weights=False)
+        peft_model.add_adapter("adapter4", config4)
+
+        peft_model.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3", "adapter4"])
         output_mixed = peft_model(input)
         assert torch.isfinite(output_base).all()
         assert not torch.allclose(output_base, output_mixed, atol=atol, rtol=rtol)
@@ -609,18 +609,18 @@ class TestMixedAdapterTypes(unittest.TestCase):
         assert torch.isfinite(output_merged).all()
         assert torch.allclose(output_mixed, output_merged, atol=atol, rtol=rtol)
 
-        # merge and unload only adapter1 and adapter3
+        # merge and unload only adapter1 and adapter4
         model_copy = copy.deepcopy(peft_model)
-        model_copy.set_adapter(["adapter1", "adapter3"])
-        output_13 = model_copy(input)
-        assert torch.isfinite(output_13).all()
-        assert not torch.allclose(output_mixed, output_13, atol=atol, rtol=rtol)
+        model_copy.set_adapter(["adapter1", "adapter4"])
+        output_14 = model_copy(input)
+        assert torch.isfinite(output_14).all()
+        assert not torch.allclose(output_mixed, output_14, atol=atol, rtol=rtol)
 
-        model_copy.set_adapter(["adapter0", "adapter1", "adapter2", "adapter4", "adapter3"])
-        model_merged_unloaded = model_copy.merge_and_unload(adapter_names=["adapter1", "adapter3"])
-        output_merged_13 = model_merged_unloaded(input)
-        assert torch.isfinite(output_merged_13).all()
-        assert torch.allclose(output_13, output_merged_13, atol=atol, rtol=rtol)
+        model_copy.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3", "adapter4"])
+        model_merged_unloaded = model_copy.merge_and_unload(adapter_names=["adapter1", "adapter4"])
+        output_merged_14 = model_merged_unloaded(input)
+        assert torch.isfinite(output_merged_14).all()
+        assert torch.allclose(output_14, output_merged_14, atol=atol, rtol=rtol)
 
         # test unloading
         model_copy = copy.deepcopy(peft_model)
