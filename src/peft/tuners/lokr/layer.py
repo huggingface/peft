@@ -281,7 +281,9 @@ class LoKrLayer(nn.Module, LycorisLayer):
             drop = (torch.rand(weight.size(0)) > rank_dropout).float()
             drop = drop.view(-1, *[1] * len(weight.shape[1:])).to(weight.device)
             if self.rank_dropout_scale[adapter_name]:
-                drop /= drop.mean()
+                drop_mean = drop.mean()
+                if drop_mean > 0:
+                    drop /= drop_mean
             weight *= drop
 
         return weight

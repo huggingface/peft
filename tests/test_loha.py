@@ -46,3 +46,29 @@ class TestLoHaCustomGradients:
         )
         scale = torch.tensor(0.7, dtype=torch.float64)
         assert torch.autograd.gradcheck(lambda *tensors: HadaWeightCP.apply(*tensors, scale), args)
+
+
+def test_loha_rank_dropout_no_nan():
+    from torch import nn
+    from peft import LoHaConfig, get_peft_model
+    torch.manual_seed(0)
+    model = nn.Sequential(nn.Linear(8, 8))
+    config = LoHaConfig(r=4, rank_dropout=1.0, target_modules=["0"])
+    peft_model = get_peft_model(model, config)
+    peft_model.train()
+    x = torch.randn(2, 8)
+    out = peft_model(x)
+    assert not torch.isnan(out).any(), "NaN detected in LoHa output with 100% rank dropout"
+
+
+def test_lokr_rank_dropout_no_nan():
+    from torch import nn
+    from peft import LoKrConfig, get_peft_model
+    torch.manual_seed(0)
+    model = nn.Sequential(nn.Linear(8, 8))
+    config = LoKrConfig(r=4, rank_dropout=1.0, rank_dropout_scale=True, target_modules=["0"])
+    peft_model = get_peft_model(model, config)
+    peft_model.train()
+    x = torch.randn(2, 8)
+    out = peft_model(x)
+    assert not torch.isnan(out).any(), "NaN detected in LoKr output with 100% rank dropout"
