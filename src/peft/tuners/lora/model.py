@@ -1122,6 +1122,9 @@ class LoraModel(BaseTuner):
                 tensors_lora[name] = torch.cat(
                     [output_state_dict[name], -mutated_init_state_dict[".".join(name.split(".")[1:])]], dim=1
                 )
+            else:
+                # Retain non-LoRA parameters such as modules_to_save or trainable tokens
+                tensors_lora[name] = output_state_dict[name]
 
         return tensors_lora
 
