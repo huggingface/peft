@@ -71,6 +71,30 @@ def dtensor_from_local_like(local_tensor: torch.Tensor, ref: torch.Tensor) -> to
     )
 
 
+def dtensor_to_singleton_submesh(tensor: torch.Tensor, target_mesh: torch.distributed.DeviceMesh) -> torch.Tensor:
+    """Drop size-one mesh axes without moving the local shard or changing its gradient."""
+    from torch.distributed.tensor import DTensor
+
+    source_mesh = tensor.device_mesh
+    source_names, target_names = source_mesh.mesh_dim_names, target_mesh.mesh_dim_names
+    if not source_names or not target_names or any(name not in source_names for name in target_names):
+        raise ValueError("Expected a compatible named device submesh.")
+
+    retained_dims = [source_names.index(name) for name in target_names]
+    if source_mesh[target_names] != target_mesh or any(
+        source_mesh.size(dim) != 1 for dim in range(source_mesh.ndim) if dim not in retained_dims
+    ):
+        raise ValueError("Can only drop singleton device mesh dimensions.")
+
+    return DTensor.from_local(
+        tensor.to_local(),
+        target_mesh,
+        [tensor.placements[dim] for dim in retained_dims],
+        shape=tensor.shape,
+        stride=tensor.stride(),
+    )
+
+
 def check_deepspeed_zero3_enabled() -> bool:
     if packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.33.0"):
         from transformers.integrations import is_deepspeed_zero3_enabled
