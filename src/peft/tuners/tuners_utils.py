@@ -734,12 +734,14 @@ class BaseTuner(nn.Module, ABC):
             ]
             if not adapters_to_merge:
                 continue
+
             base_layer = module.get_base_layer()
             for target in module.get_merge_targets(adapters_to_merge):
                 if nn.utils.parametrize.is_parametrized(base_layer, target):
                     # nested tuner layers share a base layer, so only report each tensor once
                     base_layer_name = module_names.get(id(base_layer), module_name)
                     parametrized_targets.setdefault((id(base_layer), target), f"`{base_layer_name}.{target}`")
+
         if parametrized_targets:
             raise ValueError(
                 "Cannot merge the adapters because the following tensors that they would be merged into are "
@@ -2075,15 +2077,14 @@ class BaseTunerLayer(ABC):
 
     def get_merge_targets(self, adapter_names: list[str]) -> list[str]:
         """
-        Return the names of the tensors of the base layer that merging the given adapters writes into.
-
-        Before merging, it is checked that none of these tensors is parametrized, because the merge would be silently
-        lost otherwise. Names of tensors that the base layer does not have, like `bias` for a layer without bias, are
-        ignored. Override this method if the layer merges into tensors other than `weight`.
+        Return the names of the base layer parameters that merging the given adapters writes into.
 
         Args:
             adapter_names (`list[str]`):
-                The names of the adapters that will be merged into this layer.
+                The names of the adapters to merge.
+
+        Returns:
+            `list[str]`: The names of the base layer parameters, e.g. `["weight"]`.
         """
         return ["weight"]
 

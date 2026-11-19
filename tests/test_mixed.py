@@ -930,16 +930,24 @@ class TestMixedAdapterTypes(unittest.TestCase):
 
     def test_merge_and_unload_with_parametrized_weight_raises(self):
         # Mixed models have their own merge_and_unload, which must also check for parametrized tensors before merging.
-        config0 = LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False)
+        config0 = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
         config1 = LoHaConfig(target_modules=["lin0", "lin1"], init_weights=False)
         peft_model = self._get_model(SimpleNet, config0, "adapter0")
         peft_model.add_adapter("adapter1", config1)
         peft_model.set_adapter(["adapter0", "adapter1"])
         torch.nn.utils.parametrizations.weight_norm(peft_model.base_model.model.lin1.get_base_layer())
 
-        with pytest.raises(ValueError, match=r"`lin1\.base_layer\.base_layer\.weight`"):
+        with pytest.raises(ValueError, match=r"`lin1\.base_layer\.weight`"):
             peft_model.merge_and_unload()
         assert not any(module.merged for module in peft_model.modules() if isinstance(module, BaseTunerLayer))
+
+        # adapter0 doesn't target lin1, so it can be merged on its own, even while adapter1 is active
+        input = torch.arange(90).reshape(9, 10).to(self.torch_device)
+        peft_model.set_adapter("adapter0")
+        output_adapter0 = peft_model(input)
+        peft_model.set_adapter(["adapter0", "adapter1"])
+        model_merged = peft_model.merge_and_unload(adapter_names=["adapter0"])
+        assert torch.allclose(output_adapter0, model_merged(input), atol=1e-4, rtol=1e-4)
 
 
 class TestMixedAdapterLoading:

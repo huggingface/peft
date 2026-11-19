@@ -2799,12 +2799,28 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_into_parametrized_base_layer_raises(self, test_name, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
-        if model_id == "MHA":
-            pytest.skip(
-                "LoRA on MultiheadAttention cannot handle parametrized weights, as it deletes and re-registers them."
-            )
+        if model_id == "MHA" and config_kwargs["target_modules"] == ["mha"]:
+            # here, a weight of the MHA layer gets parametrized, which LoRA on MultiheadAttention cannot handle, see
+            # test_merge_lora_mha_with_parametrized_weight_raises
+            pytest.skip("LoRA on MultiheadAttention cannot handle parametrized weights")
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_into_parametrized_base_layer_raises(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.xfail(
+        reason="LoRA on MultiheadAttention deletes and re-registers its weights, which fails if they are parametrized",
+        raises=AttributeError,
+        strict=True,
+    )
+    @pytest.mark.parametrize("weight_name", ["in_proj_weight", "out_proj.base_layer.weight"])
+    def test_merge_lora_mha_with_parametrized_weight_raises(self, weight_name):
+        # Merging should raise because the weight is parametrized, but LoRA on MultiheadAttention fails before that.
+        model = get_peft_model(ModelMha(), LoraConfig(target_modules=["mha"], init_lora_weights=False))
+        mha = model.base_model.model.mha.get_base_layer()
+        module_name, _, tensor_name = weight_name.rpartition(".")
+        torch.nn.utils.parametrizations.weight_norm(mha.get_submodule(module_name), name=tensor_name)
+
+        with pytest.raises(ValueError, match="parametrized"):
+            model.merge_adapter()
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_with_other_parametrized_tensor_works(self, test_name, model_id, config_cls, config_kwargs):
