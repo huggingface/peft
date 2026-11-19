@@ -112,7 +112,6 @@ class TestInitEmptyWeights:
     packaging.version.parse(transformers.__version__) < packaging.version.parse("5.4.0"),
     reason="PEFT weight conversion is fixed in transformers 5.4.0",
 )
-@pytest.mark.usefixtures("_transformers_moe_patch")  # TODO remove once patch_moe_parameter_targeting is removed
 class TestTransformersV5:
     """Unit tests intended to test proper working of PEFT with Transformers v5"""
 
