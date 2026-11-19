@@ -56,6 +56,14 @@ if not is_transformers_ge_v5_6_0:
     )
 
 
+if packaging.version.parse(torch.__version__) < packaging.version.parse("2.6.0"):
+    warnings.warn(
+        f"Support for PyTorch < 2.6 is deprecated in PEFT and will be removed in the next release, v1.0. "
+        f"You have PyTorch {torch.__version__}. Please upgrade to PyTorch >= 2.6.",
+        FutureWarning,
+    )
+
+
 @lru_cache
 def get_transformers_cache_name() -> str:
     """Return the cache argument and output field name used by Transformers.

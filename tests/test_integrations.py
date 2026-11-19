@@ -565,19 +565,37 @@ class TestTransformersV5:
         assert set(reloaded.targeted_parameter_names) == set(peft_model.targeted_parameter_names)
 
 
-@pytest.mark.parametrize(
-    ("version", "num_expected_warnings"),
-    [("4.57.0", 1), ("5.5.0", 1), ("5.6.0.dev0", 0), ("5.6.0", 0)],
-)
-def test_transformers_deprecation_warning(monkeypatch, recwarn, version, num_expected_warnings):
-    transformers = import_module("transformers")
-    monkeypatch.setattr(transformers, "__version__", version)
+class TestPackageVersionDeprecations:
+    @pytest.mark.parametrize(
+        ("version", "num_expected_warnings"),
+        [("4.57.0", 1), ("5.5.0", 1), ("5.6.0.dev0", 0), ("5.6.0", 0)],
+    )
+    def test_transformers_deprecation_warning(self, monkeypatch, recwarn, version, num_expected_warnings):
+        transformers = import_module("transformers")
+        monkeypatch.setattr(transformers, "__version__", version)
 
-    runpy.run_path(import_utils.__file__)
+        runpy.run_path(import_utils.__file__)
 
-    matching = [
-        warning
-        for warning in recwarn
-        if issubclass(warning.category, FutureWarning) and ("Support for Transformers" in str(warning.message))
-    ]
-    assert len(matching) == num_expected_warnings
+        matching = [
+            warning
+            for warning in recwarn
+            if issubclass(warning.category, FutureWarning) and ("Support for Transformers" in str(warning.message))
+        ]
+        assert len(matching) == num_expected_warnings
+
+    @pytest.mark.parametrize(
+        ("version", "num_expected_warnings"),
+        [("1.13.3", 1), ("2.5.0", 1), ("2.6.0", 0), ("2.15.0", 0)],
+    )
+    def test_torch_deprecation_warning(self, monkeypatch, recwarn, version, num_expected_warnings):
+        torch = import_module("torch")
+        monkeypatch.setattr(torch, "__version__", version)
+
+        runpy.run_path(import_utils.__file__)
+
+        matching = [
+            warning
+            for warning in recwarn
+            if issubclass(warning.category, FutureWarning) and ("Support for PyTorch" in str(warning.message))
+        ]
+        assert len(matching) == num_expected_warnings
