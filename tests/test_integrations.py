@@ -13,6 +13,8 @@
 # limitations under the License.
 
 import re
+import runpy
+from importlib import import_module
 
 import packaging.version
 import pytest
@@ -21,7 +23,7 @@ import transformers
 from torch import nn
 from transformers import AutoModelForCausalLM, AutoModelForImageTextToText
 
-from peft import LoraConfig, PeftModel, get_peft_model
+from peft import LoraConfig, PeftModel, get_peft_model, import_utils
 from peft.tuners import lora
 from peft.utils import infer_device
 from peft.utils.integrations import init_empty_weights, skip_init_on_device
@@ -561,3 +563,21 @@ class TestTransformersV5:
 
         assert torch.allclose(logits_before, logits_after, atol=1e-5, rtol=1e-5)
         assert set(reloaded.targeted_parameter_names) == set(peft_model.targeted_parameter_names)
+
+
+@pytest.mark.parametrize(
+    ("version", "num_expected_warnings"),
+    [("4.57.0", 1), ("5.5.0", 1), ("5.6.0.dev0", 0), ("5.6.0", 0)],
+)
+def test_transformers_deprecation_warning(monkeypatch, recwarn, version, num_expected_warnings):
+    transformers = import_module("transformers")
+    monkeypatch.setattr(transformers, "__version__", version)
+
+    runpy.run_path(import_utils.__file__)
+
+    matching = [
+        warning
+        for warning in recwarn
+        if issubclass(warning.category, FutureWarning) and ("Support for Transformers" in str(warning.message))
+    ]
+    assert len(matching) == num_expected_warnings
