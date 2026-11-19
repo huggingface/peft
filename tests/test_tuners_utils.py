@@ -373,10 +373,6 @@ class TestPeftCustomKwargs:
             assert new_config.target_modules == expected_target_modules
 
     def test_maybe_include_all_linear_layers_diffusion(self):
-        # TODO: remove once Diffusers 0.40 is released
-        if not is_diffusers_ge_v040:
-            pytest.skip("This test fails with Diffusers < 0.40 due to a change in huggingface_hub")
-
         model_id = "hf-internal-testing/tiny-sd-pipe"
         with hub_online_once(model_id):
             model = StableDiffusionPipeline.from_pretrained(model_id)
