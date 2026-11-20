@@ -42,7 +42,9 @@ class IA3Config(PeftConfig):
         feedforward_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to be treated as feedforward modules, as in the original paper. These modules will
             have (IA)³ vectors multiplied to the input, instead of the output. `feedforward_modules` must be a name or
-            a subset of names present in `target_modules`.
+            a subset of names present in `target_modules`. List entries use the same match as `target_modules`: the
+            module name equals the entry, or it ends with `.{entry}`. A string is a regex and is applied with
+            `re.fullmatch`.
         fan_in_fan_out (`bool`):
             Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
             `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
@@ -72,8 +74,11 @@ class IA3Config(PeftConfig):
     feedforward_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
-            "help": "List of module names or a regex expression of module names which are feedforward"
-            "For example, ['output.dense']"
+            "help": (
+                "List of module names or a regex expression of module names which are feedforward. "
+                "For example, ['output.dense']. When passing a list of strings, a module matches if its name "
+                "equals an entry or ends with `.{entry}`, the same rule as `target_modules`."
+            )
         },
     )
     fan_in_fan_out: bool = field(
