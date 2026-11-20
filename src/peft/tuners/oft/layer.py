@@ -119,7 +119,16 @@ class OFTRotationModule(nn.Module):
         Perform the Cayley parametrization on a batch of skew-symmetric matrices.
 
         Args:
-            data: A batch of skew-symmetric matrices of shape (b, r, c).
+            Q: The strictly upper-triangular entries of a batch of skew-symmetric matrices, of shape
+                `(b, block_size * (block_size - 1) // 2)`.
+            block_size: The size of each square block.
+            use_cayley_neumann: Whether to approximate the inverse with a truncated Neumann series instead of an exact
+                solve.
+            num_neumann_terms: The number of Neumann series terms, used only when `use_cayley_neumann=True`.
+
+        Returns:
+            `torch.Tensor`: The Cayley transforms, of shape `(b, block_size, block_size)`; orthogonal up to the Neumann
+                truncation when `use_cayley_neumann=True`.
         """
 
         b, _ = Q.shape
