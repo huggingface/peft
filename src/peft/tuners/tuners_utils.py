@@ -57,6 +57,7 @@ from peft.utils.other import (
 )
 from peft.utils.peft_types import PeftType, TaskType
 from peft.utils.quantization_utils import QuantizationBackend
+from peft.utils.runtime_checks import move_runtime_checks, remove_runtime_checks
 from peft.utils.warning import PeftWarning
 
 from ..config import PeftConfig
@@ -817,9 +818,11 @@ class BaseTuner(nn.Module, ABC):
         >>> merged_model = model.merge_and_unload()
         ```
         """
-        return self._unload_and_optionally_merge(
+        model = self._unload_and_optionally_merge(
             progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
         )
+        remove_runtime_checks(self.model)
+        return model
 
     def unload(self) -> torch.nn.Module:
         """
@@ -827,7 +830,9 @@ class BaseTuner(nn.Module, ABC):
 
         It is important to assign the returned model to a variable and use it, this is not an in-place operation!
         """
-        return self._unload_and_optionally_merge(merge=False)
+        model = self._unload_and_optionally_merge(merge=False)
+        remove_runtime_checks(self.model)
+        return model
 
     def _check_target_module_compatiblity(self, peft_config: PeftConfig, model: nn.Module, target_name: str):
         """
@@ -1221,6 +1226,9 @@ class BaseTuner(nn.Module, ABC):
 
         for parameter, requires_grad in mapping_existing_parameter_requires_grad:
             parameter.requires_grad = requires_grad
+
+        # the new adapter may have wrapped a module that a runtime check observes, the check must see the outermost module
+        move_runtime_checks(model)
 
     def _inject_parameters(
         self, peft_config: PeftConfig, model: nn.Module, adapter_name: str, low_cpu_mem_usage: bool
