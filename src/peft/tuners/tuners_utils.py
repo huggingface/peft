@@ -2832,15 +2832,32 @@ def delete_adapter(
             The name of remaining adapter(s) after deletion, or `None` if there are no active adapters left. Use this
             to set the new active adapter of the model if necessary.
     """
-    new_adapter = None
-
+    layers = []
     for key, target in model.named_modules():
         if prefix in key:
             continue
         if isinstance(target, layer_cls):
-            target.delete_adapter(adapter_name)
-            if new_adapter is None:
-                new_adapter = target.active_adapters[:]
+            layers.append(target)
+
+    # Layers that only host the deleted adapter would otherwise clear their active adapter, even when
+    # another adapter still exists on later modules. Agree on one remaining name before deletion so the
+    # first layer does not report an empty active list (and leave the model pointing at the deleted name).
+    remaining = {
+        name for layer in layers for name in layer._all_available_adapter_names() if name != adapter_name
+    }
+    fallback = min(remaining) if remaining else None
+    if fallback is not None:
+        for layer in layers:
+            if layer.active_adapters == [adapter_name] and not any(
+                name != adapter_name for name in layer._all_available_adapter_names()
+            ):
+                layer.set_adapter(fallback)
+
+    new_adapter = None
+    for target in layers:
+        target.delete_adapter(adapter_name)
+        if new_adapter is None:
+            new_adapter = target.active_adapters[:]
 
     _delete_auxiliary_adapter(model, adapter_name=adapter_name, new_active_adapters=new_adapter)
     return new_adapter

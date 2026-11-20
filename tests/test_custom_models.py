@@ -4402,6 +4402,20 @@ class TestPeftCustomModel(PeftCommonTester):
         assert model.active_adapters == ["adapter1"]
         model(**inputs)  # does not raise
 
+    def test_delete_active_adapter_falls_back_when_targets_differ(self):
+        # The first targeted module only hosts the active adapter. Deleting it must activate the
+        # adapter that lives on a later module, not leave the model with no active adapter.
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0"]), adapter_name="attn").to(self.torch_device)
+        model.add_adapter("mlp", LoraConfig(target_modules=["lin1"]))
+        inputs = self.prepare_inputs_for_testing()
+
+        model.delete_adapter("attn")
+        assert model.active_adapters == ["mlp"]
+        assert model.active_adapter == "mlp"
+        assert model.base_model.model.lin0.active_adapters == ["mlp"]
+        assert model.base_model.model.lin1.active_adapters == ["mlp"]
+        model(**inputs)  # does not raise
+
     def test_delete_adapter_multiple_adapters_with_modules_to_save(self):
         # There are 3 adapters. Adapter 0 has modules_to_save. Delete it, we should switch to adapter 1, which does not
         # have modules_to_save. Then, we delete it too, switching to adapter 2, which has modules_to_save. Finally, we
