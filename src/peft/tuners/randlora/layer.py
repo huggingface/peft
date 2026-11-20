@@ -222,7 +222,6 @@ class Linear(nn.Linear, RandLoraLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.randlora_lambda.keys():
                 base_layer = self.get_base_layer()
-                orig_dtype = base_layer.weight.dtype
 
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
@@ -236,10 +235,10 @@ class Linear(nn.Linear, RandLoraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weights.to(orig_dtype)
+                    base_layer.weight.data = orig_weights
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
-                    base_layer.weight.data += delta_weight.to(orig_dtype)
+                    base_layer.weight.data += delta_weight
 
                 self.merged_adapters.append(active_adapter)
 
@@ -253,11 +252,10 @@ class Linear(nn.Linear, RandLoraLayer):
 
         while len(self.merged_adapters) > 0:
             base_layer = self.get_base_layer()
-            orig_dtype = base_layer.weight.dtype
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.randlora_lambda.keys():
                 delta_weight = self.get_delta_weight(active_adapter)
-                base_layer.weight.data -= delta_weight.to(orig_dtype)
+                base_layer.weight.data -= delta_weight
 
     def get_scaled_bases(self, adapter, device=None) -> tuple[torch.Tensor, torch.Tensor]:
         """
