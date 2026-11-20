@@ -13,11 +13,15 @@
 # limitations under the License.
 
 
+import os
+
 import pytest
 import torch
 
 from peft import LoraConfig, PeftModel, get_peft_model
 from peft.tuners.lora import LoraGAConfig, preprocess_loraga
+from peft.tuners.lora.config import CordaConfig
+from peft.tuners.lora.corda import preprocess_corda
 
 
 class TestLoraGAPreprocessing:
@@ -431,3 +435,51 @@ class TestLoraGAIntegration:
         # Should raise ValueError about no supported layers
         with pytest.raises(ValueError, match="No supported layers found"):
             preprocess_loraga(model, lora_config, train_step)
+
+
+@pytest.mark.parametrize("cache_name", ["cache.pt", os.path.join("nested", "cache.pt")])
+def test_preprocess_cache_file_without_directory(tmp_path, monkeypatch, cache_name):
+    # os.path.dirname("cache.pt") is "" and os.makedirs("") raises FileNotFoundError.
+    monkeypatch.chdir(tmp_path)
+    torch.manual_seed(0)
+    model = torch.nn.Sequential(torch.nn.Linear(4, 4))
+    data = torch.rand(8, 4)
+
+    corda_config = LoraConfig(
+        r=2,
+        target_modules=["0"],
+        init_lora_weights="corda",
+        corda_config=CordaConfig(corda_method="ipm", cache_file=cache_name),
+    )
+    preprocess_corda(model, corda_config, run_model=lambda: model(data))
+    assert os.path.isfile(cache_name)
+
+    cov_name = "covariance.pt" if os.path.dirname(cache_name) == "" else os.path.join("nested", "covariance.pt")
+    model = torch.nn.Sequential(torch.nn.Linear(4, 4))
+    cov_config = LoraConfig(
+        r=2,
+        target_modules=["0"],
+        init_lora_weights="corda",
+        corda_config=CordaConfig(corda_method="ipm", covariance_file=cov_name),
+    )
+    preprocess_corda(model, cov_config, run_model=lambda: model(data))
+    assert os.path.isfile(cov_name)
+
+    ga_model = torch.nn.Sequential(torch.nn.Linear(4, 4))
+    ga_model.train()
+
+    def train_step():
+        loss = ga_model(torch.randn(2, 4)).sum()
+        ga_model.zero_grad()
+        loss.backward()
+
+    ga_name = "grad.pt" if os.path.dirname(cache_name) == "" else os.path.join("nested", "grad.pt")
+    ga_config = LoraConfig(
+        r=2,
+        lora_alpha=4,
+        target_modules=["0"],
+        init_lora_weights="lora_ga",
+        lora_ga_config=LoraGAConfig(direction="ArB2r", scale="stable"),
+    )
+    preprocess_loraga(ga_model, ga_config, train_step, cache_file=ga_name)
+    assert os.path.isfile(ga_name)
