@@ -2990,9 +2990,10 @@ class TestMarkAdaptersTrainableCustomNamedParameters:
         strict=True,
     )
     def test_named_parameters_without_wrapper_level_keeps_adapter_trainable(self):
-        # A wrapper can report the parameters of its inner model without its own name level. The names from
-        # named_parameters() then differ from the names from named_modules(), and the adapter parameters are not
-        # recognized as such, so they are frozen together with the base model.
+        # Adapter parameters are found by name: a name from named_parameters() has to lie under the name its tuner
+        # layer has in named_modules(). Any named_parameters() override that changes that part of the name breaks the
+        # match, and the adapter parameters are frozen together with the base model. The wrapper below is one example:
+        # it reports the parameters of its inner model without its own name level.
         class Inner(nn.Module):
             def __init__(self):
                 super().__init__()
