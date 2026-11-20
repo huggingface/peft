@@ -164,7 +164,7 @@ class Linear(nn.Module, PeanutLayer):
         base_weight = self.get_base_layer().weight
         return self._compute_delta_weight(adapter, base_weight)
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None, exact: bool = False) -> None:
         adapter_names = check_adapters_to_merge(self, adapter_names)
         if not adapter_names:
             return

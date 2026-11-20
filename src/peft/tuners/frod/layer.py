@@ -183,7 +183,7 @@ class Linear(nn.Linear, FrodLayer):
             self._offload_base_weight_to_cpu()
         return result
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None, exact: bool = False) -> None:
         adapter_names = check_adapters_to_merge(self, adapter_names)
         if not adapter_names:
             return

@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 from torch import nn
 
 from peft.config import PeftConfig
@@ -144,3 +146,6 @@ class TrainableTokensModel(BaseTuner):
         )
 
         return new_module
+
+    def _check_exact_merge_allowed(self, adapter_names: Optional[list[str]] = None) -> None:
+        """Trainable tokens merge-unmerge roundtrips are always exact"""

@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import operator
+from typing import Optional
 
 import torch
 from torch import nn
@@ -223,3 +224,6 @@ class HiraModel(BaseTuner):
             )
 
         return new_module
+
+    def _check_exact_merge_allowed(self, adapter_names: Optional[list[str]] = None) -> None:
+        """HiRA merge-unmerge roundtrips are always exact"""
