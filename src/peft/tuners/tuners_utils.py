@@ -2532,7 +2532,8 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
             if layers_pattern is None or len(layers_pattern) == 0:
                 # Lazy .*? matches the first numbered segment (the layer index), not the last one; a greedy .* would
                 # wrongly pick up nested indices such as the expert index in MoE models ("...layers.1.experts.0...").
-                match = re.match(r".*?\.[^.]*\.(?P<idx>\d+)\.", key)
+                # The prefix is optional so that layers at the root of the model ("layers.1...") also match.
+                match = re.match(r"(?:^|.*?\.)[^.]*\.(?P<idx>\d+)\.", key)
             else:
                 layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
                 for pattern in layers_pattern:
