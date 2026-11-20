@@ -146,6 +146,15 @@ print(tokenizer.decode(outputs[0]))
 </hfoption>
 </hfoptions>
 
+## Faster SVD merging
+
+The SVD based combination types (`svd`, `ties_svd`, `dare_linear_svd`, `dare_ties_svd`, and `magnitude_prune_svd`) compute a full SVD of the merged delta weight of every targeted layer, which can take several seconds per layer for large models. Pass `svd_lowrank=True` to use the randomized [`torch.svd_lowrank`](https://pytorch.org/docs/stable/generated/torch.svd_lowrank.html) instead, which only computes the leading singular vectors and is typically orders of magnitude faster.
+
+```py
+model.add_weighted_adapter(adapters, weights, adapter_name, combination_type="svd", svd_lowrank=True)
+```
+
+By default, the size of the subspace `svd_lowrank_q` is the sum of the ranks of the merged adapters, so for `combination_type="svd"` the result is the same as with the full SVD up to floating point precision. You can lower `svd_lowrank_q` for more speed or raise `svd_lowrank_niter` (default 2) for more accuracy. Since `torch.svd_lowrank` is randomized, seed the random number generator if you need reproducible merges.
 
 ## Merging (IA)³ Models
 The (IA)³ models facilitate linear merging of adapters. To merge adapters in an (IA)³ model, utilize the `add_weighted_adapter` method from the `IA3Model` class. This method is analogous to the `add_weighted_adapter` method used in `LoraModel`, with the key difference being the absence of the `combination_type` parameter. For example, to merge three (IA)³ adapters into a PEFT model, you would proceed as follows:
