@@ -1298,12 +1298,13 @@ class LoraModel(BaseTuner):
         Compute the KL divergence between the posterior and the prior of all Bayesian-LoRA layers.
 
         The KL divergence is a single-sample estimate based on the weights sampled in the last forward pass, so call
-        this after the forward pass in training mode. It is the sum over all layers (not the mean), i.e. the KL term of
-        the evidence lower bound; it is typically scaled by the inverse of the number of training batches:
+        this once after each forward pass in training mode (the sample is discarded afterwards). It is the sum over all
+        layers (not the mean), i.e. the KL term of the evidence lower bound; it is typically scaled by the inverse of
+        the number of training batches per epoch:
 
         ```py
         task_loss = model(**batch).loss
-        total_loss = task_loss + kl_weight / num_batches * model._get_bayesian_lora_loss()
+        total_loss = task_loss + kl_weight / steps_per_epoch * model._get_bayesian_lora_loss()
         ```
 
         Args:
@@ -1336,22 +1337,31 @@ class LoraModel(BaseTuner):
         """
         Sample the weights of the probabilistic LoRA variants (currently Bayesian-LoRA) in every forward pass, also in
         eval mode. Use it through [`peft.helpers.enable_probabilistic_sampling`].
+
+        This sets the `probabilistic_sampling` flag of all LoRA layers with a variant whose
+        `supports_probabilistic_sampling()` returns `True`.
         """
-        layers = [module for module in self.modules() if hasattr(module, "bayesian_lora_sample_in_eval")]
+        layers = [
+            module
+            for module in self.modules()
+            if isinstance(module, LoraLayer)
+            and any(variant.supports_probabilistic_sampling() for variant in module.lora_variant.values())
+        ]
         if not layers:
             raise ValueError(
                 "No layers supporting probabilistic sampling found. Currently, only Bayesian-LoRA "
                 "(`LoraConfig(bayesian_lora_config=...)`) is supported."
             )
         if any(layer.merged for layer in layers):
-            warnings.warn("Some Bayesian-LoRA layers are merged; their output stays deterministic.")
+            warnings.warn("Some probabilistic LoRA layers are merged; their output stays deterministic.")
+        previous = [layer.probabilistic_sampling for layer in layers]
         for layer in layers:
-            layer.bayesian_lora_sample_in_eval = True
+            layer.probabilistic_sampling = True
         try:
             yield
         finally:
-            for layer in layers:
-                layer.bayesian_lora_sample_in_eval = False
+            for layer, value in zip(layers, previous):
+                layer.probabilistic_sampling = value
 
     def _get_kasa_loss(self, adapter_names: Optional[Union[str, list[str]]] = None) -> torch.Tensor | float:
         """

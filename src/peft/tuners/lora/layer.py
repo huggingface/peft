@@ -70,6 +70,14 @@ class LoraVariant:
         """Whether an adapter using this variant can be converted to vanilla LoRA (see `convert_to_lora`)."""
         return True
 
+    def supports_probabilistic_sampling(self) -> bool:
+        """
+        Whether the weights of this variant can be sampled at inference time (see
+        `peft.helpers.enable_probabilistic_sampling`). A variant that supports this must sample its weights in
+        `forward` if `module.training` or `module.probabilistic_sampling` is `True`.
+        """
+        return False
+
     @staticmethod
     def init(module: LoraLayer, adapter_name: str) -> None:
         """Initialization code for the LoRA variant, it's called within `update_layer`"""

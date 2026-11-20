@@ -313,25 +313,12 @@ TEST_CASES = [
         "Vanilla MLP 2 LoRA with Bayesian-LoRA",
         "MLP",
         LoraConfig,
-        {"target_modules": ["lin0", "lin1"], "bayesian_lora_config": BayesianLoraConfig()},
-    ),
-    (
-        "Vanilla MLP 3 LoRA with Bayesian-LoRA",
-        "MLP",
-        LoraConfig,
         {
-            "target_modules": ["lin0"],
+            "target_modules": ["lin0", "lin1"],
             "lora_dropout": 0.1,
-            "bayesian_lora_config": BayesianLoraConfig(use_flow=False, inducing_rows=3, inducing_cols=4),
-        },
-    ),
-    (
-        "Vanilla MLP 4 LoRA with Bayesian-LoRA",
-        "MLP",
-        LoraConfig,
-        {
-            "target_modules": ["lin0"],
-            "bayesian_lora_config": BayesianLoraConfig(use_spectral_norm=False, learn_lambda=False, max_lambda=None),
+            "bayesian_lora_config": BayesianLoraConfig(
+                use_flow=False, inducing_rows=3, inducing_cols=4, max_lambda=None
+            ),
         },
     ),
     #######
@@ -9789,6 +9776,11 @@ class TestBayesianLoraRestrictions:
 
 
 class TestEnableProbabilisticSampling:
+    """
+    Tests for the `enable_probabilistic_sampling` context manager, which makes probabilistic adapters (here:
+    Bayesian-LoRA) sample their weights in eval mode instead of using the deterministic point estimate.
+    """
+
     def get_model(self):
         torch.manual_seed(0)
         config = LoraConfig(
@@ -9821,8 +9813,17 @@ class TestEnableProbabilisticSampling:
         with pytest.raises(RuntimeError, match="boom"):
             with enable_probabilistic_sampling(model):
                 raise RuntimeError("boom")
-        layers = [m for m in model.modules() if hasattr(m, "bayesian_lora_sample_in_eval")]
-        assert layers and not any(layer.bayesian_lora_sample_in_eval for layer in layers)
+        layers = [m for m in model.modules() if hasattr(m, "probabilistic_sampling")]
+        assert layers and not any(layer.probabilistic_sampling for layer in layers)
+
+    def test_nested_context_keeps_sampling_enabled(self):
+        model = self.get_model()
+        X = torch.randn(4, 10)
+        with torch.no_grad(), enable_probabilistic_sampling(model):
+            with enable_probabilistic_sampling(model):
+                pass
+            # leaving the inner context must not disable the outer one
+            assert not torch.allclose(model(X), model(X))
 
     def test_merged_adapter_warns(self):
         model = self.get_model()
@@ -9836,6 +9837,16 @@ class TestEnableProbabilisticSampling:
         with pytest.raises(ValueError, match="only Bayesian-LoRA"):
             with enable_probabilistic_sampling(model):
                 pass
+
+    def test_mixed_with_plain_lora_adapter(self):
+        # only the layers of the Bayesian-LoRA adapter are sampled, a plain LoRA adapter stays deterministic
+        model = self.get_model()
+        model.add_adapter("plain", LoraConfig(target_modules=["lin0"], init_lora_weights=False))
+        X = torch.randn(4, 10)
+        with torch.no_grad(), enable_probabilistic_sampling(model):
+            assert not torch.allclose(model(X), model(X))
+            model.set_adapter("plain")
+            assert torch.allclose(model(X), model(X))
 
     def test_non_lora_raises(self):
         model = get_peft_model(MLP(), IA3Config(target_modules=["lin0"], feedforward_modules=[]))

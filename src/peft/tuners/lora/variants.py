@@ -1611,6 +1611,9 @@ class BayesianLoraLinearVariant(LoraVariant):
     def supports_lora_conversion(self) -> bool:
         return False
 
+    def supports_probabilistic_sampling(self) -> bool:
+        return True
+
     @staticmethod
     def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
         bayesian_lora_config = config.bayesian_lora_config
@@ -1618,35 +1621,22 @@ class BayesianLoraLinearVariant(LoraVariant):
             module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_bayesian_A", "lora_bayesian_B")
             module.lora_bayesian_A = nn.ModuleDict()
             module.lora_bayesian_B = nn.ModuleDict()
-            # in eval mode, the point estimate is used unless sampling is explicitly enabled
-            module.bayesian_lora_sample_in_eval = False
+        if not hasattr(module, "probabilistic_sampling"):
+            # in eval mode, the point estimate is used unless sampling is explicitly enabled; the flag is not specific
+            # to Bayesian-LoRA, see `LoraModel._enable_probabilistic_sampling`
+            module.probabilistic_sampling = False
 
-        inducing_kwargs = {
-            "inducing_rows": bayesian_lora_config.inducing_rows,
-            "inducing_cols": bayesian_lora_config.inducing_cols,
-            "prior_sd": bayesian_lora_config.prior_sd,
-            "sqrt_width_scaling": bayesian_lora_config.sqrt_width_scaling,
-            "init_lambda": bayesian_lora_config.init_lambda,
-            "max_lambda": bayesian_lora_config.max_lambda,
-            "learn_lambda": bayesian_lora_config.learn_lambda,
-            "init_inducing_sd": bayesian_lora_config.init_inducing_sd,
-            "max_inducing_sd": bayesian_lora_config.max_inducing_sd,
-            "z_noise_scale": bayesian_lora_config.z_noise_scale,
-            "use_flow": bayesian_lora_config.use_flow,
-            "flow_hidden_features": bayesian_lora_config.flow_hidden_features,
-            "flow_dropout": bayesian_lora_config.flow_dropout,
-            "use_spectral_norm": bayesian_lora_config.use_spectral_norm,
-        }
         r = module.r[adapter_name]
         lora_A = module.lora_A[adapter_name]
-        module.lora_bayesian_A[adapter_name] = InducingWeight(module.in_features, r, **inducing_kwargs)
-        module.lora_bayesian_B[adapter_name] = InducingWeight(r, module.out_features, **inducing_kwargs)
+        module.lora_bayesian_A[adapter_name] = InducingWeight(module.in_features, r, bayesian_lora_config)
+        module.lora_bayesian_B[adapter_name] = InducingWeight(r, module.out_features, bayesian_lora_config)
         if config.init_lora_weights:
             module.lora_bayesian_B[adapter_name].zero_init_()
         for container in (module.lora_bayesian_A, module.lora_bayesian_B):
             container[adapter_name].to(device=lora_A.weight.device, dtype=lora_A.weight.dtype)
 
-        # the factors are given by the inducing weights, the regular LoRA weights are unused
+        # The factors are given by the inducing weights, so the regular LoRA weights are unused and frozen. They are
+        # kept, as the LoRA layer relies on them, e.g. to determine which adapters exist and their device and dtype.
         _register_frozen_peft_weight(module, adapter_name, "lora_A")
         _register_frozen_peft_weight(module, adapter_name, "lora_B")
         # The weights are sampled in training mode, so a new layer must not stay in the default training mode of
@@ -1677,7 +1667,7 @@ class BayesianLoraLinearVariant(LoraVariant):
 
     @staticmethod
     def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor, **kwargs) -> torch.Tensor:
-        sample = module.training or module.bayesian_lora_sample_in_eval
+        sample = module.training or module.probabilistic_sampling
         # one weight sample per forward pass, shared across the batch
         weight_A = module.lora_bayesian_A[active_adapter](sample=sample)
         weight_B = module.lora_bayesian_B[active_adapter](sample=sample)

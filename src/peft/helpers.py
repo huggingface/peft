@@ -257,7 +257,8 @@ def enable_probabilistic_sampling(model: nn.Module) -> Iterator[None]:
     ```
     """
     tuner = model.base_model if isinstance(model, PeftModel) else model
-    if not isinstance(tuner, LoraModel):
+    # duck typing, so that other PEFT methods and downstream packages can add support
+    if not hasattr(tuner, "_enable_probabilistic_sampling"):
         raise TypeError(
             f"Probabilistic sampling is not supported for {type(tuner).__name__}. Currently, only LoRA with "
             "Bayesian-LoRA (`LoraConfig(bayesian_lora_config=...)`) is supported."

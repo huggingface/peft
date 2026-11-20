@@ -55,7 +55,7 @@ A comparison with MonteCLoRA on Llama-2-7B (ARC-Easy and ARC-Challenge) is avail
 
 ## Notes
 
-- The KL divergence returned by `_get_bayesian_lora_loss()` is a sum over all inducing weights, so it is large in absolute terms; scale it by `kl_weight / steps_per_epoch` as shown above. Values of `kl_weight` below 1 temper the posterior.
+- The KL divergence returned by `_get_bayesian_lora_loss()` is a sum over all inducing weights, so it is large in absolute terms; scale it by `kl_weight / steps_per_epoch` as shown above, where `steps_per_epoch` is the number of batches in one pass over the training set, regardless of the number of epochs. `kl_weight=1` corresponds to the evidence lower bound; smaller values fit the training data more closely. Increase `kl_weight` if the model is overconfident on held-out data. Call `_get_bayesian_lora_loss()` once after each forward pass.
 - Bayesian-LoRA supports `nn.Linear` layers, including bitsandbytes 4-bit and 8-bit quantized layers. `add_weighted_adapter` is not supported.
 - Merged adapters are deterministic, so Monte Carlo prediction requires unmerged adapters.
 
