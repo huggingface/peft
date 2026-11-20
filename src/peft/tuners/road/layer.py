@@ -120,6 +120,10 @@ class RoadLayer(BaseTunerLayer):
         nn.init.zeros_(self.road_theta[adapter_name].data)
         nn.init.ones_(self.road_alpha[adapter_name].data)
 
+    def get_merge_targets(self, adapter_names: list[str]) -> list[str]:
+        # the bias is rotated as well (if the base layer has one)
+        return ["weight", "bias"]
+
 
 class Linear(nn.Module, RoadLayer):
     # Road implemented in a dense layer

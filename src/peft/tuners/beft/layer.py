@@ -62,6 +62,9 @@ class BeftLayer(BaseTunerLayer):
         if adapter_name in self.beft_bias.keys():
             nn.init.constant_(self.beft_bias[adapter_name], 0.0)
 
+    def get_merge_targets(self, adapter_names: list[str]) -> list[str]:
+        return ["bias"]
+
 
 class Linear(nn.Module, BeftLayer):
     # BEFT implemented in a dense layer

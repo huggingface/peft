@@ -925,6 +925,12 @@ class LoraLayer(BaseTunerLayer):
             else:
                 self.scaling[active_adapter] = self.scaling[active_adapter] / scale
 
+    def get_merge_targets(self, adapter_names: list[str]) -> list[str]:
+        # with lora_bias, the bias of lora_B is merged into the bias of the base layer
+        if any(self.lora_bias.get(adapter_name, False) for adapter_name in adapter_names):
+            return ["weight", "bias"]
+        return ["weight"]
+
     def _check_forward_args(self, x, *args, **kwargs):
         """Check if the arguments are compatible with the configs and state of the model"""
         adapter_names = kwargs.get("adapter_names", None)
@@ -2171,6 +2177,10 @@ class MultiheadAttention(nn.Module, LoraLayer):
         # Note: LoRA is applied to both in_proj and out_proj. There is currently no way to only specify one of them.
         self.base_layer.out_proj.update_layer(*args, config=config, **kwargs)
 
+    def get_merge_targets(self, adapter_names: list[str]) -> list[str]:
+        # out_proj is a LoRA layer of its own, which checks its own merge targets
+        return ["in_proj_weight"]
+
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
@@ -2812,6 +2822,9 @@ class ParamWrapper(nn.Module, LoraLayer):
                 f"Could not find any LoRA parametrization on {self}, please open an issue on "
                 "https://github.com/huggingface/peft/issues and report this warning."
             )
+
+    def get_merge_targets(self, adapter_names: list[str]) -> list[str]:
+        return [self.parameter_name]
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         # same as lora.Linear.merge but not hard-coding base_layer.weight and without special cases like variants removed
