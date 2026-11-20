@@ -2975,3 +2975,47 @@ class TestTunerStateDictKeyPrefixes:
         prefixes = _get_tuner_state_dict_key_prefixes(model)
         assert len(prefixes) > 0  # sanity check
         assert not any(prefix.startswith("base_model.model.emb") for prefix in prefixes)
+
+
+class TestMarkAdaptersTrainableCustomNamedParameters:
+    # See issue #4181
+
+    @pytest.mark.xfail(
+        reason="Adapter parameters are found by matching named_parameters() names against named_modules() names",
+        raises=AssertionError,
+        strict=True,
+    )
+    def test_named_parameters_without_wrapper_level_keeps_adapter_trainable(self):
+        # Adapter parameters are found by name: a name from named_parameters() has to lie under the name its tuner
+        # layer has in named_modules(). Any named_parameters() override that changes that part of the name breaks the
+        # match, and the adapter parameters are frozen together with the base model. The wrapper below is one example:
+        # it reports the parameters of its inner model without its own name level.
+        class Inner(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.lin0(x)
+
+        class Wrapper(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.model = Inner()
+
+            def forward(self, x):
+                return self.model(x)
+
+            def named_parameters(self, prefix="", recurse=True, remove_duplicate=True):
+                return self.model.named_parameters(prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
+
+        model = get_peft_model(Wrapper(), LoraConfig(target_modules=["lin0"]))
+        lora_params = [
+            param
+            for module in model.modules()
+            if isinstance(module, LoraLayer)
+            for param in [*module.lora_A.parameters(), *module.lora_B.parameters()]
+        ]
+        assert len(lora_params) == 2  # sanity check
+        assert all(not param.requires_grad for param in model.base_model.model.model.lin0.base_layer.parameters())
+        assert all(param.requires_grad for param in lora_params)
