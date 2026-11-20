@@ -324,7 +324,7 @@ class Linear(nn.Module, PacaLayer):
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                     )
                 base_weight.index_copy_(1, self.paca_indices[active_adapter].to(base_weight.device), columns)
-                self.set_base_weight(base_weight)
+                self.set_base_weight(base_weight, context="merge")
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -343,7 +343,7 @@ class Linear(nn.Module, PacaLayer):
                 base_weight = self.get_base_weight()
                 columns = self._adapted_columns(base_weight, active_adapter, sign=-1)
                 base_weight.index_copy_(1, self.paca_indices[active_adapter].to(base_weight.device), columns)
-                self.set_base_weight(base_weight)
+                self.set_base_weight(base_weight, context="unmerge")
 
     def get_delta_weight(self, adapter: str) -> torch.Tensor:
         """
