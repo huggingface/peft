@@ -247,8 +247,6 @@ class PsoftLayer(BaseTunerLayer):
                 f"({self.in_features}, {self.out_features})"
             )
 
-        self.fan_in_fan_out = config.fan_in_fan_out
-
         self.r[adapter_name] = r
         self.psoft_alpha[adapter_name] = config.psoft_alpha
         self.scaling[adapter_name] = config.psoft_alpha / r
