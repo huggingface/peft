@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections.abc import Callable
 from copy import deepcopy
 from functools import wraps
 from typing import Any, Optional
@@ -28,11 +29,29 @@ ENABLE_DORA_CACHING = False
 """Whether to enable DoRA caching, which makes it faster at inference but requires more memory"""
 
 
-def cache_decorator(cache_key: str):
+def _scaling_cache_key(scaling) -> str:
+    """Stable cache-key fragment for the adapter scaling.
+
+    The DoRA weight norm is `||W + scaling * B @ A||`, so the cached value is only valid for the
+    scaling it was computed with. `rescale_adapter_scale` changes that scaling without touching the
+    adapter weights, which is why the scale has to be part of the key.
+    """
+    if isinstance(scaling, torch.Tensor):
+        scaling = scaling.detach().flatten()
+        if scaling.numel() != 1:
+            return "-".join(f"{value:.8g}" for value in scaling.tolist())
+        scaling = scaling.item()
+    return f"{float(scaling):.8g}"
+
+
+def cache_decorator(cache_key: str, key_extra: Optional[Callable] = None):
     """Caching decorator for DoRA
 
     Caching is only enabled if ENABLE_DORA_CACHING is set to True (default: False), when in eval mode, and when the
     adapter_name is passed (e.g. not during layer initialization).
+
+    `key_extra`, when given, is called with the positional and keyword arguments of the wrapped method and its return
+    value is appended to the cache key. Use it for methods whose result depends on more than the adapter name.
 
     """
 
@@ -46,6 +65,8 @@ def cache_decorator(cache_key: str):
                 return func(self, *args, **kwargs)
 
             cache_key_adapter = f"{cache_key}-{adapter_name}"
+            if key_extra is not None:
+                cache_key_adapter = f"{cache_key_adapter}-{key_extra(*args, **kwargs)}"
             output = self._cache_get(cache_key_adapter, None)
             if output is not None:
                 return output
@@ -82,7 +103,7 @@ class DoraLinearLayer(nn.Module):
         super().train(mode=mode)
         return self
 
-    @cache_decorator("weight-norm")
+    @cache_decorator("weight-norm", key_extra=lambda *args, **kwargs: _scaling_cache_key(kwargs["scaling"]))
     def get_weight_norm(self, weight, lora_weight, scaling, adapter_name: Optional[str] = None) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
         weight = transpose(weight, self.fan_in_fan_out)
@@ -203,7 +224,7 @@ class DoraEmbeddingLayer(DoraLinearLayer):
 
 
 class _DoraConvNdLayer(DoraLinearLayer):
-    @cache_decorator("weight-norm")
+    @cache_decorator("weight-norm", key_extra=lambda *args, **kwargs: _scaling_cache_key(kwargs["scaling"]))
     def get_weight_norm(self, weight, lora_weight, scaling, adapter_name: Optional[str] = None) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
         weight = weight + scaling * lora_weight

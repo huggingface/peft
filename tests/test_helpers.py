@@ -544,6 +544,32 @@ class TestDoraCaching:
             model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
             self.check_dora_caching(model, config, inputs)
 
+    def test_dora_caching_respects_rescaled_adapter_scale(self):
+        # The DoRA weight norm is ||W + scaling * B @ A||, so the cached entry is only valid for the
+        # scaling it was computed with. rescale_adapter_scale changes that scaling without touching the
+        # adapter weights, which used to leave the stale norm in the cache and made cached inference
+        # disagree with uncached inference. See #4193.
+        torch.manual_seed(0)
+        model = nn.Sequential(nn.Linear(16, 24, bias=False)).to(self.device)
+        config = LoraConfig(init_lora_weights=False, use_dora=True, target_modules=["0"], r=4, lora_alpha=8)
+        inputs = torch.randn(5, 16).to(self.device)
+
+        model = get_peft_model(model, config)
+        model.eval()
+
+        with rescale_adapter_scale(model, 2.0):
+            with DoraCaching(enabled=False):
+                expected = self.get_output(model, inputs).clone()
+
+        with DoraCaching(enabled=True):
+            with rescale_adapter_scale(model, 0.25):
+                # prime the caches at a different scale
+                self.get_output(model, inputs)
+            with rescale_adapter_scale(model, 2.0):
+                cached = self.get_output(model, inputs).clone()
+
+        assert torch.allclose(cached, expected, atol=1e-5, rtol=1e-5)
+
     def test_dora_caching_conv(self):
         # ensure that the results don't change due to caching
         # note: don't use something like small resnet, because batch norm affects outputs in train mode
