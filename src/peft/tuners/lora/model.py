@@ -715,6 +715,10 @@ class LoraModel(BaseTuner):
                 raise ValueError(f"add_weighted_adapter does not support DoRA (problematic adapter '{adapter}')")
             if self.peft_config[adapter].kasa_config is not None:
                 raise ValueError(f"add_weighted_adapter does not support KaSA (problematic adapter '{adapter}')")
+            if self.peft_config[adapter].bayesian_lora_config is not None:
+                raise ValueError(
+                    f"add_weighted_adapter does not support Bayesian-LoRA (problematic adapter '{adapter}')"
+                )
 
         # the combined adapter needs lora_bias as soon as one source has it, but an embedding rejects it outright
         bias_adapters = [adapter for adapter in adapters if self.peft_config[adapter].lora_bias]
@@ -1288,6 +1292,76 @@ class LoraModel(BaseTuner):
         if num_monte_layers == 0:
             return 0.0
         return var_loss_sum / num_monte_layers
+
+    def _get_bayesian_lora_loss(self, adapter_names: Optional[Union[str, list[str]]] = None) -> torch.Tensor | float:
+        """
+        Compute the KL divergence between the posterior and the prior of all Bayesian-LoRA layers.
+
+        The KL divergence is a single-sample estimate based on the weights sampled in the last forward pass, so call
+        this once after each forward pass in training mode (the sample is discarded afterwards). It is the sum over all
+        layers (not the mean), i.e. the KL term of the evidence lower bound; it is typically scaled by the inverse of
+        the number of training batches per epoch:
+
+        ```py
+        task_loss = model(**batch).loss
+        total_loss = task_loss + kl_weight / steps_per_epoch * model._get_bayesian_lora_loss()
+        ```
+
+        Args:
+            adapter_names (`str` or `list[str]`, *optional*):
+                Name(s) of the adapter(s) to include. If `None` (the default), the active adapters are used.
+
+        Returns:
+            The KL divergence as a tensor (or `0.0` if no matching Bayesian-LoRA layers are present).
+        """
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+        elif isinstance(adapter_names, str):
+            adapter_names = [adapter_names]
+
+        kl: torch.Tensor | float = 0.0
+        for module in self.modules():
+            if not isinstance(module, LoraLayer):
+                continue
+            factors_A = getattr(module, "lora_bayesian_A", None)
+            if factors_A is None:
+                continue
+            for adapter_name in adapter_names:
+                if adapter_name in factors_A:
+                    kl = kl + factors_A[adapter_name].kl_divergence()
+                    kl = kl + module.lora_bayesian_B[adapter_name].kl_divergence()
+        return kl
+
+    @contextmanager
+    def _enable_probabilistic_sampling(self):
+        """
+        Sample the weights of the probabilistic LoRA variants (currently Bayesian-LoRA) in every forward pass, also in
+        eval mode. Use it through [`peft.helpers.enable_probabilistic_sampling`].
+
+        This sets the `probabilistic_sampling` flag of all LoRA layers with a variant whose
+        `supports_probabilistic_sampling()` returns `True`.
+        """
+        layers = [
+            module
+            for module in self.modules()
+            if isinstance(module, LoraLayer)
+            and any(variant.supports_probabilistic_sampling() for variant in module.lora_variant.values())
+        ]
+        if not layers:
+            raise ValueError(
+                "No layers supporting probabilistic sampling found. Currently, only Bayesian-LoRA "
+                "(`LoraConfig(bayesian_lora_config=...)`) is supported."
+            )
+        if any(layer.merged for layer in layers):
+            warnings.warn("Some probabilistic LoRA layers are merged; their output stays deterministic.")
+        previous = [layer.probabilistic_sampling for layer in layers]
+        for layer in layers:
+            layer.probabilistic_sampling = True
+        try:
+            yield
+        finally:
+            for layer, value in zip(layers, previous):
+                layer.probabilistic_sampling = value
 
     def _get_kasa_loss(self, adapter_names: Optional[Union[str, list[str]]] = None) -> torch.Tensor | float:
         """
