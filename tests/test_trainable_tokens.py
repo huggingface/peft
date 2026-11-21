@@ -640,6 +640,20 @@ class TestTrainableTokens:
             model = get_peft_model(model, config)
         assert "Target modules ['doesnt_exist'] not found in the base model." in str(e)
 
+    def test_config_raises_on_default_empty_token_indices(self):
+        # token_indices defaults to an empty list; this used to fail only on the first forward pass with an
+        # unrelated `index_copy_` error
+        with pytest.raises(ValueError, match="`token_indices` must be a non-empty list"):
+            TrainableTokensConfig(target_modules=["embed_tokens"])
+
+    def test_config_raises_on_explicit_empty_token_indices(self):
+        with pytest.raises(ValueError, match="`token_indices` must be a non-empty list"):
+            TrainableTokensConfig(target_modules=["embed_tokens"], token_indices=[])
+
+    def test_config_accepts_non_empty_token_indices(self):
+        config = TrainableTokensConfig(target_modules=["embed_tokens"], token_indices=[0, 1, 3])
+        assert config.token_indices == [0, 1, 3]
+
     @pytest.mark.parametrize(
         "peft_config, target_layer_name",
         [
