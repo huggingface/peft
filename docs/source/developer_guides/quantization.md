@@ -258,7 +258,7 @@ model = get_peft_model(model, config)
 
 ## HQQ quantization
 
-The models that are quantized using Half-Quadratic Quantization of Large Machine Learning Models ([HQQ](https://mobiusml.github.io/hqq_blog/)) support LoRA adapter tuning. To tune the quantized model, you'll need to install the `hqq` library with: `pip install hqq`.
+The models that are quantized using Half-Quadratic Quantization of Large Machine Learning Models ([HQQ](https://dropbox.github.io/hqq_blog/)) support LoRA adapter tuning. To tune the quantized model, you'll need to install the `hqq` library with: `pip install hqq`.
 
 ```python
 from hqq.engine.hf import HQQModelForCausalLM
