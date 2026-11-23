@@ -1435,6 +1435,8 @@ TEST_CASES = [
         DummyConfig,
         {"target_modules": ["conv1d"]},
     ),
+    ("Embedding + transformers Conv1D 2 Dummy", "EmbConv1D", DummyConfig, {"target_modules": ["emb"]}),
+    ("Embedding + transformers Conv1D 3 Dummy", "EmbConv1D", DummyConfig, {"target_modules": ["emb", "conv1d"]}),
     ("Conv1d 1 Dummy", "Conv1d", DummyConfig, {"target_modules": ["conv1d"]}),
     ("Conv1d Groups Dummy", "Conv1dGroups", DummyConfig, {"target_modules": ["conv1d"]}),
     ("Conv2d 1 Dummy", "Conv2d", DummyConfig, {"target_modules": ["conv2d"]}),
@@ -9615,6 +9617,16 @@ class TestFsdp2UnshardedParams:
                 True,
                 id="ia3-safe-merge",
             ),
+            pytest.param(
+                lambda: DummyConfig(target_modules=["lin0", "lin1"], init_weights=False),
+                False,
+                id="dummy",
+            ),
+            pytest.param(
+                lambda: DummyConfig(target_modules=["lin0", "lin1"], init_weights=False),
+                True,
+                id="dummy-safe-merge",
+            ),
         ],
     )
     def test_merge_and_unmerge_reach_shards(self, get_config, safe_merge, reshard_after_forward):
@@ -9728,6 +9740,20 @@ class TestFsdp2UnshardedParams:
                 LoraConfig(target_modules=["conv2d"], init_lora_weights=False),
                 torch.rand(2, 45),
                 id="lora-conv2d",
+            ),
+            pytest.param(
+                ModelConv2D,
+                "conv2d",
+                DummyConfig(target_modules=["conv2d"], init_weights=False),
+                torch.rand(2, 45),
+                id="dummy-conv2d",
+            ),
+            pytest.param(
+                ModelEmbConv1D,
+                "emb",
+                DummyConfig(target_modules=["emb", "conv1d"], init_weights=False),
+                torch.arange(90).view(9, 10),
+                id="dummy-embedding-conv1d",
             ),
         ],
     )

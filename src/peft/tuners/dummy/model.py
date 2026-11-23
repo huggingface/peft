@@ -26,7 +26,7 @@ from peft.utils import (
     resolve_quantization_backend,
 )
 
-from .layer import Conv1d, Conv2d, Conv3d, DummyLayer, Linear
+from .layer import Conv1d, Conv2d, Conv3d, DummyLayer, Embedding, Linear
 
 
 def _get_tuner_layer_class(target_base_layer: torch.nn.Module) -> type[DummyLayer] | None:
@@ -39,6 +39,8 @@ def _get_tuner_layer_class(target_base_layer: torch.nn.Module) -> type[DummyLaye
         layer_cls = Conv2d
     elif isinstance(target_base_layer, torch.nn.Conv3d):
         layer_cls = Conv3d
+    elif isinstance(target_base_layer, torch.nn.Embedding):
+        layer_cls = Embedding
     elif (quant_backend := resolve_quantization_backend(target_base_layer)) is not None:
         layer_cls = {"linear": Linear}.get(quant_backend.layer_type)
 
@@ -127,8 +129,8 @@ class DummyModel(BaseTuner):
         if layer_cls is None:
             raise TypeError(
                 f"Target module {target} is not supported. Currently, `torch.nn.Linear`, "
-                "`transformers.pytorch_utils.Conv1D`, and `torch.nn.Conv1d/2d/3d`"
-                " (optionally quantized) are supported."
+                "`transformers.pytorch_utils.Conv1D`, `torch.nn.Conv1d/2d/3d` (optionally quantized), and"
+                " `torch.nn.Embedding` are supported."
             )
 
         if isinstance(target_base_layer, Conv1D):
@@ -137,7 +139,9 @@ class DummyModel(BaseTuner):
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
                 dummy_config.fan_in_fan_out = True
-        elif isinstance(target_base_layer, (torch.nn.Linear, torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)):
+        elif isinstance(
+            target_base_layer, (torch.nn.Linear, torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d, torch.nn.Embedding)
+        ):
             if dummy_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is a torch.nn layer. "

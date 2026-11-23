@@ -79,17 +79,7 @@ class DummyLayer(BaseTunerLayer):
         self.dummy_lora_dropout[adapter_name] = nn.Dropout(p=config.lora_dropout)
 
         self._create_adapter_modules(adapter_name, r, config)
-
-        # Initialization: with the default init_weights=True, A is randomly initialized but B is zero, so the adapter
-        # starts out as an exact identity transform - the adapted layer behaves exactly like the base layer until the
-        # adapter has been trained. This is the convention that most PEFT methods follow. With init_weights=False, B is
-        # randomly initialized as well, so the adapter has a non-zero effect right away; this is mainly useful for
-        # testing.
-        nn.init.kaiming_uniform_(self.dummy_lora_A[adapter_name].weight, a=math.sqrt(5))
-        if config.init_weights:
-            nn.init.zeros_(self.dummy_lora_B[adapter_name].weight)
-        else:
-            nn.init.kaiming_uniform_(self.dummy_lora_B[adapter_name].weight, a=math.sqrt(5))
+        self._init_adapter_weights(adapter_name, config)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
@@ -97,6 +87,21 @@ class DummyLayer(BaseTunerLayer):
     def _create_adapter_modules(self, adapter_name: str, r: int, config: DummyConfig) -> None:
         # Implemented by subclasses; creates the low-rank update modules for the given adapter.
         raise NotImplementedError
+
+    def _init_adapter_weights(self, adapter_name: str, config: DummyConfig) -> None:
+        """Initialize the adapter weights.
+
+        With the default init_weights=True, one of the two factors is randomly initialized but the other is zero, so
+        the adapter starts out as an exact identity transform -- the adapted layer behaves exactly like the base layer
+        until the adapter has been trained. This is the convention that most PEFT methods follow. With
+        init_weights=False, both factors are randomly initialized, so the adapter has a non-zero effect right away;
+        this is mainly useful for testing.
+        """
+        nn.init.kaiming_uniform_(self.dummy_lora_A[adapter_name].weight, a=math.sqrt(5))
+        if config.init_weights:
+            nn.init.zeros_(self.dummy_lora_B[adapter_name].weight)
+        else:
+            nn.init.kaiming_uniform_(self.dummy_lora_B[adapter_name].weight, a=math.sqrt(5))
 
     def set_scale(self, adapter: str, scale: float) -> None:
         if adapter not in self.scaling:
@@ -387,3 +392,86 @@ class Conv3d(_ConvNd):
         super().__init__(*args, **kwargs)
         if not self.get_base_layer().weight.dim() == 5:
             raise ValueError(f"Conv3d layer kernel must have 5 dimensions, not {self.get_base_layer().weight.dim()}")
+
+
+class Embedding(nn.Module, DummyLayer):
+    """Dummy implemented in an embedding layer, supporting `torch.nn.Embedding`."""
+
+    def __init__(
+        self,
+        base_layer: nn.Module,
+        adapter_name: str,
+        config: DummyConfig,
+        **kwargs,
+    ) -> None:
+        super().__init__()
+        DummyLayer.__init__(self, base_layer, **kwargs)
+        self._active_adapter = adapter_name
+        self.update_layer(adapter_name, config=config)
+
+    def _create_adapter_modules(self, adapter_name: str, r: int, config: DummyConfig) -> None:
+        # A is an embedding that maps a token id to r dimensions, B is a linear layer mapping those r dimensions to the
+        # embedding dimension, mirroring the structure of the Linear layer adapter.
+        self.dummy_lora_A[adapter_name] = nn.Embedding(self.in_features, r)
+        self.dummy_lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=False)
+
+    def _init_adapter_weights(self, adapter_name: str, config: DummyConfig) -> None:
+        r"""Initialize the adapter weights.
+
+        The roles of A and B are swapped compared to the Linear layer: A (the embedding lookup) is initialized with
+        zeros, B with random values instead of the other way around. Either factor being zero makes the delta weight
+        zero, so the adapter is still an identity transform at init. The swap matters for training: for a Linear layer,
+        the input values multiply into the gradient of the upstream factor:
+          dL/dA = x.T @ (upstream @ B)
+        So it picks up pace on its own once B has moved away from zero.
+
+        An embedding input only selects rows of A, so the gradient of A is proportional to B:
+          dL/dA = \sum_i (upstream[i] @ B)
+        Therefore gradients would stay vanishingly small for many steps if B started at zero.
+        Initializing A with zero instead scales the gradient with random values from B instead of zero and gives
+        larger values for the gradients.
+
+        With init_weights=False, both factors are randomly initialized, giving the adapter a non-zero effect right away.
+        """
+        nn.init.zeros_(self.dummy_lora_A[adapter_name].weight)
+        if config.init_weights:
+            nn.init.normal_(self.dummy_lora_B[adapter_name].weight)
+        else:
+            nn.init.normal_(self.dummy_lora_A[adapter_name].weight)
+            nn.init.normal_(self.dummy_lora_B[adapter_name].weight)
+
+    def _compose_delta_weight(self, weight_a: torch.Tensor, weight_b: torch.Tensor) -> torch.Tensor:
+        # weight_a is the lookup table of A with shape (num_embeddings, r), weight_b has shape (embedding_dim, r),
+        # stored like a nn.Linear weight. The low-rank update of a token i is B applied to the i-th row of A, so the
+        # delta weight is A @ B.T, which directly has the shape (num_embeddings, embedding_dim) of the base weight.
+        return weight_a @ weight_b.t()
+
+    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        if self.disable_adapters:
+            if self.merged:
+                self.unmerge()
+            result = self.base_layer(x, *args, **kwargs)
+        elif self.merged:
+            result = self.base_layer(x, *args, **kwargs)
+        else:
+            result = self.base_layer(x, *args, **kwargs)
+            orig_dtype = result.dtype
+
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.dummy_lora_A.keys():
+                    continue
+                a = self.dummy_lora_A[active_adapter]
+                b = self.dummy_lora_B[active_adapter]
+                dropout = self.dummy_lora_dropout[active_adapter]
+                # Note: no input dtype cast here, unlike in Linear: x contains token ids that must stay integers.
+                result = result + b(dropout(a(x))) * self.scaling[active_adapter]
+            result = result.to(orig_dtype)
+
+        return result
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "dummy." + rep
+
+    def extra_repr(self) -> str:
+        return quantization_extra_repr(self)

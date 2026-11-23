@@ -36,7 +36,8 @@ class DummyConfig(PeftConfig):
     Args:
         target_modules (`Union[List[str], str]`):
             The names of the modules to apply the adapter to. Supports `nn.Linear`,
-            `transformers.pytorch_utils.Conv1D`, and `nn.Conv1d`/`nn.Conv2d`/`nn.Conv3d` (including groups).
+            `transformers.pytorch_utils.Conv1D`, `nn.Conv1d`/`nn.Conv2d`/`nn.Conv3d` (including groups), and
+            `nn.Embedding`.
         exclude_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to not apply the adapter.
         r (`int`):
@@ -70,7 +71,7 @@ class DummyConfig(PeftConfig):
             "help": (
                 "List of module names or regex expression of the module names to replace with Dummy."
                 "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. "
-                "Supported modules are nn.Linear, transformers.pytorch_utils.Conv1D, and nn.Conv1d/2d/3d."
+                "Supported modules are nn.Linear, transformers.pytorch_utils.Conv1D, nn.Conv1d/2d/3d, and nn.Embedding."
             )
         },
     )

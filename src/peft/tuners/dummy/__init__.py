@@ -15,11 +15,11 @@
 from peft.utils import register_peft_method
 
 from .config import DummyConfig
-from .layer import Conv1d, Conv2d, Conv3d, DummyLayer, Linear
+from .layer import Conv1d, Conv2d, Conv3d, DummyLayer, Embedding, Linear
 from .model import DummyModel
 
 
-__all__ = ["Conv1d", "Conv2d", "Conv3d", "DummyConfig", "DummyLayer", "DummyModel", "Linear"]
+__all__ = ["Conv1d", "Conv2d", "Conv3d", "DummyConfig", "DummyLayer", "DummyModel", "Embedding", "Linear"]
 
 register_peft_method(
     name="dummy",
