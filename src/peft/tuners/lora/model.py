@@ -25,14 +25,12 @@ from typing import Literal, Optional, Union
 
 import packaging.version
 import torch
-import transformers
 from torch import nn
 
 from peft.import_utils import (
     is_bnb_4bit_available,
     is_bnb_available,
     is_transformers_dtensor_tp,
-    is_transformers_ge_v5_4_0,
     is_transformers_ge_v5_17_0,
 )
 from peft.tuners.tuners_utils import (
@@ -390,16 +388,8 @@ class LoraModel(BaseTuner):
 
         # If the module has a tp_plan, we add hooks to the LoRA layers to make sure they respect the plan
         if tp_plan is not None:
-            if not is_transformers_ge_v5_4_0:
-                raise RuntimeError(
-                    "The base model is tensor-parallel sharded but the installed version of Transformers does not "
-                    "support LoRA with Tensor Parallelism. Please upgrade to transformers >= 5.4.0."
-                )
-
             if not is_transformers_dtensor_tp:
-                from transformers.integrations.tensor_parallel import (
-                    add_tensor_parallel_hooks_to_module,
-                )
+                from transformers.integrations.tensor_parallel import add_tensor_parallel_hooks_to_module
 
             if tp_plan == "colwise_gather_output" and is_transformers_dtensor_tp:
                 # The input and output of the base layer (e.g. lm_head) are replicated, so the LoRA layers are
@@ -567,14 +557,6 @@ class LoraModel(BaseTuner):
         hook_handles = []
 
         if alora_offsets is not None:
-            # TODO: remove once transformers 4.52 is no longer supported. Note that 4.52.0 is yanked, so 4.52.1
-            # is the first 4.52 release.
-            transformers_lt_4_52 = packaging.version.parse(transformers.__version__) < packaging.version.parse(
-                "4.52.1"
-            )
-            if transformers_lt_4_52:
-                raise ValueError("Using aLoRA requires transformers >= 4.52.1.")
-
             from transformers.modeling_layers import GradientCheckpointingLayer
 
             for n, layer in self.named_modules():

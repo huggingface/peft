@@ -78,7 +78,7 @@ def test_cartridge_offsets_position_ids_in_forward(monkeypatch, base_model):
     assert torch.equal(captured["position_ids"], position_ids + peft_config.num_virtual_tokens)
 
 
-def test_cartridge_prefill_4d_mask_uses_cache_position(monkeypatch, base_model):
+def test_cartridge_prefill_4d_mask(monkeypatch, base_model):
     base = base_model
     peft_config = CartridgeConfig(num_virtual_tokens=4, num_frozen_tokens=1, task_type="CAUSAL_LM")
     model = get_peft_model(base, peft_config)
@@ -88,15 +88,13 @@ def test_cartridge_prefill_4d_mask_uses_cache_position(monkeypatch, base_model):
     def fake_create_attention_mask(
         model,
         *,
-        model_input,
         attention_mask,
         past_key_values,
-        cache_position,
         batch_size,
         sequence_length,
         position_ids,
     ):
-        captured["cache_position"] = cache_position
+        captured["attention_mask"] = attention_mask
         return attention_mask
 
     # NOTE: this replaces create_attention_mask at its import location inside peft.peft_model; if the 4d mask handling
@@ -118,10 +116,12 @@ def test_cartridge_prefill_4d_mask_uses_cache_position(monkeypatch, base_model):
         }
 
     model.base_model_prepare_inputs_for_generation = fake_prepare_inputs_for_generation
-    _ = model.prepare_inputs_for_generation(input_ids)
+    model_kwargs = model.prepare_inputs_for_generation(input_ids)
 
-    assert captured["cache_position"] is not None
-    assert torch.equal(captured["cache_position"], cache_position)
+    assert captured["attention_mask"].shape == (1, input_ids.shape[1] + peft_config.num_virtual_tokens)
+    assert torch.equal(
+        model_kwargs["cache_position"], torch.arange(input_ids.shape[1]) + peft_config.num_virtual_tokens
+    )
 
 
 @pytest.mark.parametrize("num_frozen_tokens", [0, 2])

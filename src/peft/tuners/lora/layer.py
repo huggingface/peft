@@ -27,7 +27,7 @@ import torch.nn.functional as F
 from torch import nn
 from transformers.pytorch_utils import Conv1D
 
-from peft.import_utils import is_transformers_dtensor_tp, is_transformers_ge_v5_4_0
+from peft.import_utils import is_transformers_dtensor_tp
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import (
     BaseTunerLayer,
@@ -1279,9 +1279,6 @@ class Embedding(nn.Module, LoraLayer):
         self.output_fns = {}
 
         if tp_plan is not None:
-            if not is_transformers_ge_v5_4_0:
-                raise RuntimeError("Tensor Parallel with LoRA is only supported for transformers v5.4.0 and above. ")
-
             if tp_plan not in _EMBEDDING_SUPPORTED_TP_PLANS:
                 raise ValueError(
                     f"Unsupported tensor parallel plan {tp_plan} for embedding layers. "

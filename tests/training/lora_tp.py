@@ -31,7 +31,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
 from transformers.testing_utils import ColoredFormatter, Colors
 
 from peft import LoraConfig, get_peft_model
-from peft.import_utils import is_transformers_ge_v5_4_0, is_transformers_ge_v5_13_0
+from peft.import_utils import is_transformers_ge_v5_13_0
 
 
 TINY_MODEL_ID = "peft-internal-testing/zephyr-smol_llama-100m-sft-full"
@@ -268,7 +268,4 @@ if __name__ == "__main__":
         help="List of target modules for LoRA adaptation",
     )
     args = parser.parse_args()
-    if not is_transformers_ge_v5_4_0:
-        print("This test requires transformers v5.4.0 or higher")
-    else:
-        main(model_id=args.model_id, target_modules=args.target_modules)
+    main(model_id=args.model_id, target_modules=args.target_modules)

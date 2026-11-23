@@ -74,7 +74,6 @@ from peft import (
     set_base_model_state_dict,
     set_peft_model_state_dict,
 )
-from peft.import_utils import is_transformers_ge_v5
 from peft.mapping import PEFT_TYPE_TO_TUNER_MAPPING
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.lora import LoraLayer
@@ -1595,15 +1594,6 @@ class PeftCommonTester:
         if (config_cls == AdaLoraConfig) and ("roberta" in model_id.lower()):
             # TODO: no gradients on the "dense" layer, other layers work, not sure why
             pytest.skip("AdaLora with RoBERTa does not work correctly")
-
-        if not is_transformers_ge_v5:
-            # TODO: remove once transformers < 5.0 no longer supported
-            if "gptbigcode" in model_id.lower():
-                pytest.skip("GPTBigCode doesn't implement gradient checkpointing correctly in transformers < 5.0.")
-            if "bart" in model_id.lower():
-                pytest.skip(
-                    "Bart in transformers < 5.0 doesn't handle input sharing well enough. See transformers#41821"
-                )
 
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
