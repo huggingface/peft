@@ -64,8 +64,7 @@ class DummyLayer(BaseTunerLayer):
         **kwargs,
     ) -> None:
         """Internal function to create a dummy adapter and its weights based
-        on its name and config. Will be called by __init__ and when adding
-        additional adapters.
+        on its name and config. Will be called by __init__ and when adding additional adapters.
 
         Args:
             adapter_name (`str`): Name for the adapter to add.
@@ -131,7 +130,10 @@ class DummyLayer(BaseTunerLayer):
             weight_a = weight_a.float()
             weight_b = weight_b.float()
 
-        output_tensor = self._compose_delta_weight(weight_a, weight_b) * self.scaling[adapter]
+        output_tensor = self._compose_delta_weight(weight_a, weight_b)
+        # The delta weight is a freshly computed tensor that nothing else references, so apply the scaling in place to
+        # avoid allocating another full-size tensor.
+        output_tensor.mul_(self.scaling[adapter])
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -144,13 +146,13 @@ class DummyLayer(BaseTunerLayer):
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
-        Merge the active adapter weights into the base weights
+        Merge the active adapter weights into the base weights.
 
         Args:
             safe_merge (`bool`, *optional*):
                 If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
-                NaNs. Defaults to `False`.
+                NaNs but is generally slower and needs more memory. Defaults to `False`.
             adapter_names (`List[str]`, *optional*):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
@@ -172,8 +174,17 @@ class DummyLayer(BaseTunerLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.set_base_weight(orig_weight)
+                    if self.quantization_backend is not None:
+                        self.set_base_weight(orig_weight)
+                    else:
+                        # Write into the existing weight in place instead of rebinding the data: with FSDP2, the
+                        # module can hold a temporary unsharded copy of the weight, and rebinding (via set_base_weight)
+                        # would only update that copy, which is then discarded at the next reshard, losing the merge.
+                        self.get_base_weight().copy_(orig_weight)
                 else:
+                    # For plain weights, get_base_weight returns the existing weight tensor, so this writes the delta
+                    # into it in place. For quantized weights, a dequantized copy is returned and set_base_weight
+                    # re-quantizes it afterwards.
                     orig_weight = self.get_base_weight()
                     orig_weight += self.get_delta_weight(active_adapter)
                     self.set_base_weight(orig_weight)

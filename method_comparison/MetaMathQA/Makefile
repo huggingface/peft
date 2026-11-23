@@ -8,8 +8,8 @@ RESULTS_DIR := results
 
 OPTIONAL_FLAGS =
 
-ifdef UPLOAD_BUCKET
-	OPTIONAL_FLAGS += --bucket_name "${UPLOAD_BUCKET}"
+ifdef UPLOAD_BUCKET_METAMATHQA
+	OPTIONAL_FLAGS += --bucket_name "${UPLOAD_BUCKET_METAMATHQA}"
 endif
 
 # --- Automatic Experiment and Result Discovery ---

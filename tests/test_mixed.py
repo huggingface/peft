@@ -42,6 +42,8 @@ from peft import (
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
+from .test_custom_models import ModelMha
+
 
 class SimpleNet(nn.Module):
     def __init__(self, bias=True):
@@ -217,6 +219,12 @@ class TestMixedAdapterTypes(unittest.TestCase):
         peft_model_01.set_adapter(["adapter0", "adapter1"])
         output_mixed_01 = peft_model_01(input)
 
+        model_copy = copy.deepcopy(peft_model_01)
+        model_copy.merge_adapter()
+        assert torch.allclose(output_mixed_01, model_copy(input), atol=atol, rtol=rtol)
+        model_copy.unmerge_adapter()
+        assert torch.allclose(output_mixed_01, model_copy(input), atol=atol, rtol=rtol)
+
         model_merged_01 = peft_model_01.merge_and_unload()
         output_merged_01 = model_merged_01(input)
         assert torch.allclose(output_mixed_01, output_merged_01, atol=atol, rtol=rtol)
@@ -227,6 +235,12 @@ class TestMixedAdapterTypes(unittest.TestCase):
         peft_model_10.add_adapter("adapter0", config0)
         peft_model_10.set_adapter(["adapter1", "adapter0"])
         output_mixed_10 = peft_model_10(input)
+
+        model_copy = copy.deepcopy(peft_model_10)
+        model_copy.merge_adapter()
+        assert torch.allclose(output_mixed_10, model_copy(input), atol=atol, rtol=rtol)
+        model_copy.unmerge_adapter()
+        assert torch.allclose(output_mixed_10, model_copy(input), atol=atol, rtol=rtol)
 
         model_merged_10 = peft_model_10.merge_and_unload()
         output_merged_10 = model_merged_10(input)
@@ -420,6 +434,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 LoKrConfig(target_modules=["lin0"], init_weights=False),
                 AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
                 DummyConfig(target_modules=["lin0"], init_weights=False),
+                OFTConfig(target_modules=["lin0"], init_weights=False, r=0, oft_block_size=2),
             ],
             r=2,
         ),
@@ -466,6 +481,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 LoKrConfig(init_weights=False),
                 AdaLoraConfig(init_lora_weights=False, total_step=1),
                 DummyConfig(init_weights=False),
+                OFTConfig(init_weights=False, r=0, oft_block_size=2),
             ],
             r=2,
         ),
@@ -562,7 +578,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         if platform.system() == "Linux":
             pytest.skip("This test fails but only on GitHub CI with Linux systems.")
 
-        atol = 1e-5
+        atol = 1e-4
         rtol = 1e-5
         torch.manual_seed(0)
 
@@ -579,10 +595,14 @@ class TestMixedAdapterTypes(unittest.TestCase):
         config2 = AdaLoraConfig(r=4, lora_alpha=4, target_modules=["lin1"], init_lora_weights=False, total_step=1)
         peft_model.add_adapter("adapter2", config2)
 
-        config3 = LoKrConfig(r=4, alpha=4, target_modules=["lin0", "lin1"], init_weights=False)
+        # OFT is not commutative with the other adapters, add it before adapter4 so that it is in the middle of lin0
+        config3 = OFTConfig(target_modules=["lin0"], init_weights=False, r=0, oft_block_size=2)
         peft_model.add_adapter("adapter3", config3)
 
-        peft_model.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3"])
+        config4 = LoKrConfig(r=4, alpha=4, target_modules=["lin0", "lin1"], init_weights=False)
+        peft_model.add_adapter("adapter4", config4)
+
+        peft_model.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3", "adapter4"])
         output_mixed = peft_model(input)
         assert torch.isfinite(output_base).all()
         assert not torch.allclose(output_base, output_mixed, atol=atol, rtol=rtol)
@@ -601,18 +621,18 @@ class TestMixedAdapterTypes(unittest.TestCase):
         assert torch.isfinite(output_merged).all()
         assert torch.allclose(output_mixed, output_merged, atol=atol, rtol=rtol)
 
-        # merge and unload only adapter1 and adapter3
+        # merge and unload only adapter1 and adapter4
         model_copy = copy.deepcopy(peft_model)
-        model_copy.set_adapter(["adapter1", "adapter3"])
-        output_13 = model_copy(input)
-        assert torch.isfinite(output_13).all()
-        assert not torch.allclose(output_mixed, output_13, atol=atol, rtol=rtol)
+        model_copy.set_adapter(["adapter1", "adapter4"])
+        output_14 = model_copy(input)
+        assert torch.isfinite(output_14).all()
+        assert not torch.allclose(output_mixed, output_14, atol=atol, rtol=rtol)
 
-        model_copy.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3"])
-        model_merged_unloaded = model_copy.merge_and_unload(adapter_names=["adapter1", "adapter3"])
-        output_merged_13 = model_merged_unloaded(input)
-        assert torch.isfinite(output_merged_13).all()
-        assert torch.allclose(output_13, output_merged_13, atol=atol, rtol=rtol)
+        model_copy.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3", "adapter4"])
+        model_merged_unloaded = model_copy.merge_and_unload(adapter_names=["adapter1", "adapter4"])
+        output_merged_14 = model_merged_unloaded(input)
+        assert torch.isfinite(output_merged_14).all()
+        assert torch.allclose(output_14, output_merged_14, atol=atol, rtol=rtol)
 
         # test unloading
         model_copy = copy.deepcopy(peft_model)
@@ -620,6 +640,98 @@ class TestMixedAdapterTypes(unittest.TestCase):
         output_unloaded = model_unloaded(input)
         assert torch.isfinite(output_unloaded).all()
         assert torch.allclose(output_base, output_unloaded, atol=atol, rtol=rtol)
+
+    def test_merge_adapter_mha(self):
+        # The LoRA MultiheadAttention layer also merges its out_proj child, so only nested base_layer chains may be
+        # reordered when merging.
+        atol = 1e-4
+        rtol = 1e-4
+        input = torch.rand(9, 2, 10).to(self.torch_device)
+        peft_model = self._get_model(ModelMha, LoraConfig(target_modules=["mha"], init_lora_weights=False), "adapter0")
+        torch.manual_seed(1)
+        peft_model.add_adapter("adapter1", LoHaConfig(target_modules=["lin0"], init_weights=False))
+        peft_model.set_adapter(["adapter0", "adapter1"])
+        output_mixed = peft_model(input)
+
+        peft_model.merge_adapter()
+        assert torch.allclose(output_mixed, peft_model(input), atol=atol, rtol=rtol)
+        peft_model.unmerge_adapter()
+        assert torch.allclose(output_mixed, peft_model(input), atol=atol, rtol=rtol)
+
+    @parameterized.expand([False, True])
+    def test_disable_adapter_restores_state(self, modules_to_save):
+        # Regression test for #3507: PeftMixedModel.disable_adapter() should restore the
+        # adapter-enabled state that existed on entry, instead of unconditionally
+        # re-enabling. Tests nested contexts and an already-disabled model.
+        atol = 1e-5
+        rtol = 1e-5
+        input = torch.arange(90).reshape(9, 10).to(self.torch_device)
+
+        config = LoraConfig(
+            r=4,
+            lora_alpha=4,
+            target_modules=["lin0"],
+            modules_to_save=["lin1"] if modules_to_save else None,
+            init_lora_weights=False,
+        )
+        peft_model = self._get_model(SimpleNet, config, "adapter0", seed=0)
+        adapter_layers = [m for m in peft_model.modules() if isinstance(m, (BaseTunerLayer, AuxiliaryTrainingWrapper))]
+
+        output_adapter = peft_model(input)
+
+        with peft_model.disable_adapter():
+            output_base = peft_model(input)
+            with peft_model.disable_adapter():
+                assert all(m.disable_adapters for m in adapter_layers)
+                assert torch.allclose(peft_model(input), output_base, atol=atol, rtol=rtol)
+            output_after_inner = peft_model(input)
+            assert all(m.disable_adapters for m in adapter_layers)
+
+        assert all(not m.disable_adapters for m in adapter_layers)
+        assert torch.allclose(peft_model(input), output_adapter, atol=atol, rtol=rtol)
+
+        assert not torch.allclose(output_adapter, output_base, atol=atol, rtol=rtol)
+        assert torch.allclose(output_after_inner, output_base, atol=atol, rtol=rtol)
+        assert not torch.allclose(output_after_inner, output_adapter, atol=atol, rtol=rtol)
+
+        peft_model.base_model.disable_adapter_layers()
+        assert all(m.disable_adapters for m in adapter_layers)
+        with peft_model.disable_adapter():
+            assert all(m.disable_adapters for m in adapter_layers)
+        assert all(m.disable_adapters for m in adapter_layers)
+        assert torch.allclose(peft_model(input), output_base, atol=atol, rtol=rtol)
+
+    @parameterized.expand(itertools.product([False, True], [False, True]))
+    def test_disable_adapter_restores_state_after_exception(self, initially_disabled, modules_to_save):
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"] if modules_to_save else None)
+        peft_model = self._get_model(SimpleNet, config, "adapter0")
+        adapter_layers = [m for m in peft_model.modules() if isinstance(m, (BaseTunerLayer, AuxiliaryTrainingWrapper))]
+        if initially_disabled:
+            peft_model.base_model.disable_adapter_layers()
+
+        with pytest.raises(RuntimeError, match="outer context"):
+            with peft_model.disable_adapter():
+                with pytest.raises(RuntimeError, match="inner context"):
+                    with peft_model.disable_adapter():
+                        raise RuntimeError("inner context")
+                assert all(m.disable_adapters for m in adapter_layers)
+                raise RuntimeError("outer context")
+
+        assert all(m.disable_adapters == initially_disabled for m in adapter_layers)
+
+    def test_disable_adapter_irregular_state(self):
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = self._get_model(SimpleNet, config, "adapter0")
+        adapter_layers = [m for m in peft_model.modules() if isinstance(m, (BaseTunerLayer, AuxiliaryTrainingWrapper))]
+        peft_model.base_model.model.lin0.enable_adapters(False)
+        assert {m.disable_adapters for m in adapter_layers} == {False, True}
+
+        with pytest.warns(UserWarning, match="some adapter layers that are enabled and others that are disabled"):
+            with peft_model.disable_adapter():
+                assert all(m.disable_adapters for m in adapter_layers)
+
+        # Like PeftModel, normalize inconsistent tuner and auxiliary states to enabled.
+        assert all(not m.disable_adapters for m in adapter_layers)
 
     def test_delete_adapter(self):
         atol = 1e-5

@@ -70,20 +70,8 @@ def _run_lorafa_weight_decay_step(config: LoraConfig, lr: float, weight_decay: f
         assert name_no_wd == name_wd
         assert torch.equal(param_no_wd, param_wd)
 
-    optimizer_no_wd = create_lorafa_optimizer(
-        model=model_no_wd,
-        r=config.r,
-        lora_alpha=config.lora_alpha,
-        lr=lr,
-        weight_decay=0.0,
-    )
-    optimizer_wd = create_lorafa_optimizer(
-        model=model_wd,
-        r=config.r,
-        lora_alpha=config.lora_alpha,
-        lr=lr,
-        weight_decay=weight_decay,
-    )
+    optimizer_no_wd = create_lorafa_optimizer(model_no_wd, lr)
+    optimizer_wd = create_lorafa_optimizer(model_wd, lr, weight_decay=weight_decay)
     loss = torch.nn.CrossEntropyLoss()
 
     # Save initial lora_A weights. Only from one model since both models params are identical
@@ -141,7 +129,11 @@ def test_lorafa_init(use_rslora):
         bias="none",
     )
     model = get_peft_model(model, config)
-    optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr)
+    # Ensure that the correct call of create_lorafa_optimizer does not warn because the signature has been changed.
+    # TODO: remove in PEFT v1.2
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        optimizer = create_lorafa_optimizer(model, lr)
 
     expected_scaling = lora_alpha / math.sqrt(lora_rank) if use_rslora else lora_alpha / lora_rank
     scaling_factors = [factor for factor in optimizer.param_groups[0]["scaling_factors"] if factor is not None]
@@ -162,27 +154,35 @@ def test_lorafa_init(use_rslora):
     assert all_A_fixed and all_B_trainable
 
 
-@pytest.mark.parametrize("use_rslora", [False, True])
-def test_lorafa_rslora_flag_mismatch_raises(use_rslora):
-    """
-    Test if passing an explicit use_rslora flag that disagrees with the active adapter config raises.
-    """
-    lora_rank = 16
-    lora_alpha = 32
-    lr = 7e-5
+# TODO: remove legacy signature coverage in PEFT v1.2
+@pytest.mark.parametrize(
+    ("args", "kwargs"),
+    [
+        pytest.param((16, 32, 0.001, 0.1), {}, id="all-positional"),
+        pytest.param((16, 32), {"lr": 0.001, "weight_decay": 0.1}, id="rank-and-alpha-positional"),
+        pytest.param((16,), {"lora_alpha": 32, "lr": 0.001, "weight_decay": 0.1}, id="rank-positional"),
+        pytest.param((), {"r": 16, "lora_alpha": 32, "lr": 0.001, "weight_decay": 0.1}, id="all-keyword"),
+    ],
+)
+def test_lorafa_legacy_signature_warns(args, kwargs):
+    # Deliberately use a different scaling factor in the config than the legacy arguments imply.
+    model = get_peft_model(SimpleNet(), LoraConfig(r=2, lora_alpha=8, target_modules=["lin0"]))
 
-    model = SimpleNet()
-    config = LoraConfig(
-        r=lora_rank,
-        lora_alpha=lora_alpha,
-        target_modules=["lin0", "lin1"],
-        use_rslora=not use_rslora,
-        bias="none",
-    )
-    model = get_peft_model(model, config)
+    with pytest.warns(FutureWarning, match=r"`r` and `lora_alpha` are deprecated"):
+        optimizer = create_lorafa_optimizer(model, *args, **kwargs)
 
-    with pytest.raises(ValueError, match="was passed to create_lorafa_optimizer"):
-        create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr, use_rslora=use_rslora)
+    group = optimizer.param_groups[0]
+    assert group["lr"] == 0.001
+    assert group["weight_decay"] == 0.1
+    assert {factor for factor in group["scaling_factors"] if factor is not None} == {4.0}
+
+
+@pytest.mark.parametrize("kwargs", [{"r": 16}, {"lora_alpha": 32}], ids=["rank-only", "alpha-only"])
+def test_lorafa_legacy_signature_requires_rank_and_alpha(kwargs):
+    model = get_peft_model(SimpleNet(), LoraConfig(r=2, lora_alpha=8, target_modules=["lin0"]))
+
+    with pytest.raises(TypeError):
+        create_lorafa_optimizer(model, lr=0.001, **kwargs)
 
 
 def test_lorafa_init_embedding_target_module():
@@ -201,7 +201,7 @@ def test_lorafa_init_embedding_target_module():
         bias="none",
     )
     model = get_peft_model(model, config).to(torch_device)
-    optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr)
+    optimizer = create_lorafa_optimizer(model=model, lr=lr)
 
     lora_scaling_factors = [
         scaling_factor
@@ -225,38 +225,6 @@ def test_lorafa_init_embedding_target_module():
     optimizer.step()
 
 
-# TODO remove after 2026-11-01
-def test_lorafa_scaling_factor_deprecation_warning():
-    """
-    Test that using the legacy scaling_factor emits a FutureWarning
-    """
-    param = nn.Parameter(torch.ones(2, 2))
-    optimizer = lorafa_module.LoraFAOptimizer(
-        [
-            {
-                "params": [param],
-                "lr": 1e-3,
-                "names": ["dummy.weight"],
-                "scaling_factor": 1.0,
-                "betas": (0.9, 0.999),
-                "eps": 1e-6,
-                "weight_decay": 0.0,
-                "correct_bias": True,
-            }
-        ]
-    )
-    param.grad = torch.ones_like(param)
-
-    with warnings.catch_warnings(record=True) as caught_warnings:
-        warnings.simplefilter("always")
-        optimizer.step()
-
-    assert any(
-        isinstance(warning.message, FutureWarning) and "`scaling_factor` is deprecated" in str(warning.message)
-        for warning in caught_warnings
-    )
-
-
 def test_LoraFAOptimizer_step():
     """
     Test if the optimizer's step function runs without any exception and checks specific conditions on lora_A and
@@ -275,7 +243,7 @@ def test_LoraFAOptimizer_step():
         bias="none",
     )
     model = get_peft_model(model, config).to(torch_device)
-    optimizer = create_lorafa_optimizer(model=model, r=16, lora_alpha=32, lr=7e-5)
+    optimizer = create_lorafa_optimizer(model, lr)
     loss = torch.nn.CrossEntropyLoss()
 
     # Save initial weights of lora_A
@@ -402,7 +370,7 @@ def test_lorafa_respects_layer_specific_scaling_patterns(monkeypatch):
         bias="none",
     )
     model = get_peft_model(SimpleNet(), config).to(torch_device)
-    optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr)
+    optimizer = create_lorafa_optimizer(model, lr)
 
     lin0 = model.base_model.model.lin0
     lin1 = model.base_model.model.lin1
@@ -487,7 +455,7 @@ def test_lorafa_bart_layerdrop(layerdrop):
         .to(torch_device)
         .train()
     )
-    optimizer = create_lorafa_optimizer(model, r=2, lora_alpha=2, lr=0.001, weight_decay=0.1)
+    optimizer = create_lorafa_optimizer(model, lr=0.001, weight_decay=0.1)
     ids = torch.tensor([[3, 4, 5, 2]], device=torch_device)
     loss = model(input_ids=ids, attention_mask=torch.ones_like(ids), labels=ids).loss
     loss.backward()
@@ -503,7 +471,7 @@ def test_lorafa_step_with_closure():
         torch.nn.Sequential(torch.nn.Linear(4, 4, bias=False)),
         LoraConfig(target_modules=["0"], r=2, lora_alpha=4),
     )
-    optimizer = create_lorafa_optimizer(model, r=2, lora_alpha=4, lr=0.001)
+    optimizer = create_lorafa_optimizer(model, 0.001)
     x = torch.ones(2, 4)
 
     def closure():

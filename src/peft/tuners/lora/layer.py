@@ -19,7 +19,7 @@ import math
 import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
-from typing import Any, Optional, Union
+from typing import Any, Optional, Self, Union
 
 import torch
 import torch.distributed as dist
@@ -1100,9 +1100,9 @@ class Linear(nn.Module, LoraLayer):
                                 f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
 
-                    base_layer.weight.data = orig_weight
+                    base_layer.weight.data.copy_(orig_weight)
                     if new_bias is not None:
-                        base_layer.bias.data = new_bias.to(orig_dtype)
+                        base_layer.bias.data.copy_(new_bias.to(orig_dtype))
 
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
@@ -1138,7 +1138,7 @@ class Linear(nn.Module, LoraLayer):
                     weight.data -= delta_weight.to(orig_dtype)
                 else:
                     unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
-                    weight.data = unmerged
+                    weight.data.copy_(unmerged)
 
                 if self.lora_bias[active_adapter]:
                     self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias * self.scaling[active_adapter]
@@ -1166,7 +1166,8 @@ class Linear(nn.Module, LoraLayer):
             weight_A = weight_A.float()
             weight_B = weight_B.float()
 
-        output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
+        output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out)
+        output_tensor.mul_(self.scaling[adapter])
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -1221,6 +1222,9 @@ class Linear(nn.Module, LoraLayer):
         if variant is not None:
             return variant.supports_lora_conversion()
         return True
+
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        return self.get_delta_weight(adapter_name)
 
     def __repr__(self) -> str:
         rep = super().__repr__()
@@ -1476,7 +1480,7 @@ class Embedding(nn.Module, LoraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weight
+                    base_layer.weight.data.copy_(orig_weight)
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
                         base_layer.weight.data += self.get_delta_weight(active_adapter).to(orig_dtype)
@@ -1500,7 +1504,7 @@ class Embedding(nn.Module, LoraLayer):
                     weight.data -= self.get_delta_weight(active_adapter).to(orig_dtype)
                 else:
                     unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
-                    weight.data = unmerged
+                    weight.data.copy_(unmerged)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -1525,7 +1529,8 @@ class Embedding(nn.Module, LoraLayer):
             weight_A = weight_A.float()
             weight_B = weight_B.float()
 
-        output_tensor = transpose(weight_B @ weight_A, True) * self.scaling[adapter]
+        output_tensor = transpose(weight_B @ weight_A, True)
+        output_tensor.mul_(self.scaling[adapter])
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -1845,9 +1850,9 @@ class _ConvNd(nn.Module, LoraLayer):
                                 f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
 
-                    base_layer.weight.data = orig_weight
+                    base_layer.weight.data.copy_(orig_weight)
                     if new_bias is not None:
-                        base_layer.bias.data = new_bias.to(orig_dtype)
+                        base_layer.bias.data.copy_(new_bias.to(orig_dtype))
 
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
@@ -1882,7 +1887,7 @@ class _ConvNd(nn.Module, LoraLayer):
                     weight.data -= delta_weight.to(orig_dtype)
                 else:
                     unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
-                    weight.data = unmerged
+                    weight.data.copy_(unmerged)
 
                 if self.lora_bias[active_adapter]:
                     self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias * self.scaling[active_adapter]
@@ -1913,16 +1918,13 @@ class _ConvNd(nn.Module, LoraLayer):
         # https://github.com/bmaltais/kohya_ss/blob/feb6728762a8f463d15ba936d189d4c3abfaa1ab/networks/lora.py#L117
         if self.get_base_layer().weight.shape[2:] == (1, 1):
             # conv2d 1x1
-            output_tensor = (weight_B.squeeze(3).squeeze(2) @ weight_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(
-                3
-            ) * self.scaling[adapter]
+            output_tensor = (weight_B.squeeze(3).squeeze(2) @ weight_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(3)
         else:
             output_tensor = self.conv_fn(weight_A.transpose(0, 1), weight_B)
 
-            if self.get_base_layer().groups > 1:
-                output_tensor = output_tensor * self.scaling[adapter]
-            else:
-                output_tensor = output_tensor.transpose(0, 1) * self.scaling[adapter]
+            if self.get_base_layer().groups == 1:
+                output_tensor = output_tensor.transpose(0, 1)
+        output_tensor.mul_(self.scaling[adapter])
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -2325,7 +2327,8 @@ class MultiheadAttention(nn.Module, LoraLayer):
             weight_A = weight_A.float()
             weight_B = weight_B.float()
 
-        output_tensor = (weight_B @ weight_A) * self.scaling[adapter]
+        output_tensor = weight_B @ weight_A
+        output_tensor.mul_(self.scaling[adapter])
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -2387,24 +2390,38 @@ class MultiheadAttention(nn.Module, LoraLayer):
     # from accelerate.
     @skip_init_on_device
     def _restore_weights(self):
-        # Restore the weights as registered parameters on the base layer.
-        # This is necessary because the way that weights are merged/unmerged (which is necessary for forward to work
-        # correctly), the Module "forgets" these attributes. Therefore, we need to call register_parameter explicitly.
-        # We cannot call register_parameter for merging/unmerging because that cuts them off from the autograd graph.
-        # Note that this is hacky, since we need to ensure that _restore_weights is called by each method that needs it.
+        # Merging replaces the base parameters with tensors to preserve the LoRA autograd graph. A normal forward
+        # automatically merges and then unmerges again, which re-registers the parameters. After an explicit
+        # merge_adapter(), however, they remain unregistered and would be missing from state_dict() and
+        # named_parameters(). Restore them before saving, loading, converting, or enumerating parameters.
 
         # in_proj
         # TODO work with separate weights
         base_layer = self.get_base_layer()
         weight = base_layer.in_proj_weight
-        del base_layer.in_proj_weight
-        base_layer.register_parameter("in_proj_weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad))
+        # FSDP2 tracks parameter identities across module traversals. Only restore weights that merging replaced.
+        # For example, two iterations of `self.named_modules()` would otherwise lead to different module identities.
+        if not isinstance(weight, nn.Parameter):
+            del base_layer.in_proj_weight
+            base_layer.register_parameter(
+                "in_proj_weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad)
+            )
 
         # out_proj
         base_layer = base_layer.out_proj.get_base_layer()
         weight = base_layer.weight
-        del base_layer.weight
-        base_layer.register_parameter("weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad))
+        if not isinstance(weight, nn.Parameter):
+            del base_layer.weight
+            base_layer.register_parameter("weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad))
+
+    def _apply(self, *args, **kwargs) -> Self:
+        # changes in dtype, device, etc.
+        self._restore_weights()
+        return super()._apply(*args, **kwargs)
+
+    def _load_from_state_dict(self, *args, **kwargs) -> None:
+        self._restore_weights()
+        super()._load_from_state_dict(*args, **kwargs)
 
     def state_dict(self, *args, **kwargs):
         self._restore_weights()
@@ -2717,10 +2734,11 @@ class ParamWrapper(nn.Module, LoraLayer):
             weight_B = weight_B.reshape(weight_B.shape[0], -1, self.num_experts)
             # fan_in_fan_out must be False, so no transpose call here
             if not self._did_swap_in_out_features:
-                delta_weight = torch.einsum("o r e, e r i -> e i o", weight_B, weight_A) * self.scaling[adapter_name]
+                delta_weight = torch.einsum("o r e, e r i -> e i o", weight_B, weight_A)
             else:
                 # for some MoE layers, the order is (experts, out_features, in_features)
-                delta_weight = torch.einsum("o r e, e r i -> e o i", weight_B, weight_A) * self.scaling[adapter_name]
+                delta_weight = torch.einsum("o r e, e r i -> e o i", weight_B, weight_A)
+            delta_weight.mul_(self.scaling[adapter_name])
 
         param = self.get_param()
         if param.dtype in ALLOWED_COMPUTE_DTYPES:
