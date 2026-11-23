@@ -147,9 +147,9 @@ Any `target_modules` entry that does not correspond to a module in the model is 
 
 ### The model never learns to generate a special token
 
-Some checkpoints contain special tokens that were never trained, for instance the tags of a chat template like `<tool_call>`. Their input embedding rows are all zero, and their output embedding (`lm_head`) rows are often identical to those of many other untrained tokens. Most PEFT methods keep both layers frozen, so the model cannot learn to generate such a token: tokens with identical output embedding rows always receive identical logits. The training loss still decreases, because the rest of the sequence is learned.
+Some checkpoints contain special tokens that were never trained, for instance the tags of a chat template like `<tool_call>`. Their input embedding rows are often, but not always, zero: untrained tokens may keep a random initialization. Their output embedding (`lm_head`) rows are often identical to those of many other untrained tokens. Most PEFT methods keep both layers frozen, so the model cannot learn to generate such a token: tokens with identical output embedding rows always receive identical logits. The training loss still decreases, because the rest of the sequence is learned. For an example of near-zero input rows, see the tool-call tags in Qwen2.5-Coder-7B-Instruct.
 
-[`get_peft_model`] can detect this situation during the first training batches: pass `runtime_checks="warn"` (or `"raise"`) and it reports the affected token ids. The check is off by default and adds a small runtime overhead to the first training batches only. To fix it, make the rows of these tokens trainable with `trainable_token_indices`. Since the trainable rows start from the current values, initialize them first, e.g. with the mean embedding of a related text:
+[`get_peft_model`] only checks for near-zero input embedding rows during the first training batches: pass `runtime_checks="warn"` (or `"raise"`) and it reports the affected token ids. The check is off by default and adds a small runtime overhead to the first training batches only. To fix it, make the rows of these tokens trainable with `trainable_token_indices`. Since the trainable rows start from the current values, initialize them first, e.g. with the mean embedding of a related text:
 
 ```python
 tokens = ["<tool_call>", "</tool_call>"]
@@ -166,6 +166,8 @@ with torch.no_grad():
 lora_config = LoraConfig(..., trainable_token_indices={"embed_tokens": token_ids, "lm_head": token_ids})
 peft_model = get_peft_model(base_model, lora_config)
 ```
+
+The check treats an embedding output with `grad_fn` as trainable. However, a trainable transformation can preserve zero vectors: for example, an OFT rotation or HiRA elementwise scaling produces an output with `grad_fn`, yet a zero row stays zero. In general, trainable parameters do not guarantee that a zero input vector can become nonzero. For these zero-preserving transformations, the check skips inspection and removes itself without reporting when its batch budget expires.
 
 The `lm_head` entry is only needed if the output embedding is not tied to the input embedding, otherwise trainable tokens keep the tied layer updated automatically. Alternatively, or if you're not using LoRA, add the embedding layers to `target_modules` or `modules_to_save` if the PEFT method supports it, see [Extending the vocabulary](#extending-the-vocabulary).
 

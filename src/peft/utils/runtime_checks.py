@@ -137,10 +137,12 @@ class ZeroEmbeddingCheck(RuntimeCheck):
     data.
     """
 
-    def __init__(self, mode: Literal["warn", "raise"], ignored_token_ids: set[int]):
+    def __init__(self, mode: Literal["warn", "raise"], ignored_token_ids: set[int], adapter_layer: nn.Module | None):
         super().__init__(mode)
         self.ignored_token_ids = ignored_token_ids
         self.num_checked_batches = 0
+        self.has_inspected_batch = False
+        self.adapter_layer = adapter_layer
 
     @staticmethod
     def get_target_module(model: nn.Module) -> nn.Module | None:
@@ -150,12 +152,19 @@ class ZeroEmbeddingCheck(RuntimeCheck):
     def create(cls, model: nn.Module, mode: Literal["warn", "raise"]) -> "ZeroEmbeddingCheck":
         embedding = _get_input_embeddings(model)
         ignored = _get_ignored_token_ids(model, embedding) if embedding is not None else set()
-        return cls(mode=mode, ignored_token_ids=ignored)
+        # Keep one adapter layer to observe disable_adapter() even on a bare embedding, without retaining the model.
+        from peft.tuners.tuners_utils import BaseTunerLayer
+
+        adapter_layer = next((module for module in model.modules() if isinstance(module, BaseTunerLayer)), None)
+        return cls(mode=mode, ignored_token_ids=ignored, adapter_layer=adapter_layer)
 
     def __call__(self, module: nn.Module, args: tuple, kwargs: dict, output) -> None:
         if not (module.training and torch.is_grad_enabled()):
             return
-        # Every training batch counts, including skipped ones, so that the check always expires.
+        if getattr(module, "disable_adapters", False) or getattr(self.adapter_layer, "disable_adapters", False):
+            # Reference forwards with disabled adapters do not consume the inspection budget.
+            return
+        # Every enabled training batch counts, including unsupported signatures and trainable embeddings.
         self.num_checked_batches += 1
         if self.num_checked_batches >= MAX_CHECKED_BATCHES:
             self.remove()
@@ -166,16 +175,16 @@ class ZeroEmbeddingCheck(RuntimeCheck):
         # skipped. The conditions are ordered so that `output.shape` is only read if `output` is a tensor; nothing
         # here can raise.
         input_ids = args[0] if args else next(iter(kwargs.values()), None)
-        if not isinstance(output, torch.Tensor):
+        if (
+            not isinstance(output, torch.Tensor)
+            or not isinstance(input_ids, torch.Tensor)
+            or input_ids.is_floating_point()
+            or output.shape[:-1] != input_ids.shape
+        ):
+            if self.num_checked_batches >= MAX_CHECKED_BATCHES and not self.has_inspected_batch:
+                self.report("The runtime check could not inspect the input embedding in any of the training batches.")
             return
-        if not isinstance(input_ids, torch.Tensor) or input_ids.is_floating_point():
-            return
-        if output.shape[:-1] != input_ids.shape:
-            return
-
-        if getattr(module, "disable_adapters", False):
-            # e.g. a reference forward pass in the disable_adapter() context, the adapters may still train these rows
-            return
+        self.has_inspected_batch = True
 
         # local import to avoid circular import
         from peft.tuners.trainable_tokens.layer import TrainableTokensLayer
@@ -185,17 +194,15 @@ class ZeroEmbeddingCheck(RuntimeCheck):
         if isinstance(layer, TrainableTokensLayer):
             if any(param.requires_grad for param in layer.base_layer.parameters()):
                 # the whole embedding is trained, e.g. full fine-tuning on top of trainable tokens
-                self.remove()
                 return
             # otherwise only the rows listed in the token indices are updated
             for adapter_name in layer.active_adapters:
                 trainable_ids.update(layer.token_indices.get(adapter_name, []))
         elif output.grad_fn is not None:
             # The output depends on trainable parameters, e.g. with modules_to_save, LoRA on the embedding, or full
-            # fine-tuning, so every row can be updated. Checking grad_fn instead of requires_grad matters: activation
+            # fine-tuning, so treat the rows as trainable. Checking grad_fn instead of requires_grad matters: activation
             # checkpointing calls output.requires_grad_() on the frozen embedding output, which sets requires_grad but
-            # leaves grad_fn empty.
-            self.remove()
+            # leaves grad_fn empty. Keep checking in case a later adapter freezes the embedding.
             return
 
         with torch.no_grad():
@@ -249,7 +256,12 @@ def move_runtime_checks(model: nn.Module) -> None:
     This is needed when an adapter added after the checks were attached wraps a target module, e.g. the input
     embedding, since a check has to see the output of the wrapper, not of the frozen base layer inside it.
     """
+    checks = {}
     for check in _find_runtime_checks(model):
+        check.remove()
+        # Wrappers can deep-copy hooks along with the embedding; keep only the original check of each class.
+        checks.setdefault(type(check), check)
+    for check in checks.values():
         check.register(model)
 
 

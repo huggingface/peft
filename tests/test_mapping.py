@@ -13,6 +13,7 @@
 # limitations under the License.
 import copy
 import pickle
+import warnings
 
 import pytest
 import torch
@@ -163,8 +164,57 @@ class TestZeroEmbeddingCheck:
         for _ in range(MAX_CHECKED_BATCHES - 1):
             hook(embedding, (), {}, None)
         assert self.get_hooks(model)
-        hook(embedding, (), {}, None)
+        with pytest.raises(RuntimeError, match="could not inspect the input embedding"):
+            hook(embedding, (), {}, None)
         assert not self.get_hooks(model)
+
+    @pytest.mark.parametrize("trainable", [False, True])
+    def test_last_batch_is_handled_after_unsupported_calls(self, base_model, trainable):
+        # A valid final batch, including a trainable output, prevents an unsupported-signature report.
+        config = LoraConfig(target_modules=["q_proj"], modules_to_save=["embed_tokens"] if trainable else None)
+        model = get_peft_model(base_model, config, runtime_checks="raise").train()
+        embedding = model.get_input_embeddings()
+        [hook] = self.get_hooks(model)
+        for _ in range(MAX_CHECKED_BATCHES - 1):
+            hook(embedding, (), {}, None)
+        model(input_ids=torch.tensor([[1, 2, 3]]))
+        assert not self.get_hooks(model)
+
+    def test_disabled_adapters_on_bare_embedding(self, base_model):
+        # Disabling q_proj adapters must also pause the check on the plain embedding, without using its budget.
+        model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]), runtime_checks="raise").train()
+        ids = torch.tensor([[1, 5, 2]])
+        [hook] = self.get_hooks(model)
+        with model.disable_adapter():
+            for _ in range(MAX_CHECKED_BATCHES):
+                model(ids)
+        assert self.get_hooks(model) == [hook]
+        assert hook.num_checked_batches == 0
+        with pytest.raises(RuntimeError, match=r"token ids \[5\]"):
+            model(ids)
+
+    def test_modules_to_save_does_not_duplicate_check(self, base_model):
+        # modules_to_save copies the embedding hooks; only one check may report on the wrapper.
+        model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]), runtime_checks="warn").train()
+        model.add_adapter("b", LoraConfig(target_modules=["q_proj"], modules_to_save=["embed_tokens"]))
+        model.set_adapter("default")
+        with warnings.catch_warnings(record=True) as record:
+            warnings.simplefilter("always")
+            model(torch.tensor([[1, 5, 2]]))
+        assert len([w for w in record if issubclass(w.category, PeftWarning)]) == 1
+        assert not self.get_hooks(model)
+
+    def test_trainable_adapter_does_not_remove_check(self, base_model):
+        # A trainable embedding batch counts, but a later frozen adapter must still be checked.
+        model = get_peft_model(base_model, LoraConfig(target_modules=["q_proj"]), runtime_checks="raise").train()
+        model.add_adapter("b", LoraConfig(target_modules=["q_proj"], modules_to_save=["embed_tokens"]))
+        model.set_adapter("b")
+        model(torch.tensor([[1, 5, 2]]))
+        [hook] = self.get_hooks(model)
+        assert hook.num_checked_batches == 1
+        model.set_adapter("default")
+        with pytest.raises(RuntimeError, match=r"token ids \[5\]"):
+            model(torch.tensor([[1, 5, 2]]))
 
     def test_ignores_pad_token_of_text_config(self, base_model, input_ids):
         # Multimodal models store the token ids of the language model in config.text_config. The tokens 5 and 6 have
@@ -232,7 +282,7 @@ class TestZeroEmbeddingCheck:
         for param in model.get_input_embeddings().parameters():
             param.requires_grad_(True)
         model(input_ids=input_ids)
-        assert not self.get_hooks(model)
+        assert len(self.get_hooks(model)) == 1
 
     def test_adapter_added_later_that_wraps_the_embedding(self, base_model, input_ids):
         # the check moves to the LoRA embedding layer instead of observing the frozen base layer inside it
