@@ -620,10 +620,9 @@ class ALoraLinearVariant(LoraVariant):
         lora_B = module.lora_B[active_adapter]
 
         if min(offsets) == max(offsets):
-            # All rows activate over the same trailing span, so it can be sliced directly. No mask, no
-            # gather, and no device sync. This also covers whole-sequence activation (offset == T), i.e.
-            # a plain LoRA forward pass. This is especially helpful for cases like MTP where we append a
-            # fixed amount of tokens to the end.
+            # All rows activate at the same index, so we don't need a mask. This also covers whole-sequence
+            # activation (offset == T), i.e. a plain LoRA forward pass. This is especially helpful for cases like
+            # Multi Token Prediction where we append a fixed amount of tokens to the end.
             offset = offsets[0]
             result[:, T - offset :, :] = result[:, T - offset :, :] + lora_B(lora_A(x[:, T - offset :, :])) * scaling
             return result
@@ -640,8 +639,6 @@ def _alora_offsets_as_list(alora_offsets: Optional[list[Optional[int]]], T: int)
     """
     Normalize the aLoRA offsets for one layer forward to be in the range of [0;T], T being the input
     sequence length.
-
-    TODO: discuss if this can be integrated into calculate_alora_offsets
 
     Returns None if no row of the batch activates the adapter, which is the case when the invocation
     sequence was not found in the input (its offset is None). Otherwise, offsets are clamped to the
