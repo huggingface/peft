@@ -51,9 +51,8 @@ RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum
 # When uncommenting this to include gptqmodel, ensure that it doesn't downgrade tokenizers, as this would break Transformers
 # RUN CUDA_ARCH_LIST=8.9 conda run -n peft pip install "gptqmodel>=7.0.0"
 
-# TODO: EETQ uses `-std=c++17` but starting with PyTorch 2.14, the min C++ version is 20. Therefore, don't install
-# EETQ and let its tests skip. In the future, either EETQ gets updated and we can start testing it again, or
-# remove EETQ support from PEFT completely if it's abandoned.
+# TODO: Remove the EETQ installation block in PEFT v1.2.
+# EETQ uses `-std=c++17`, but PyTorch 2.14 and later require C++20. Skip installing EETQ until its build is compatible.
 # RUN \
     # Add eetq for quantization testing; needs to run without build isolation since the setup
     # script directly imports torch from the environment which would fail with isolation.
@@ -70,9 +69,9 @@ RUN conda run -n peft pip install -U --no-cache-dir \
         git+https://github.com/huggingface/transformers \
         git+https://github.com/huggingface/accelerate \
         peft[test]@git+https://github.com/huggingface/peft \
-        # Add aqlm for quantization testing
+        # TODO: Remove the AQLM dependency in PEFT v1.2.
         aqlm[gpu]>=1.0.2 \
-        # Add HQQ for quantization testing
+        # TODO: Remove the HQQ dependency in PEFT v1.2.
         hqq \
         deepspeed \
         "kernels>=0.16"

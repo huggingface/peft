@@ -199,7 +199,11 @@ tokenizer.save_pretrained("./opt-125m-gptq")
 
 Once quantized, you can post-train GPTQ models with PEFT APIs.
 
+<!-- TODO: Remove the AQLM, EETQ, and HQQ sections and the AQLM introduction bullet in PEFT v1.2. -->
+
 ## AQLM quantization
+
+PEFT support for AQLM is deprecated and will be removed in v1.2. Pin `peft<1.2` if you still use AQLM, but we recommend to switch to bitsandbytes for new runs. Please open an issue on PEFT if you still use AQLM and want us to keep supporting it.
 
 Additive Quantization of Language Models ([AQLM](https://huggingface.co/papers/2401.06118)) is a Large Language Models compression method. It quantizes multiple weights together and takes advantage of interdependencies between them. AQLM represents groups of 8-16 weights as a sum of multiple vector codes. This allows it to compress models down to as low as 2-bit with considerably low accuracy losses.
 
@@ -221,6 +225,8 @@ quantized_model = get_peft_model(quantized_model, peft_config)
 You can refer to the [Google Colab](https://colab.research.google.com/drive/12GTp1FCj5_0SnnNQH18h_2XFh9vS_guX?usp=sharing) example for an overview of AQLM+LoRA finetuning.
 
 ## EETQ quantization
+
+PEFT support for EETQ is deprecated and will be removed in v1.2. Pin `peft<1.2` if you still use EETQ, but we recommend to switch to bitsandbytes for new runs. Please open an issue on PEFT if you still use EETQ and want us to keep supporting it.
 
 You can also perform LoRA fine-tuning on EETQ quantized models. [EETQ](https://github.com/NetEase-FuXi/EETQ) package offers simple and efficient way to perform 8-bit quantization, which is claimed to be faster than the `LLM.int8()` algorithm. First, make sure that you have a transformers version that is compatible with EETQ (e.g. by installing it from latest pypi or from source).
 
@@ -257,6 +263,8 @@ model = get_peft_model(model, config)
 ```
 
 ## HQQ quantization
+
+PEFT support for HQQ is deprecated and will be removed in v1.2. Pin `peft<1.2` if you still use HQQ, but we recommend to switch to bitsandbytes for new runs. Please open an issue on PEFT if you still use EETQ and want us to keep supporting it.
 
 The models that are quantized using Half-Quadratic Quantization of Large Machine Learning Models ([HQQ](https://mobiusml.github.io/hqq_blog/)) support LoRA adapter tuning. To tune the quantized model, you'll need to install the `hqq` library with: `pip install hqq`.
 

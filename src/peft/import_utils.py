@@ -153,6 +153,7 @@ def is_torch_tpu_available(check_device=True) -> bool:
     return False
 
 
+# TODO: Remove the AQLM, EETQ, and HQQ availability checks in PEFT v1.2.
 @lru_cache
 def is_aqlm_available() -> bool:
     return importlib.util.find_spec("aqlm") is not None

@@ -4115,6 +4115,7 @@ class MixedPrecisionTests(unittest.TestCase):
             trainer.train()  # does not raise
 
 
+# TODO: Remove the AQLM GPU tests in PEFT v1.2.
 @require_non_xpu
 @require_torch_gpu
 @require_aqlm
@@ -4168,7 +4169,11 @@ class PeftAqlmGPUTests(unittest.TestCase):
                 bias="none",
                 task_type="CAUSAL_LM",
             )
-            model = get_peft_model(model, config)
+            with pytest.warns(
+                FutureWarning,
+                match=r"AQLM support is deprecated and will be removed in PEFT v1\.2",
+            ):
+                model = get_peft_model(model, config)
 
             data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
@@ -4200,6 +4205,7 @@ class PeftAqlmGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
+# TODO: Remove the HQQ GPU tests in PEFT v1.2.
 @require_non_xpu
 @require_torch_gpu
 @require_hqq
@@ -4262,7 +4268,8 @@ class PeftHqqGPUTests(unittest.TestCase):
                 task_type="CAUSAL_LM",
                 use_dora=use_dora,
             )
-            model = get_peft_model(model, config)
+            with pytest.warns(FutureWarning, match=r"HQQ support is deprecated and will be removed in PEFT v1\.2"):
+                model = get_peft_model(model, config)
 
             data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
@@ -4339,7 +4346,8 @@ class PeftHqqGPUTests(unittest.TestCase):
             quantization_config=quant_config,
         )
         torch.manual_seed(0)
-        model = get_peft_model(model, config).eval()
+        with pytest.warns(FutureWarning, match=r"HQQ support is deprecated and will be removed in PEFT v1\.2"):
+            model = get_peft_model(model, config).eval()
         with torch.inference_mode():
             output_hqq = model(**inputs).logits
 
@@ -4371,7 +4379,8 @@ class PeftHqqGPUTests(unittest.TestCase):
                 dtype=compute_dtype,
                 quantization_config=quant_config,
             )
-            model = PeftModel.from_pretrained(model, tmp_dir)
+            with pytest.warns(FutureWarning, match=r"HQQ support is deprecated and will be removed in PEFT v1\.2"):
+                model = PeftModel.from_pretrained(model, tmp_dir)
             with torch.inference_mode():
                 output_loaded = model(**inputs).logits
 
@@ -4558,6 +4567,7 @@ class PeftAwqGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
+# TODO: Remove the EETQ GPU tests in PEFT v1.2.
 @require_non_xpu
 @require_torch_gpu
 @require_eetq
@@ -4614,7 +4624,8 @@ class PeftEetqGPUTests(unittest.TestCase):
                 bias="none",
                 task_type="CAUSAL_LM",
             )
-            model = get_peft_model(model, config)
+            with pytest.warns(FutureWarning, match=r"EETQ support is deprecated and will be removed in PEFT v1\.2"):
+                model = get_peft_model(model, config)
 
             data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
@@ -4683,7 +4694,8 @@ class PeftEetqGPUTests(unittest.TestCase):
                 task_type="CAUSAL_LM",
             )
 
-            model = get_peft_model(model, config)
+            with pytest.warns(FutureWarning, match=r"EETQ support is deprecated and will be removed in PEFT v1\.2"):
+                model = get_peft_model(model, config)
 
             data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)

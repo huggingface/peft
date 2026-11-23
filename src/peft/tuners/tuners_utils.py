@@ -215,12 +215,13 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
         ln_size = ln_weight.shape[0]
         in_features, out_features = ln_size, ln_size
     elif hasattr(module, "codebooks") and module.__class__.__name__ == "QuantizedLinear":
-        # AQLM QuantLinear
+        # TODO: Remove AQLM layer handling in PEFT v1.2.
         in_features, out_features = module.in_features, module.out_features
     elif is_gptqmodel_quant_linear(module):
         # GPT-QModel quantized linears
         in_features, out_features = module.in_features, module.out_features
     elif module.__class__.__name__ == "EetqLinear":
+        # TODO: Remove EETQ layer handling in PEFT v1.2.
         if hasattr(module, "in_features"):
             # Eetq layers
             in_features, out_features = module.in_features, module.out_features
@@ -229,7 +230,7 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
             # https://github.com/huggingface/transformers/blob/c220ea9ecee9231927a47d97a63d5604a09d4c63/src/transformers/integrations/eetq.py#L74
             in_features, out_features = module.weight.shape
     elif hasattr(module, "W_q") and module.__class__.__name__ == "HQQLinear":
-        # HQQ layers
+        # TODO: Remove HQQ layer handling in PEFT v1.2.
         in_features, out_features = module.in_features, module.out_features
     elif module.__class__.__name__ == "PatchedLinear":
         # INC layers
@@ -1371,6 +1372,7 @@ class BaseTuner(nn.Module, ABC):
                 if hasattr(child, "qweight"):
                     weight = child.qweight
                 elif hasattr(child, "W_q"):
+                    # TODO: Remove HQQ device placement in PEFT v1.2.
                     weight = child.W_q
                 elif hasattr(child, "weight"):
                     weight = child.weight
