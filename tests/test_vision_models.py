@@ -33,6 +33,7 @@ from transformers import (
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
+    DummyConfig,
     HiraConfig,
     HRAConfig,
     IA3Config,
@@ -51,6 +52,7 @@ from .testing_utils import load_cat_image
 CONFIGS = {
     "lora": LoraConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     "dora": LoraConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"], use_dora=True),
+    "dummy": DummyConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     "loha": LoHaConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     "lokr": LoKrConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     "oft": OFTConfig(

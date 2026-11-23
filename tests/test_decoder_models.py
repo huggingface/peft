@@ -40,6 +40,7 @@ from peft import (
     CPTConfig,
     DeftConfig,
     DeloraConfig,
+    DummyConfig,
     FourierFTConfig,
     FrodConfig,
     GloraConfig,
@@ -161,6 +162,14 @@ ALL_CONFIGS = [
             "task_type": "CAUSAL_LM",
             "target_modules": None,
             "r": 2,
+        },
+    ),
+    (
+        DummyConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "init_weights": False,
         },
     ),
     (

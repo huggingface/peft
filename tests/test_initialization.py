@@ -47,6 +47,7 @@ from peft import (
     BOFTConfig,
     C3AConfig,
     DeloraConfig,
+    DummyConfig,
     EvaConfig,
     FrodConfig,
     GraloraConfig,
@@ -3900,12 +3901,13 @@ class TestIncompatibleTorchaoInstalled:
     config_cases = [
         (LoraConfig, {}),
         (BOFTConfig, {"boft_block_size": 2}),
+        (DummyConfig, {}),
         (MissConfig, {"r": 2}),
         (OFTConfig, {"r": 0, "oft_block_size": 2}),
         (ShiraConfig, {"r": 1}),
         (VeraConfig, {}),
     ]
-    config_ids = ["lora", "boft", "miss", "oft", "shira", "vera"]
+    config_ids = ["lora", "boft", "dummy", "miss", "oft", "shira", "vera"]
 
     @pytest.fixture
     def custom_module(self):

@@ -28,6 +28,7 @@ from transformers import AutoModelForCausalLM
 
 from peft import (
     AdaLoraConfig,
+    DummyConfig,
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
@@ -432,6 +433,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 LoHaConfig(target_modules=["lin0"], init_weights=False),
                 LoKrConfig(target_modules=["lin0"], init_weights=False),
                 AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
+                DummyConfig(target_modules=["lin0"], init_weights=False),
                 OFTConfig(target_modules=["lin0"], init_weights=False, r=0, oft_block_size=2),
             ],
             r=2,
@@ -453,6 +455,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 LoHaConfig(target_modules=["lin1"], init_weights=False),
                 LoKrConfig(target_modules=["lin1"], init_weights=False),
                 AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False, total_step=1),
+                DummyConfig(target_modules=["lin1"], init_weights=False),
             ],
             r=2,
         ),
@@ -477,6 +480,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 LoHaConfig(init_weights=False),
                 LoKrConfig(init_weights=False),
                 AdaLoraConfig(init_lora_weights=False, total_step=1),
+                DummyConfig(init_weights=False),
                 OFTConfig(init_weights=False, r=0, oft_block_size=2),
             ],
             r=2,
@@ -521,6 +525,10 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False, total_step=1),
                 AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False, total_step=1),
             ),
+            (
+                DummyConfig(target_modules=["lin1"], init_weights=False),
+                DummyConfig(target_modules=["lin1"], init_weights=False),
+            ),
         ],
         name_func=_param_name_func,
     )
@@ -549,6 +557,10 @@ class TestMixedAdapterTypes(unittest.TestCase):
             (
                 AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
                 AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
+            ),
+            (
+                DummyConfig(target_modules=["lin0"], init_weights=False),
+                DummyConfig(target_modules=["lin0"], init_weights=False),
             ),
         ],
         name_func=_param_name_func,
@@ -1051,9 +1063,10 @@ class TestMixedAdapterLoading:
             LoKrConfig(target_modules=["lin0"], init_weights=False),
             AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
             ShiraConfig(target_modules=["lin0"], r=2, init_weights=False),
+            DummyConfig(target_modules=["lin0"], init_weights=False),
             LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_lora_weights=False),
         ],
-        ids=["lora", "loha", "lokr", "adalora", "shira", "modules_to_save"],
+        ids=["lora", "loha", "lokr", "adalora", "shira", "dummy", "modules_to_save"],
     )
     def test_from_pretrained_trainability(self, tmp_path, config, is_trainable):
         # Regression for #3823: PeftMixedModel must preserve requires_grad just as PeftModel does.
