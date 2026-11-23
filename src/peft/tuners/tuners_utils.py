@@ -1917,9 +1917,7 @@ class BaseTunerLayer(ABC):
     r"""
     A tuner layer mixin that provides the common methods and attributes for all tuners.
 
-    Args:
-        is_pluggable (`bool`, *optional*):
-            Whether the adapter layer can be plugged to any pytorch module
+    Attributes:
         active_adapters (Union[List[`str`], `str`], *optional*):
             The name of the active adapter.
     """

@@ -42,7 +42,7 @@ class PacaModel(BaseTuner):
 
     Args:
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
-        config ([`PacaConfig`]): The configuration of the PaCA model.
+        peft_config ([`PacaConfig`]): The configuration of the PaCA model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             Create empty adapter weights on meta device. Useful to speed up the loading process.

@@ -34,7 +34,7 @@ class C3AModel(BaseTuner):
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.
-        config ([`C3AConfig`]): The configuration of the C3A model.
+        peft_config ([`C3AConfig`]): The configuration of the C3A model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
 
     Returns:

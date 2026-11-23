@@ -31,7 +31,7 @@ class SupertuningModel(BaseTuner):
 
     Args:
         model ([`~transformers.PreTrainedModel`]): The base model to adapt.
-        config ([`SupertuningConfig`]): The Supertuning configuration.
+        peft_config ([`SupertuningConfig`]): The Supertuning configuration.
         adapter_name (`str`): The adapter name. Defaults to `"default"`.
         low_cpu_mem_usage (`bool`, *optional*): Create empty adapter weights on the meta device to speed up loading.
 
