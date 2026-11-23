@@ -102,7 +102,6 @@ class DeftLayer(BaseTunerLayer):
         self.deft_decomposition[adapter_name] = config.decomposition_method
         self.deft_init_scale[adapter_name] = config.init_scale
         self.deft_para[adapter_name] = config.para
-        self.fan_in_fan_out = config.fan_in_fan_out
         # injection scaling (analogous to LoRA's alpha/r); 1.0 = no scaling (backward compatible)
         self.deft_scaling[adapter_name] = (config.alpha / r) if getattr(config, "alpha", None) else 1.0
 
@@ -188,6 +187,8 @@ class DeftLinear(nn.Module, DeftLayer):
     ) -> None:
         super().__init__()
         DeftLayer.__init__(self, base_layer, **kwargs)
+        self.fan_in_fan_out = config.fan_in_fan_out
+
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, config=config, **kwargs)
 
