@@ -260,6 +260,66 @@ class TestActivationSteering:
         model.base_model.set_adapter(["other", "default"])
         torch.testing.assert_close(model(inputs), reference + torch.tensor([6.0, -12.0]))
 
+    def two_active_adapters(self, base, inputs):
+        # At median 10, "default" adds [6, 8] and "other" adds -1 * 10 * [0, 1] = [0, -10].
+        model = calibrated_model(base, steering_config(init_val=1.0), inputs)
+        model.add_adapter("other", steering_config(indices=[1], init_val=-1.0))
+        calibrate_activation_steering(model, {"hidden_states": inputs}, adapter_name="other")
+        model.base_model.set_adapter(["default", "other"])
+        return model
+
+    def test_set_scale_multiplies_the_doses_of_one_adapter(self, inputs):
+        base = SteeringModel()
+        reference = base(inputs)
+        model = self.two_active_adapters(base, inputs)
+        torch.testing.assert_close(model(inputs), reference + torch.tensor([6.0, -2.0]))
+
+        model.set_scale("other", 0.5)
+        torch.testing.assert_close(model(inputs), reference + torch.tensor([6.0, 3.0]))
+        # The factor replaces the previous one instead of multiplying it.
+        model.set_scale("other", 0.5)
+        torch.testing.assert_close(model(inputs), reference + torch.tensor([6.0, 3.0]))
+        model.set_scale("default", 0.0)
+        torch.testing.assert_close(model(inputs), reference + torch.tensor([0.0, -5.0]))
+        model.set_scale("default", 1.0)
+        model.set_scale("other", 1.0)
+        torch.testing.assert_close(model(inputs), reference + torch.tensor([6.0, -2.0]))
+
+    def test_set_scale_unknown_adapter_raises(self, inputs):
+        model = calibrated_model(SteeringModel(), steering_config(), inputs)
+        with pytest.raises(ValueError, match="does not exist"):
+            model.set_scale("missing", 0.5)
+
+    def test_scale_layer_and_unscale_layer_change_the_active_adapters(self, inputs):
+        base = SteeringModel()
+        reference = base(inputs)
+        model = self.two_active_adapters(base, inputs)
+        model.set_adapter("default")
+        layer = model.base_model.model.block.down_proj
+
+        layer.scale_layer(2)
+        assert layer.scaling == {"default": 2.0, "other": 1.0}
+        torch.testing.assert_close(model(inputs), reference + torch.tensor([12.0, 16.0]))
+        layer.unscale_layer(4)
+        assert layer.scaling == {"default": 0.5, "other": 1.0}
+        layer.unscale_layer()
+        assert layer.scaling == {"default": 1.0, "other": 1.0}
+        # Adapters that are not in the layer are ignored.
+        layer.set_scale("missing", 3.0)
+        assert layer.scaling == {"default": 1.0, "other": 1.0}
+
+        model.delete_adapter("other")
+        assert layer.scaling == {"default": 1.0}
+
+    def test_scale_is_not_saved(self, inputs, tmp_path):
+        model = calibrated_model(SteeringModel(), steering_config(init_val=1.0), inputs)
+        steered = model(inputs)
+        model.set_scale("default", 0.5)
+        model.save_pretrained(tmp_path)
+
+        loaded = PeftModel.from_pretrained(SteeringModel(), tmp_path)
+        torch.testing.assert_close(loaded(inputs), steered)
+
     def test_failed_recalibration_preserves_working_adapter(self, inputs):
         base = SteeringModel()
         reference = base(inputs)

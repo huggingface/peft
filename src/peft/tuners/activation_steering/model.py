@@ -125,6 +125,24 @@ class ActivationSteeringModel(BaseTuner):
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
 
+    def set_scale(self, adapter_name: str, scale: float) -> None:
+        """Multiply all doses of an adapter by a factor, e.g. to weaken adapters that are active together.
+
+        The factor replaces any previous one, so `set_scale(adapter_name, 1.0)` restores the doses of the adapter. It
+        is not saved with the adapter.
+
+        Args:
+            adapter_name (`str`):
+                The name of the adapter.
+            scale (`float`):
+                The factor by which the doses of the adapter are multiplied.
+        """
+        if adapter_name not in self.peft_config:
+            raise ValueError(f"Adapter '{adapter_name}' does not exist.")
+        for module in self.model.modules():
+            if isinstance(module, ActivationSteeringLayer):
+                module.set_scale(adapter_name, scale)
+
     def _check_merge_allowed(self):
         raise ValueError("Activation steering does not support merging.")
 

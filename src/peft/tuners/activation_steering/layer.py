@@ -52,7 +52,7 @@ def get_projection_weight(module, quantization_kwargs):
 
 class ActivationSteeringLayer(nn.Module, BaseTunerLayer):
     adapter_layer_names = ("activation_steering_doses",)
-    other_param_names = ("activation_steering_indices", "activation_steering_scales")
+    other_param_names = ("activation_steering_indices", "activation_steering_scales", "scaling")
 
     def __init__(self, base_layer, adapter_name, indices, init_val, config: ActivationSteeringConfig):
         super().__init__()
@@ -61,6 +61,8 @@ class ActivationSteeringLayer(nn.Module, BaseTunerLayer):
         # The indices are restored from the config on load, while the calibrated scales are saved with the adapter.
         self.activation_steering_indices = BufferDict(persistent=False)
         self.activation_steering_scales = BufferDict(persistent=True)
+        # A factor applied to all doses of an adapter, see set_scale. Unlike the doses, it is not saved.
+        self.scaling: dict[str, float] = {}
         self.in_features, _ = _get_in_out_features(self.get_base_layer())
         # The attention mask and the number of input tokens of the current model call, set by a forward pre-hook.
         self._attention_mask: torch.Tensor | None = None
@@ -79,8 +81,35 @@ class ActivationSteeringLayer(nn.Module, BaseTunerLayer):
         self.activation_steering_doses[adapter_name] = nn.Parameter(torch.tensor(doses, dtype=torch.float32))
         self.activation_steering_indices[adapter_name] = torch.tensor(indices, dtype=torch.long)
         self.activation_steering_scales[adapter_name] = torch.zeros(len(indices), dtype=torch.float32)
+        self.scaling[adapter_name] = 1.0
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=config.inference_mode)
+
+    def set_scale(self, adapter: str, scale: float) -> None:
+        """Set the factor by which all doses of the given adapter are multiplied. The initial factor is 1."""
+        if adapter not in self.scaling:
+            # Ignore the case where the adapter is not in the layer
+            return
+        self.scaling[adapter] = scale
+
+    def scale_layer(self, scale: float) -> None:
+        """Multiply the current factor of all active adapters by the provided scale"""
+        for active_adapter in self.active_adapters:
+            if active_adapter in self.scaling:
+                self.scaling[active_adapter] *= scale
+
+    def unscale_layer(self, scale: float | None = None) -> None:
+        """Divide the current factor of all active adapters by the provided scale. If `scale=None` is passed, reset
+        it to 1.
+        """
+        for active_adapter in self.active_adapters:
+            if active_adapter not in self.scaling:
+                continue
+
+            if scale is None:
+                self.scaling[active_adapter] = 1.0
+            else:
+                self.scaling[active_adapter] /= scale
 
     def merge(self, *args, **kwargs):
         raise ValueError("Activation steering does not support merging.")
@@ -113,7 +142,8 @@ class ActivationSteeringLayer(nn.Module, BaseTunerLayer):
             for name in adapters:
                 doses = self.activation_steering_doses[name].to(device=x.device, dtype=torch.float32)
                 scales = self.activation_steering_scales[name].to(device=x.device, dtype=torch.float32)
-                delta = delta.index_add(0, self.activation_steering_indices[name].to(x.device), doses * scales)
+                values = doses * scales * self.scaling[name]
+                delta = delta.index_add(0, self.activation_steering_indices[name].to(x.device), values)
 
             mask = self._attention_mask
             if mask is not None:

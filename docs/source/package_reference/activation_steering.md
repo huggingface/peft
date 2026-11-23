@@ -238,6 +238,20 @@ Each kept neuron starts at a dose of `init_val`, with the sign that lowers the l
 
 The kept doses are regular trainable parameters, so they can also be refined with any training loop, e.g. [`~transformers.Trainer`], before saving. A loss term that keeps the outputs on unrelated prompts close to those of the base model, computed under `model.disable_adapter()`, can limit side effects. With gradient checkpointing, run the backward pass of each steered forward pass before the next one, since the recomputation uses the attention mask of the most recent model call. Call `select_neurons` before creating the optimizer.
 
+## Using several adapters at once
+
+Several adapters can be active at the same time, and their doses add up. Two adapters that work well on their own may therefore overshoot together, which often shows as repetitive text. [`~ActivationSteeringModel.set_scale`] multiplies all doses of an adapter by a factor, without changing the doses themselves. For example, with one adapter made as above for German and another one for answering in one short sentence:
+
+```python
+model = PeftModel.from_pretrained(base_model, "path/to/german", adapter_name="german").eval()
+model.load_adapter("path/to/brief", adapter_name="brief")
+model.base_model.set_adapter(["german", "brief"])
+model.set_scale("german", 0.8)
+model.set_scale("brief", 0.8)
+```
+
+In this example, about a quarter of the replies repeat themselves with both factors at 1. At 0.8, about 9 in 10 replies are German, short, and coherent, against 1 in 5 for the base model with a system prompt that asks for both. The factor is not saved with the adapter.
+
 # API
 
 ## ActivationSteeringConfig
