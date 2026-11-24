@@ -20,7 +20,7 @@ import torch
 from torch import nn
 from tqdm import tqdm
 
-from peft.tuners import adalora, dummy, loha, lokr, lora, oft, shira
+from peft.tuners import adalora, loha, lokr, lora, oft, shira
 from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
@@ -45,7 +45,6 @@ COMPATIBLE_TUNER_TYPES = (
     PeftType.ADALORA,
     PeftType.OFT,
     PeftType.SHIRA,
-    PeftType.DUMMY,
 )
 PREFIXES = [
     lora.LoraModel.prefix,
@@ -53,7 +52,6 @@ PREFIXES = [
     loha.LoHaModel.prefix,
     oft.OFTModel.prefix,
     shira.ShiraModel.prefix,
-    dummy.DummyModel.prefix,
 ]
 Configs = Union[
     lora.LoraConfig,
@@ -62,7 +60,6 @@ Configs = Union[
     adalora.AdaLoraConfig,
     oft.OFTConfig,
     shira.ShiraConfig,
-    dummy.DummyConfig,
 ]
 Layers = (
     lora.layer.LoraLayer,
@@ -71,7 +68,6 @@ Layers = (
     adalora.layer.AdaLoraLayer,
     oft.OFTLayer,
     shira.ShiraLayer,
-    dummy.layer.DummyLayer,
 )
 
 
@@ -135,8 +131,6 @@ class MixedModel(BaseTuner):
             oft.OFTModel._create_and_replace(self, config, *args, **kwargs)
         elif isinstance(config, shira.ShiraConfig):
             shira.ShiraModel._create_and_replace(self, config, *args, **kwargs)
-        elif isinstance(config, dummy.DummyConfig):
-            dummy.DummyModel._create_and_replace(self, config, *args, **kwargs)
         else:
             raise TypeError(f"Unsupported config type {type(config)}, should be one of {COMPATIBLE_TUNER_TYPES}.")
 
@@ -226,8 +220,6 @@ class MixedModel(BaseTuner):
             new_module = oft.OFTModel._create_new_module(config, adapter_name, target, **kwargs)
         elif isinstance(config, shira.ShiraConfig):
             new_module = shira.ShiraModel._create_new_module(config, adapter_name, target, **kwargs)
-        elif isinstance(config, dummy.DummyConfig):
-            new_module = dummy.DummyModel._create_new_module(config, adapter_name, target, **kwargs)
         else:
             raise TypeError(f"Unknown config type {type(config)}, should be one of {COMPATIBLE_TUNER_TYPES}.")
         return new_module

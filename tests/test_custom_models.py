@@ -1427,7 +1427,7 @@ TEST_CASES = [
     ("Vanilla MLP 2 Dummy", "MLP", DummyConfig, {"target_modules": ["lin0"]}),
     ("Vanilla MLP 3 Dummy", "MLP", DummyConfig, {"target_modules": ["lin1"]}),
     ("Vanilla MLP 4 Dummy", "MLP", DummyConfig, {"target_modules": ["lin0", "lin1"]}),
-    ("Vanilla MLP 5 Dummy", "MLP", DummyConfig, {"target_modules": ["lin0"], "r": 2, "lora_alpha": 4}),
+    ("Vanilla MLP 5 Dummy", "MLP", DummyConfig, {"target_modules": ["lin0"], "r": 2, "alpha": 4}),
     ("Vanilla MLP 6 Dummy", "MLP", DummyConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
     (
         "Embedding + transformers Conv1D 1 Dummy",

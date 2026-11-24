@@ -27,11 +27,22 @@ class DummyConfig(PeftConfig):
 
     The Dummy method is not a research method. It is a minimal, deliberately trivial tuner that serves as a template
     for contributors who want to add a new PEFT method and as a test vehicle for PEFT features that any tuner should
-    support (saving, loading, merging, quantization, mixed adapters, ...).
+    support (saving, loading, merging, quantization, ...).
 
     Its implementation is essentially a plain LoRA without any of the optimizations or extras that LoRA offers: an
     adapter consists of a down-projection `A` and an up-projection `B`, and the effective weight of an adapted layer is
-    `W + B @ A * (lora_alpha / r)`. This makes the effect of the adapter easy to predict and reason about.
+    `W + B @ A * (alpha / r)`. This makes the effect of the adapter easy to predict and reason about.
+
+    Example:
+
+        ```py
+        >>> from transformers import AutoModelForCausalLM
+        >>> from peft import DummyConfig, get_peft_model
+
+        >>> base_model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        >>> config = DummyConfig(target_modules=["q_proj", "v_proj"])
+        >>> model = get_peft_model(base_model, config)
+        ```
 
     Args:
         target_modules (`Union[List[str], str]`):
@@ -43,17 +54,14 @@ class DummyConfig(PeftConfig):
         r (`int`):
             The rank of the update matrices, expressed in `int`. A smaller rank results in fewer trainable parameters
             and less capacity. Must be divisible by `groups` when targeting grouped convolutional layers.
-        lora_alpha (`int`):
-            The scaling factor of the update matrices, expressed in `int`. The effective scaling is `lora_alpha / r`.
-        lora_dropout (`float`):
+        alpha (`float`):
+            The scaling factor of the update matrices, expressed in `int`. The effective scaling is `alpha / r`.
+        dropout (`float`):
             The dropout probability for the update matrices, expressed in `float`.
         init_weights (`bool`):
             Whether to initialize the update matrices such that the adapter starts out as an identity transform (`B` is
             zero). Set this to False to randomly initialize both `A` and `B`, which gives the adapter a non-zero effect
             right away.
-        fan_in_fan_out (`bool`):
-            Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
-            `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
         modules_to_save (`List[str]`):
             List of modules apart from Dummy layers to be set as trainable and saved in the final checkpoint.
         layers_to_transform (`Union[List[int],int]`):
@@ -80,8 +88,8 @@ class DummyConfig(PeftConfig):
         metadata={"help": "List of module names or regex expression of the module names to exclude from Dummy."},
     )
     r: int = field(default=8, metadata={"help": "The rank of the low-rank update matrices"})
-    lora_alpha: int = field(default=8, metadata={"help": "The scaling factor of the low-rank update matrices"})
-    lora_dropout: float = field(default=0.0, metadata={"help": "The dropout probability for the update matrices"})
+    alpha: float = field(default=8, metadata={"help": "The scaling factor of the low-rank update matrices"})
+    dropout: float = field(default=0.0, metadata={"help": "The dropout probability for the update matrices"})
     init_weights: bool = field(
         default=True,
         metadata={
@@ -91,10 +99,6 @@ class DummyConfig(PeftConfig):
                 " effect right away."
             ),
         },
-    )
-    fan_in_fan_out: bool = field(
-        default=False,
-        metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
     modules_to_save: Optional[list[str]] = field(
         default=None,
