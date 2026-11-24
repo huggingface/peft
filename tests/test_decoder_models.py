@@ -1055,7 +1055,9 @@ class TestDecoderModels(PeftCommonTester):
             model(x)
 
     def test_prefix_tuning_cpu_and_disk_offload(self, tmp_path):
-        # See 3619, a device map with only CPU and disk entries has no accelerator to place the cache on
+        # See 3619: when the device map only contains CPU and disk entries, there is no accelerator to place the prefix
+        # cache on, and the forward pass of the offloaded model used to raise a StopIteration in get_layer_device_map.
+        # Comparing its logits with those of the non-offloaded model is only a sanity check on top of that.
         model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         device_map = {
             "model.decoder.embed_tokens": "cpu",
@@ -1082,7 +1084,7 @@ class TestDecoderModels(PeftCommonTester):
         x = torch.tensor([[1, 2, 3]])
         with torch.no_grad():
             expected = model(x).logits
-            actual = offloaded_model(x).logits
+            actual = offloaded_model(x).logits  # raised StopIteration before the fix
         torch.testing.assert_close(actual, expected)
 
     def test_prefix_tuning_offsets_position_ids_in_forward(self, monkeypatch):
