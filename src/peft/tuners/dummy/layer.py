@@ -75,8 +75,8 @@ class DummyLayer(BaseTunerLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         self.r[adapter_name] = r
-        self.scaling[adapter_name] = config.lora_alpha / r
-        self.dummy_lora_dropout[adapter_name] = nn.Dropout(p=config.lora_dropout)
+        self.scaling[adapter_name] = config.alpha / r
+        self.dummy_lora_dropout[adapter_name] = nn.Dropout(p=config.dropout)
 
         self._create_adapter_modules(adapter_name, r, config)
         self._init_adapter_weights(adapter_name, config)
@@ -135,19 +135,28 @@ class DummyLayer(BaseTunerLayer):
             weight_a = weight_a.float()
             weight_b = weight_b.float()
 
-        output_tensor = self._compose_delta_weight(weight_a, weight_b)
-        # The delta weight is a freshly computed tensor that nothing else references, so apply the scaling in place to
-        # avoid allocating another full-size tensor.
-        output_tensor.mul_(self.scaling[adapter])
+        output_tensor = self._compose_delta_weight(adapter, weight_a, weight_b)
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
 
         return output_tensor
 
-    def _compose_delta_weight(self, weight_a: torch.Tensor, weight_b: torch.Tensor) -> torch.Tensor:
-        # Implemented by subclasses; combines the low-rank factors into a full-size delta weight.
+    def _compose_delta_weight(self, adapter: str, weight_a: torch.Tensor, weight_b: torch.Tensor) -> torch.Tensor:
+        # Implemented by subclasses; combines the low-rank factors into a full-size, scaled delta weight. The delta
+        # weight is a freshly computed tensor that nothing else references, so subclasses apply the scaling in place to
+        # avoid allocating another full-size tensor.
         raise NotImplementedError
+
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        return self.get_delta_weight(adapter_name)
+
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        # We can easily implement `_get_additive_delta`, therefore we do support LoRA conversion (and of course
+        # because this method is also LoRA but that's besides the point).
+        #
+        # See `peft.convert_to_lora` for details.
+        return True
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -219,8 +228,8 @@ class Linear(nn.Module, DummyLayer):
         **kwargs,
     ) -> None:
         super().__init__()
+        self.fan_in_fan_out = kwargs.pop("fan_in_fan_out", False)
         DummyLayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = config.fan_in_fan_out
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, config=config)
 
@@ -228,10 +237,14 @@ class Linear(nn.Module, DummyLayer):
         self.dummy_lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
         self.dummy_lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=False)
 
-    def _compose_delta_weight(self, weight_a: torch.Tensor, weight_b: torch.Tensor) -> torch.Tensor:
+    def _compose_delta_weight(self, adapter: str, weight_a: torch.Tensor, weight_b: torch.Tensor) -> torch.Tensor:
         # weight_a has shape (r, in_features), weight_b has shape (out_features, r); transpose for Conv1D layers, which
         # store the weight like (fan_in, fan_out)
-        return transpose(weight_b @ weight_a, self.fan_in_fan_out)
+        output_tensor = transpose(weight_b @ weight_a, self.fan_in_fan_out)
+        # The delta weight is a freshly computed tensor that nothing else references, so apply the scaling in place to
+        # avoid allocating another full-size tensor.
+        output_tensor.mul_(self.scaling[adapter])
+        return output_tensor
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         if self.disable_adapters:
@@ -257,9 +270,10 @@ class Linear(nn.Module, DummyLayer):
                     continue
                 a = self.dummy_lora_A[active_adapter]
                 b = self.dummy_lora_B[active_adapter]
+                scaling = self.scaling[active_adapter]
                 dropout = self.dummy_lora_dropout[active_adapter]
                 x = self._cast_input_dtype(x, a.weight.dtype)
-                result = result + b(dropout(a(x))) * self.scaling[active_adapter]
+                result = result + b(dropout(a(x))) * scaling
             result = result.to(orig_dtype)
 
         return result
@@ -329,7 +343,7 @@ class _ConvNd(nn.Module, DummyLayer):
             bias=False,
         )
 
-    def _compose_delta_weight(self, weight_a: torch.Tensor, weight_b: torch.Tensor) -> torch.Tensor:
+    def _compose_delta_weight(self, adapter: str, weight_a: torch.Tensor, weight_b: torch.Tensor) -> torch.Tensor:
         # weight_a has shape (r, in_channels // groups, *kernel_size), weight_b has shape
         # (out_channels, r // groups, *(1,) * (kernel_dim - 2)). The delta weight of each group is B_g @ A_g, so the
         # factors are reshaped to (groups, r // groups, ...) and combined with a single batched matrix multiplication.
@@ -341,7 +355,9 @@ class _ConvNd(nn.Module, DummyLayer):
         b = weight_b.reshape(groups, -1, rank_per_group)
         output_tensor = torch.bmm(b, a)
 
-        return output_tensor.reshape(base_layer.weight.shape)
+        output_tensor = output_tensor.reshape(base_layer.weight.shape)
+        output_tensor.mul_(self.scaling[adapter])
+        return output_tensor
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         if self.disable_adapters:
@@ -431,11 +447,12 @@ class Embedding(nn.Module, DummyLayer):
 
         An embedding input only selects rows of A, so the gradient of A is proportional to B:
           dL/dA = \sum_i (upstream[i] @ B)
-        Therefore gradients would stay vanishingly small for many steps if B started at zero.
-        Initializing A with zero instead scales the gradient with random values from B instead of zero and gives
-        larger values for the gradients.
+        Therefore gradients would stay vanishingly small for many steps if B started at zero. Initializing A with zero
+        instead scales the gradient with random values from B instead of zero and gives larger values for the
+        gradients.
 
-        With init_weights=False, both factors are randomly initialized, giving the adapter a non-zero effect right away.
+        With init_weights=False, both factors are randomly initialized, giving the adapter a non-zero effect right
+        away.
         """
         nn.init.zeros_(self.dummy_lora_A[adapter_name].weight)
         if config.init_weights:
@@ -444,11 +461,13 @@ class Embedding(nn.Module, DummyLayer):
             nn.init.normal_(self.dummy_lora_A[adapter_name].weight)
             nn.init.normal_(self.dummy_lora_B[adapter_name].weight)
 
-    def _compose_delta_weight(self, weight_a: torch.Tensor, weight_b: torch.Tensor) -> torch.Tensor:
+    def _compose_delta_weight(self, adapter: str, weight_a: torch.Tensor, weight_b: torch.Tensor) -> torch.Tensor:
         # weight_a is the lookup table of A with shape (num_embeddings, r), weight_b has shape (embedding_dim, r),
         # stored like a nn.Linear weight. The low-rank update of a token i is B applied to the i-th row of A, so the
         # delta weight is A @ B.T, which directly has the shape (num_embeddings, embedding_dim) of the base weight.
-        return weight_a @ weight_b.t()
+        output_tensor = weight_a @ weight_b.t()
+        output_tensor.mul_(self.scaling[adapter])
+        return output_tensor
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         if self.disable_adapters:
@@ -466,9 +485,10 @@ class Embedding(nn.Module, DummyLayer):
                     continue
                 a = self.dummy_lora_A[active_adapter]
                 b = self.dummy_lora_B[active_adapter]
+                scaling = self.scaling[active_adapter]
                 dropout = self.dummy_lora_dropout[active_adapter]
                 # Note: no input dtype cast here, unlike in Linear: x contains token ids that must stay integers.
-                result = result + b(dropout(a(x))) * self.scaling[active_adapter]
+                result = result + b(dropout(a(x))) * scaling
             result = result.to(orig_dtype)
 
         return result

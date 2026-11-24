@@ -26,5 +26,4 @@ register_peft_method(
     config_cls=DummyConfig,
     model_cls=DummyModel,
     prefix="dummy_",
-    is_mixed_compatible=True,
 )

@@ -14,8 +14,6 @@
 
 from __future__ import annotations
 
-import warnings
-
 import torch
 from transformers.pytorch_utils import Conv1D
 
@@ -53,10 +51,10 @@ class DummyModel(BaseTuner):
 
     The Dummy method is not a research method. It is a minimal, deliberately trivial tuner that serves as a template
     for contributors who want to add a new PEFT method and as a test vehicle for PEFT features that any tuner should
-    support (saving, loading, merging, quantization, mixed adapters, ...).
+    support (saving, loading, merging, quantization, ...).
 
     Its implementation is essentially a plain LoRA without any of the optimizations or extras that LoRA offers, see
-    [`DummyConfig`] for details.
+    [`DummyConfig`] for details, which also contains a usage example.
 
     Args:
         model (`torch.nn.Module`):
@@ -68,17 +66,6 @@ class DummyModel(BaseTuner):
 
     Returns:
         `torch.nn.Module`: The Dummy model.
-
-    Example:
-
-        ```py
-        >>> from transformers import AutoModelForCausalLM
-        >>> from peft import DummyConfig, get_peft_model
-
-        >>> base_model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
-        >>> config = DummyConfig(target_modules=["q_proj", "v_proj"])
-        >>> model = get_peft_model(base_model, config)
-        ```
 
     **Attributes**:
         - **model** ([`~torch.nn.Module`]) -- The model to be adapted.
@@ -99,10 +86,10 @@ class DummyModel(BaseTuner):
         current_key,
         **optional_kwargs,
     ):
-        bias = hasattr(target, "bias") and target.bias is not None
-        kwargs = {
-            "bias": bias,
-        }
+        if current_key is None:
+            raise ValueError("Current Key shouldn't be `None`")
+
+        kwargs = {}
         kwargs.update(get_quantization_kwargs(self))
 
         # If it is not a DummyLayer, create a new module, else update it with new adapters
@@ -130,21 +117,10 @@ class DummyModel(BaseTuner):
                 " `torch.nn.Embedding` are supported."
             )
 
+        # Conv1D layers store the weight like (fan_in, fan_out) and therefore need transposed delta weights. This is
+        # determined automatically from the base layer type, there is no user-facing config option for it.
         if isinstance(target_base_layer, Conv1D):
-            if not dummy_config.fan_in_fan_out:
-                warnings.warn(
-                    "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
-                )
-                dummy_config.fan_in_fan_out = True
-        elif isinstance(
-            target_base_layer, (torch.nn.Linear, torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d, torch.nn.Embedding)
-        ):
-            if dummy_config.fan_in_fan_out:
-                warnings.warn(
-                    "fan_in_fan_out is set to True but the target module is a torch.nn layer. "
-                    "Setting fan_in_fan_out to False."
-                )
-                dummy_config.fan_in_fan_out = False
+            kwargs["fan_in_fan_out"] = True
 
         new_module = layer_cls(target, adapter_name, config=dummy_config, **kwargs)
         return new_module
