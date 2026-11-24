@@ -185,18 +185,20 @@ def create_and_prepare_model(args, data_args, training_args):
         )
         tokenizer.chat_template = chat_template
 
-        # make embedding resizing configurable?
-        # Transformers 4.46.0+ defaults uses mean_resizing by default, which fails with QLoRA + FSDP because the
-        # embedding could be on meta device, therefore, we set mean_resizing=False in that case (i.e. the status quo
-        # ante). See https://github.com/huggingface/accelerate/issues/1620.
-        uses_transformers_4_46 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.46.0")
-        uses_fsdp = os.environ.get("ACCELERATE_USE_FSDP", "false").lower() == "true"
-        # Check if the model is quantized
-        is_quantized = (bnb_config is not None) or (getattr(model, "hf_quantizer", None) is not None)
-        if is_quantized and uses_fsdp and uses_transformers_4_46:
-            model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8, mean_resizing=False)
-        else:
-            model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
+        if len(tokenizer) > model.get_input_embeddings().num_embeddings:
+            # Transformers 4.46.0+ defaults uses mean_resizing by default, which fails with QLoRA + FSDP because the
+            # embedding could be on meta device, therefore, we set mean_resizing=False in that case (i.e. the status quo
+            # ante). See https://github.com/huggingface/accelerate/issues/1620.
+            uses_transformers_4_46 = packaging.version.parse(transformers.__version__) >= packaging.version.parse(
+                "4.46.0"
+            )
+            uses_fsdp = os.environ.get("ACCELERATE_USE_FSDP", "false").lower() == "true"
+            # Check if the model is quantized
+            is_quantized = (bnb_config is not None) or (getattr(model, "hf_quantizer", None) is not None)
+            if is_quantized and uses_fsdp and uses_transformers_4_46:
+                model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8, mean_resizing=False)
+            else:
+                model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
     else:
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
         tokenizer.pad_token = tokenizer.eos_token

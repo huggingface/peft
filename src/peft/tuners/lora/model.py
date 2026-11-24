@@ -63,7 +63,16 @@ from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .inc import dispatch_inc
-from .layer import Embedding, LoraLayer, MultiheadAttention, ParamWrapper, _ConvNd, dispatch_default
+from .layer import (
+    _LINEAR_SUPPORTED_TP_PLANS,
+    _SUPPORTED_TP_PLANS,
+    Embedding,
+    LoraLayer,
+    MultiheadAttention,
+    ParamWrapper,
+    _ConvNd,
+    dispatch_default,
+)
 from .te import dispatch_transformer_engine
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
@@ -127,38 +136,19 @@ def get_tp_plan_and_mesh(model, current_key: str):
     return plan_name, tp_mesh
 
 
-def add_lora_tp_hooks_dtensor(
-    tp_module: nn.Module, tp_plan_name: str, device_mesh, *, base_layer: nn.Module, module_name: str
-) -> None:
-    from torch.distributed.tensor import DTensor, Shard
+def add_lora_tp_hooks_dtensor(tp_module: nn.Module, tp_plan_name: str, device_mesh, *, module_name: str) -> None:
     from transformers.distributed.tensor_parallel import ALL_PARALLEL_STYLES
 
-    style = ALL_PARALLEL_STYLES[tp_plan_name]
-    if tp_plan_name not in ("colwise", "rowwise"):
-        raise ValueError(f"Unsupported TP plan {tp_plan_name} for LoRA: only colwise and rowwise are supported.")
+    if tp_plan_name not in _LINEAR_SUPPORTED_TP_PLANS:
+        raise ValueError(
+            f"Unsupported TP plan {tp_plan_name} for LoRA linear hooks. "
+            f"Supported plans: {', '.join(_LINEAR_SUPPORTED_TP_PLANS)}."
+        )
 
-    shard_dim = 0 if tp_plan_name == "colwise" else 1
-    for p_name, param in list(tp_module.named_parameters(recurse=False)):
+    style = ALL_PARALLEL_STYLES[tp_plan_name]
+    for p_name, _ in list(tp_module.named_parameters(recurse=False)):
         style.validate_param(tp_module, p_name, device_mesh, parameter_name=f"{module_name}.{p_name}")
-        global_shape = list(param.shape)
-        global_shape[shard_dim] = base_layer.weight.shape[shard_dim]
-        if param.shape == torch.Size(global_shape):
-            # The adapter was initialized with global dimensions, so we can shard it directly.
-            style.shard_param(tp_module, p_name, device_mesh)
-        else:
-            # The adapter was initialized with local dimensions, so wrap it without sharding a second time.
-            global_stride = torch.empty(global_shape, device="meta").stride()
-            tp_module._parameters[p_name] = nn.Parameter(
-                DTensor.from_local(
-                    param,
-                    device_mesh,
-                    [Shard(shard_dim)],
-                    run_check=False,
-                    shape=torch.Size(global_shape),
-                    stride=global_stride,
-                ),
-                requires_grad=param.requires_grad,
-            )
+        style.shard_param(tp_module, p_name, device_mesh)
     style.install_forward(tp_module, device_mesh)
 
 
@@ -411,9 +401,11 @@ class LoraModel(BaseTuner):
                     add_tensor_parallel_hooks_to_module,
                 )
 
-            _SUPPORTED_TP_PLANS = ("colwise", "rowwise", "embedding_rowwise")
-
-            if tp_plan not in _SUPPORTED_TP_PLANS:
+            if tp_plan == "colwise_gather_output" and is_transformers_dtensor_tp:
+                # The input and output of the base layer (e.g. lm_head) are replicated, so the LoRA layers are
+                # replicated as well and don't need hooks
+                pass
+            elif tp_plan not in _SUPPORTED_TP_PLANS:
                 warnings.warn(
                     f'TP plan "{tp_plan}" on the base layer is not supported for LoRA. '
                     "LoRA adapters will be created without tensor parallel hooks."
@@ -437,7 +429,6 @@ class LoraModel(BaseTuner):
                             tp_module,
                             tp_plan,
                             device_mesh,
-                            base_layer=base_layer,
                             module_name=tp_layer_name[0],
                         )
                     else:
@@ -448,7 +439,7 @@ class LoraModel(BaseTuner):
                             tp_layer_name,
                             device_mesh,
                         )
-                else:  # embedding_rowwise
+                elif tp_plan == "embedding_rowwise":
                     # TP hooks are  handled in the `_embed` method in lora/layer.py where they are explicitly called.
                     # Here we simply register the TP plans.
                     tp_plan_keys.append(f"{generic_key}.base_layer.weight")

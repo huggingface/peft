@@ -405,11 +405,10 @@ class HRAConv2d(nn.Module, HRALayer):
 
                 base_layer.weight.data = orig_weight.to(orig_dtype)
 
-    def _get_output_size(self, x: torch.Tensor) -> tuple[int, int]:
+    def _get_output_size(self, x: torch.Tensor, padding: tuple[int, int]) -> tuple[int, int]:
         base_layer = self.get_base_layer()
         kernel_size = base_layer.kernel_size
         dilation = base_layer.dilation
-        padding = base_layer.padding
         stride = base_layer.stride
         height = (x.shape[-2] + 2 * padding[0] - dilation[0] * (kernel_size[0] - 1) - 1) // stride[0] + 1
         width = (x.shape[-1] + 2 * padding[1] - dilation[1] * (kernel_size[1] - 1) - 1) // stride[1] + 1
@@ -442,20 +441,30 @@ class HRAConv2d(nn.Module, HRALayer):
                         x = self._apply_delta_weight_to_input(x, active_adapter)
                     x = x.permute(0, 3, 1, 2)
                     x = x.to(dtype=orig_dtype)
-                    result = F.conv2d(
-                        input=x,
-                        weight=base_layer.weight,
-                        bias=base_layer.bias,
-                        padding=base_layer.padding,
-                        stride=base_layer.stride,
-                        dilation=base_layer.dilation,
-                    )
+                    result = base_layer._conv_forward(x, base_layer.weight, bias=base_layer.bias)
                 else:
+                    padding = base_layer.padding
+                    if padding == "valid":
+                        padding = (0, 0)
+                    elif padding == "same":
+                        left, right, top, bottom = base_layer._reversed_padding_repeated_twice
+                        if left == right and top == bottom:
+                            padding = (top, left)
+                    # F.unfold only supports zero padding, so apply nonzero padding modes with F.pad before unfolding.
+                    # Conv2d stores numeric padding as (height, width), while F.pad expects (left, right, top, bottom),
+                    # stored in _reversed_padding_repeated_twice. The same mechanism handles asymmetric "same" padding,
+                    # which F.unfold cannot accept directly.
+                    if base_layer.padding_mode != "zeros" or padding == "same":
+                        mode = "constant" if base_layer.padding_mode == "zeros" else base_layer.padding_mode
+                        x = F.pad(x, pad=base_layer._reversed_padding_repeated_twice, mode=mode)
+                        padding = (0, 0)
+                    height, width = self._get_output_size(x, padding)
+
                     patches = F.unfold(
                         x,
                         kernel_size=base_layer.kernel_size,
                         dilation=base_layer.dilation,
-                        padding=base_layer.padding,
+                        padding=padding,
                         stride=base_layer.stride,
                     ).transpose(1, 2)
                     # The adapted weight is W @ H_0 @ H_1 (see merge), so H_1.T must be applied to x first.
@@ -469,7 +478,6 @@ class HRAConv2d(nn.Module, HRALayer):
                         self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[1],
                     )
                     result = F.linear(input=patches, weight=orig_weight, bias=base_layer.bias).transpose(1, 2)
-                    height, width = self._get_output_size(x)
                     result = result.view(x.shape[0], self.out_features, height, width)
 
         result = result.to(previous_dtype)

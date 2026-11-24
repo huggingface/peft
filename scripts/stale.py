@@ -31,6 +31,7 @@ LABELS_TO_EXEMPT = [
     "new model",
     "wip",
     "PRs welcome to address this",
+    "post-v1",
 ]
 
 

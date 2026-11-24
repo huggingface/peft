@@ -23,6 +23,7 @@ import torch
 from safetensors.torch import save_file
 
 from peft.config import PeftConfig
+from peft.import_utils import get_transformers_cache_name
 from peft.utils import PeftType
 from peft.utils.constants import SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME
 from peft.utils.save_and_load import load_peft_weights
@@ -186,7 +187,7 @@ def initialize_kv_prefix_from_text(
     return initialize_kv_prefix_from_past_key_values(
         model,
         adapter_name=adapter_name,
-        past_key_values=outputs.past_key_values,
+        past_key_values=getattr(outputs, get_transformers_cache_name()),
         num_virtual_tokens=num_virtual_tokens,
     )
 

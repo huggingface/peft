@@ -169,7 +169,7 @@ MODEL_OUTPUT_FILENAME = "output.safetensors"
 ADAPTER_WEIGHTS_NAME = "adapter_model.safetensors"
 
 MODEL_OPT = "peft-internal-testing/tiny-random-OPTForCausalLM"
-MODEL_LLAMA = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+MODEL_LLAMA = "peft-internal-testing/tiny-random-LlamaForCausalLM"
 MODEL_T5 = "peft-internal-testing/tiny-random-T5ForConditionalGeneration-calibrated"
 # decoder model with a more exotic architecture than opt
 MODEL_GEMMA4 = "peft-internal-testing/tiny-random-gemma4-E2B"
