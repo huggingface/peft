@@ -140,6 +140,11 @@ jobs:
           CI: 1
           PYTEST_ADDOPTS: "--junitxml=test-results.xml"
         run: |
+          # Some hosted Windows runners advertise unusable AMX support, causing oneDNN kernels to crash.
+          # https://github.com/actions/runner-images/issues/14483
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            export ONEDNN_MAX_CPU_ISA=AVX512_CORE_FP16
+          fi
           if [[ "${{ matrix.os }}" == "ubuntu-latest" && "${{ matrix.python-version }}" == "3.14" ]]; then
             make test
           else
