@@ -2773,6 +2773,9 @@ class ParamWrapper(nn.Module, LoraLayer):
         base_layer = self.get_base_layer()
         requires_grad_before = param.requires_grad
         nn.utils.parametrize.register_parametrization(base_layer, self.parameter_name, proxy)
+        # An outer wrapper may have cached the weight before this proxy was registered.
+        cache_key = (id(base_layer), self.parameter_name)
+        nn.utils.parametrize._cache.pop(cache_key, None)
         # set requires_grad, as it defaults to False
         base_layer.parametrizations[self.parameter_name].original.requires_grad_(requires_grad_before)
         try:
@@ -2780,6 +2783,7 @@ class ParamWrapper(nn.Module, LoraLayer):
                 yield
         finally:
             self._remove_parametrizations()
+            nn.utils.parametrize._cache.pop(cache_key, None)
 
     def _remove_parametrizations(self):
         # Remove the parametrization of this specific parameter

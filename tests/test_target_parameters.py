@@ -575,6 +575,34 @@ class TestTargetParameters:
         output_unloaded = unloaded(x)
         assert torch.all(output_unloaded == output_parametrized)
 
+    def test_nested_adapters_on_parametrized_weights_get_gradients(self):
+        class Projections(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.up = nn.Parameter(torch.eye(4))
+                self.down = nn.Parameter(torch.eye(4))
+
+            def forward(self, x):
+                return nn.functional.linear(nn.functional.linear(x, self.up), self.down)
+
+        projections = Projections()
+        nn.utils.parametrize.register_parametrization(projections, "up", nn.Identity())
+        nn.utils.parametrize.register_parametrization(projections, "down", nn.Identity())
+        config = LoraConfig(r=2, target_modules=[], target_parameters=["0.up", "0.down"])
+        model = get_peft_model(nn.Sequential(projections), config)
+        adapters = [module for module in model.modules() if isinstance(module, ParamWrapper)]
+        assert len(adapters) == 2
+        for adapter in adapters:
+            nn.init.ones_(adapter.lora_A["default"].weight)
+
+        for _ in range(2):
+            model.zero_grad(set_to_none=True)
+            model(torch.ones(2, 4)).sum().backward()
+            for adapter in adapters:
+                grad = adapter.lora_B["default"].weight.grad
+                assert grad is not None, f"{adapter.parameter_name} has no LoRA gradient"
+                assert torch.count_nonzero(grad)
+
     def test_target_parameter_result_caching_works(self, monkeypatch):
         # See 2912
         # There was an issue with the caching of _LoraParameterProxy not working correctly. This test checks that the
