@@ -5425,7 +5425,7 @@ class TestUnshardedLoRASaveUnderZeRO3:
         deepspeed = pytest.importorskip("deepspeed")
         if dist.is_initialized():
             _teardown_dist()
-        _setup_dist(rank=0, world_size=1, port=29555)
+        _setup_dist(rank=0, world_size=1, init_method=(tmp_path / "rendezvous").as_uri())
 
         try:
             ds_config = {"train_batch_size": dist.get_world_size(), "zero_optimization": {"stage": 3}}
@@ -5453,7 +5453,7 @@ class TestUnshardedLoRASaveUnderZeRO3:
         deepspeed = pytest.importorskip("deepspeed")
         if dist.is_initialized():
             _teardown_dist()
-        _setup_dist(rank=0, world_size=1, port=29555)
+        _setup_dist(rank=0, world_size=1, init_method=(tmp_path / "rendezvous").as_uri())
 
         try:
             ds_config = {"train_batch_size": dist.get_world_size(), "zero_optimization": {"stage": 3}}
