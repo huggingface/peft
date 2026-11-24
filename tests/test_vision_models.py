@@ -103,7 +103,6 @@ class TestPastKV:
 class TestResnet:
     # saftensors version of the hf-internal-testing model
     model_id = "peft-internal-testing/tiny-random-ResNetForImageClassification"
-    cat_image = load_cat_image()  # for caching
 
     @pytest.fixture(autouse=True)
     def teardown(self):
@@ -121,7 +120,9 @@ class TestResnet:
 
     @pytest.fixture(scope="class")
     def data(self, image_processor):
-        return image_processor(self.cat_image, return_tensors="pt")
+        # Defer Hub access until test setup so a cache error cannot interrupt collection.
+        cat_image = load_cat_image()
+        return image_processor(cat_image, return_tensors="pt")
 
     @pytest.mark.parametrize("config", CONFIGS.values(), ids=CONFIGS.keys())
     def test_model_with_batchnorm_reproducibility(self, config, tmp_path, data):
