@@ -1122,6 +1122,9 @@ class LoraModel(BaseTuner):
                 tensors_lora[name] = torch.cat(
                     [output_state_dict[name], -mutated_init_state_dict[".".join(name.split(".")[1:])]], dim=1
                 )
+            elif "lora_" not in name:
+                # weights that are not part of the LoRA update, e.g. modules_to_save, are kept as they are
+                tensors_lora[name] = output_state_dict[name]
 
         return tensors_lora
 
