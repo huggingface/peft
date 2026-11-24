@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import functools
+import inspect
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -24,6 +25,11 @@ import packaging.version
 import torch
 import transformers
 from torch import nn
+
+from ..import_utils import get_transformers_cache_name
+
+
+_TORCH_WRAPPER_NAMES = {"_fsdp_wrapped_module", "_checkpoint_wrapped_module"}
 
 
 class TpMeshDimRegistry:
@@ -106,6 +112,15 @@ def get_fsdp_modules(model: nn.Module) -> list[nn.Module]:
     return [module for module in model.modules() if isinstance(module, FSDPModule)]
 
 
+def remove_torch_wrapper_names(name: str) -> str:
+    """Remove the names of torch's FSDP and activation checkpointing wrappers from a module or parameter name.
+
+    These wrappers add a level to the names in `named_modules()` and `named_parameters()`, at any depth of the model.
+    `state_dict` keys need no clean up because the wrappers take care of it.
+    """
+    return ".".join(part for part in name.split(".") if part not in _TORCH_WRAPPER_NAMES)
+
+
 def dequantize_module_weight(module: torch.nn.Module) -> torch.nn.Parameter:
     """
     Helper function to dequantize a quantized weight.
@@ -183,18 +198,16 @@ def get_bnb_param_type(param: torch.nn.Parameter) -> Literal[False, "4bit", "8bi
 
 # adapted from:
 # https://github.com/huggingface/transformers/blob/eab6c491d439e83d5e31c660df6f7e36592eb0a2/src/transformers/generation/utils.py#L1617-L1643
-def get_layer_device_map(model: Any) -> dict[int, Union[int, str]] | None:
+def get_layer_device_map(model: Any) -> dict[int, Union[int, str]]:
     """
     Derive the device map for the layers of the model.
     """
-    main_device = next(d for d in model.hf_device_map.values() if d not in ["cpu", "disk"])
+    # like accelerate's dispatch_model, run on CPU if the device map only contains CPU and disk
+    main_device = next((d for d in model.hf_device_map.values() if d not in ["cpu", "disk"]), "cpu")
 
     execution_device_map = {
         name: main_device if device in ["cpu", "disk"] else device for name, device in model.hf_device_map.items()
     }
-
-    if execution_device_map is None:
-        return None
 
     if len(execution_device_map) == 1 and "" in execution_device_map:
         return {idx: execution_device_map[""] for idx in range(model.config.num_hidden_layers)}
@@ -237,6 +250,16 @@ def map_cache_to_layer_device_map(model: Any, cache: transformers.Cache) -> None
             # TODO: remove if we drop support for transformers <= 4.55
             cache.key_cache[idx] = cache.key_cache[idx].to(layer_device)
             cache.value_cache[idx] = cache.value_cache[idx].to(layer_device)
+
+
+def check_cache_in_signature(method) -> bool:
+    """Check whether a method explicitly accepts the Transformers cache argument.
+
+    Note that for the longest time, the argument was called `past_key_values` but it was deprecated in
+    https://github.com/huggingface/transformers/pull/50585 and is henceforth called `cache`. Therefore, the name is not
+    hard-coded.
+    """
+    return get_transformers_cache_name() in inspect.signature(method).parameters
 
 
 def is_activation_checkpointing(model: nn.Module, *, default: bool) -> bool:

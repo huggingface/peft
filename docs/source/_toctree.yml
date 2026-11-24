@@ -67,6 +67,10 @@
         title: LayerNorm Tuning
       - local: package_reference/trainable_tokens
         title: Trainable Tokens
+      - local: package_reference/paca
+        title: PaCA
+      - local: package_reference/shira
+        title: SHiRA
       title: Layer Tuning
     - sections:
       - local: package_reference/adalora
@@ -121,8 +125,6 @@
         title: OFT
       - local: package_reference/osf
         title: OSF
-      - local: package_reference/paca
-        title: PaCA
       - local: package_reference/peanut
         title: PEANuT
       - local: package_reference/poly
@@ -137,8 +139,6 @@
         title: RoAd
       - local: package_reference/shadow
         title: ShadowPEFT
-      - local: package_reference/shira
-        title: SHiRA
       - local: package_reference/supertuning
         title: Super-Tuning
       - local: package_reference/tinylora

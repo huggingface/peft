@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import functools
-import inspect
 import re
+import runpy
+from importlib import import_module
 
 import packaging.version
 import pytest
@@ -23,7 +23,7 @@ import transformers
 from torch import nn
 from transformers import AutoModelForCausalLM, AutoModelForImageTextToText
 
-from peft import LoraConfig, PeftModel, get_peft_model
+from peft import LoraConfig, PeftModel, get_peft_model, import_utils
 from peft.tuners import lora
 from peft.utils import infer_device
 from peft.utils.integrations import init_empty_weights, skip_init_on_device
@@ -110,88 +110,10 @@ class TestInitEmptyWeights:
         assert all(p.device == expected for p in mlp1.parameters())
 
 
-# TODO Remove this once patch_moe_parameter_targeting is removed from Transformers
-@pytest.fixture(params=[False, True], ids=["without_transformers_moe_patch", "with_transformers_moe_patch"])
-def _transformers_moe_patch(request):
-    """Parametrize tests over the MoE parameter-targeting patch being active/inactive.
-
-    The transformers patch `patch_moe_parameter_targeting` could hide a bug in PEFT when it comes to detecting the
-    correct in_features/out_features of a 3-dim MoE parameter. The patch is applied by transformers when their
-    `load_adapter` method is being called. Therefore, the order in which the tests were executed could hide or surface
-    the bug.
-
-    With this fixture, we ensure that each test is run twice, once without and once with the patch. This should mirror
-    real world usage, where the patch may or may not be active. At fixture exit, the patch is always removed.
-
-    For details, see discussion in #3165
-
-    """
-    try:
-        from transformers.integrations.peft import patch_moe_parameter_targeting
-    except (ImportError, AttributeError):
-        patch_moe_parameter_targeting = None
-
-    should_patch = request.param
-
-    if should_patch and patch_moe_parameter_targeting is None:
-        pytest.skip(
-            "Transformers patch_moe_parameter_targeting no longer exists; skipping the 'patched' test variant."
-        )
-
-    is_patched = hasattr(lora.layer.ParamWrapper.update_layer, "__wrapped__")
-    orig_update_layer = inspect.unwrap(lora.layer.ParamWrapper.update_layer)
-
-    def new_update_layer(layer, *args, **kwargs):
-        # this is copied 1:1 from transformers:
-        # https://github.com/huggingface/transformers/blob/bc7ee236fca35e771b6b393178a192add1469243/src/transformers/integrations/peft.py#L394-L401
-        did_swap = getattr(layer, "_did_swap_in_out_features", False)
-        if not did_swap and layer.parameter_name in ("down_proj", "gate_up_proj"):
-            tmp_in_features = layer.in_features
-            layer.in_features = layer.out_features
-            layer.out_features = tmp_in_features
-            layer._did_swap_in_out_features = True
-        return orig_update_layer(layer, *args, **kwargs)
-
-    # 4 cases:
-    # should_patch | is_patched
-    #         true |       true
-    #         true |      false
-    #        false |       true
-    #        false |      false
-
-    if not should_patch and not is_patched:
-        yield
-        return
-
-    if not should_patch and is_patched:
-        lora.layer.ParamWrapper.update_layer = orig_update_layer
-        yield
-        return
-
-    if should_patch and is_patched:
-        try:
-            yield
-        finally:
-            lora.layer.ParamWrapper.update_layer = orig_update_layer
-        return
-
-    if should_patch and not is_patched:
-        try:
-            lora.layer.ParamWrapper.update_layer = functools.wraps(lora.layer.ParamWrapper.update_layer)(
-                new_update_layer
-            )
-            yield
-        finally:
-            lora.layer.ParamWrapper.update_layer = orig_update_layer
-        return
-    # this is unreachable
-
-
 @pytest.mark.skipif(
     packaging.version.parse(transformers.__version__) < packaging.version.parse("5.4.0"),
     reason="PEFT weight conversion is fixed in transformers 5.4.0",
 )
-@pytest.mark.usefixtures("_transformers_moe_patch")  # TODO remove once patch_moe_parameter_targeting is removed
 class TestTransformersV5:
     """Unit tests intended to test proper working of PEFT with Transformers v5"""
 
@@ -358,7 +280,7 @@ class TestTransformersV5:
         # It can happen that a model returns an entry for get_checkpoint_conversion_mapping but there is nothing further
         # to do because no weights are being fused (e.g. only renamed). In that case, we have no entry in
         # _MOE_TARGET_MODULE_MAPPING. The bug was that we would call dict.__getitem__ instead of dict.get.
-        model_id = "trl-internal-testing/tiny-Qwen2_5_VLForConditionalGeneration"
+        model_id = "peft-internal-testing/tiny-Qwen2_5_VLForConditionalGeneration"
         with hub_online_once(model_id):
             model = AutoModelForImageTextToText.from_pretrained(model_id)
             config = LoraConfig(target_modules=["q_proj", "v_proj"])
@@ -371,7 +293,7 @@ class TestTransformersV5:
         # https://github.com/huggingface/trl/issues/5428
         # Targeting up_proj but not gate_proj must raise -- they are fused into gate_up_proj. Covers the list and regex
         # paths and guards the error-message handling. See `test_qwen3_moe_works` for a valid config.
-        model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
+        model_id = "peft-internal-testing/tiny-Qwen3MoeForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
             msg = re.escape(
@@ -384,7 +306,7 @@ class TestTransformersV5:
     def test_qwen3_moe_works(self):
         # https://github.com/huggingface/trl/issues/5428
         # When correctly targeting both up and gate projection, there should be no error (see previous test)
-        model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
+        model_id = "peft-internal-testing/tiny-Qwen3MoeForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
             # target up_proj and gate_proj
@@ -403,7 +325,7 @@ class TestTransformersV5:
     def test_qwen3_moe_regex_target_modules_works(self, regex):
         # Regression test for https://github.com/huggingface/peft/issues/3229: the conversion used to `set()` the regex
         # string, splitting it into characters. It is now resolved to concrete names against the model.
-        model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
+        model_id = "peft-internal-testing/tiny-Qwen3MoeForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
             peft_model = get_peft_model(model, LoraConfig(target_modules=regex))  # does not raise
@@ -421,7 +343,7 @@ class TestTransformersV5:
 
     def test_qwen3_moe_single_attention_regex_target_modules_works(self):
         # A regex resolving to a single attention projection (no experts) converts cleanly: nothing moves to parameters.
-        model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
+        model_id = "peft-internal-testing/tiny-Qwen3MoeForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
             peft_model = get_peft_model(model, LoraConfig(target_modules=r".*\.q_proj"))  # does not raise
@@ -441,7 +363,7 @@ class TestTransformersV5:
         # "all-linear" is matched by module type, not as a regex. On v4 the experts *and* the router `gate` were
         # nn.Linear, so "all-linear" targeted them; after fusion the experts are stacked parameters and the router is a
         # custom module, so "all-linear" must still carry all of them into target_parameters (gate -> gate.weight).
-        model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
+        model_id = "peft-internal-testing/tiny-Qwen3MoeForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
             peft_model = get_peft_model(model, LoraConfig(target_modules="all-linear"))  # does not raise
@@ -467,7 +389,7 @@ class TestTransformersV5:
         # Save/reload a regex-targeted adapter. Reload re-runs the conversion on the already-converted config, so this
         # also guards idempotency.
         inputs = torch.arange(10).view(1, -1).to(self.torch_device)
-        model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
+        model_id = "peft-internal-testing/tiny-Qwen3MoeForCausalLM"
         regex = r"^(model(?=\.).*\.(q_proj|k_proj|v_proj|gate_proj|up_proj|down_proj))$"
 
         with hub_online_once(model_id):
@@ -514,6 +436,12 @@ class TestTransformersV5:
     }
     _moe_dense_shared_kwargs = {
         "qwen3_moe": {"num_experts": 4, "num_experts_per_tok": 2, "mlp_only_layers": [0]},
+        "qwen2_moe": {
+            "num_experts": 4,
+            "num_experts_per_tok": 2,
+            "mlp_only_layers": [0],
+            "shared_expert_intermediate_size": 16,
+        },
         "qwen3_next": {
             "num_experts": 4,
             "num_experts_per_tok": 2,
@@ -617,3 +545,57 @@ class TestTransformersV5:
         for layer_prefix in ["model.layers.0.mlp", "model.layers.1.mlp.shared_experts"]:
             for proj in ["gate_proj", "up_proj", "down_proj"]:
                 assert f"{layer_prefix}.{proj}" in targeted_modules
+
+    def test_qwen2_moe_all_linear_save_load_roundtrip(self, tmp_path):
+        # https://github.com/huggingface/peft/issues/3801
+        # qwen2_moe was dropped from transformers' conversion mapping, so "all-linear" silently skipped its experts.
+        inputs = torch.arange(10).view(1, -1)
+        model = self._get_tiny_moe_model("qwen2_moe")
+        peft_model = get_peft_model(model, LoraConfig(r=2, target_modules="all-linear", init_lora_weights=False))
+        assert {"gate.weight", "gate_up_proj", "down_proj"} <= set(peft_model.peft_config["default"].target_parameters)
+        with torch.inference_mode():
+            logits_before = peft_model(inputs).logits
+        peft_model.save_pretrained(tmp_path)
+
+        reloaded = PeftModel.from_pretrained(self._get_tiny_moe_model("qwen2_moe"), tmp_path)
+        with torch.inference_mode():
+            logits_after = reloaded(inputs).logits
+
+        assert torch.allclose(logits_before, logits_after, atol=1e-5, rtol=1e-5)
+        assert set(reloaded.targeted_parameter_names) == set(peft_model.targeted_parameter_names)
+
+
+class TestPackageVersionDeprecations:
+    @pytest.mark.parametrize(
+        ("version", "num_expected_warnings"),
+        [("4.57.0", 1), ("5.5.0", 1), ("5.6.0.dev0", 0), ("5.6.0", 0)],
+    )
+    def test_transformers_deprecation_warning(self, monkeypatch, recwarn, version, num_expected_warnings):
+        transformers = import_module("transformers")
+        monkeypatch.setattr(transformers, "__version__", version)
+
+        runpy.run_path(import_utils.__file__)
+
+        matching = [
+            warning
+            for warning in recwarn
+            if issubclass(warning.category, FutureWarning) and ("Support for Transformers" in str(warning.message))
+        ]
+        assert len(matching) == num_expected_warnings
+
+    @pytest.mark.parametrize(
+        ("version", "num_expected_warnings"),
+        [("1.13.3", 1), ("2.5.0", 1), ("2.6.0", 0), ("2.15.0", 0)],
+    )
+    def test_torch_deprecation_warning(self, monkeypatch, recwarn, version, num_expected_warnings):
+        torch = import_module("torch")
+        monkeypatch.setattr(torch, "__version__", version)
+
+        runpy.run_path(import_utils.__file__)
+
+        matching = [
+            warning
+            for warning in recwarn
+            if issubclass(warning.category, FutureWarning) and ("Support for PyTorch" in str(warning.message))
+        ]
+        assert len(matching) == num_expected_warnings

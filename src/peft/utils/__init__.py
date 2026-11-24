@@ -15,7 +15,7 @@
 from .constants import ALLOWED_COMPUTE_DTYPES, UPCAST_DTYPES
 from .error import NoMatchingPeftModuleError, PeftError
 from .integrations import activation_checkpointing_enable, is_activation_checkpointing, map_cache_to_layer_device_map
-from .loftq_utils import replace_lora_weights_loftq
+from .loftq_utils import replace_lora_weights_loftq, replace_lora_weights_pissa
 from .other import (
     CONFIG_NAME,
     INCLUDE_LINEAR_LAYERS_SHORTHAND,
@@ -167,6 +167,7 @@ __all__ = [
     "quantization_extra_repr",
     "register_peft_method",
     "replace_lora_weights_loftq",
+    "replace_lora_weights_pissa",
     "resolve_quantization_backend",
     "set_additional_trainable_modules",
     "set_base_model_state_dict",
