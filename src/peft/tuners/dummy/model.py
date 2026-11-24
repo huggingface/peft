@@ -86,9 +86,6 @@ class DummyModel(BaseTuner):
         current_key,
         **optional_kwargs,
     ):
-        if current_key is None:
-            raise ValueError("Current Key shouldn't be `None`")
-
         kwargs = {}
         kwargs.update(get_quantization_kwargs(self))
 
