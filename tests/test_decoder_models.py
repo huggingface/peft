@@ -1054,6 +1054,37 @@ class TestDecoderModels(PeftCommonTester):
             # does not raise
             model(x)
 
+    def test_prefix_tuning_cpu_and_disk_offload(self, tmp_path):
+        # See 3619, a device map with only CPU and disk entries has no accelerator to place the cache on
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+        device_map = {
+            "model.decoder.embed_tokens": "cpu",
+            "model.decoder.embed_positions": "cpu",
+            "model.decoder.final_layer_norm": "cpu",
+            "model.decoder.layers.0": "cpu",
+            "model.decoder.layers.1": "cpu",
+            "model.decoder.layers.2": "cpu",
+            "model.decoder.layers.3": "disk",
+            "model.decoder.layers.4": "disk",
+            "lm_head": "cpu",
+        }
+        with hub_online_once(model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(model_id)
+            offloaded_base_model = AutoModelForCausalLM.from_pretrained(
+                model_id, device_map=device_map, offload_folder=tmp_path
+            )
+        model = get_peft_model(base_model, PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM"))
+        offloaded_model = get_peft_model(
+            offloaded_base_model, PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM")
+        )
+        offloaded_model.prompt_encoder.load_state_dict(model.prompt_encoder.state_dict())
+
+        x = torch.tensor([[1, 2, 3]])
+        with torch.no_grad():
+            expected = model(x).logits
+            actual = offloaded_model(x).logits
+        torch.testing.assert_close(actual, expected)
+
     def test_prefix_tuning_offsets_position_ids_in_forward(self, monkeypatch):
         # Regression: RoPE models need position_ids offset for prefix tuning.
         model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
