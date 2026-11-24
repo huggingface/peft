@@ -239,6 +239,9 @@ class Linear(nn.Module, DummyLayer):
                 self.unmerge()
             result = self.base_layer(x, *args, **kwargs)
         elif self.merged:
+            # We don't have to explicitly check if there are unmerged active adapters since this is explicitly
+            # forbidden to do. Merging requires the merged adapter to be active and each affected layer must merge all
+            # of its applicable active adapters in active order.
             result = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
@@ -287,12 +290,6 @@ class _ConvNd(nn.Module, DummyLayer):
     def _create_adapter_modules(self, adapter_name: str, r: int, config: DummyConfig) -> None:
         base_layer = self.get_base_layer()
         kernel_dim = base_layer.weight.dim()
-        if r % base_layer.groups != 0:
-            raise ValueError(
-                f"Targeting a {base_layer.__class__.__name__} with groups={base_layer.groups} and rank {r}. "
-                "Currently, support is limited to conv layers where the rank is divisible by groups. "
-                "Either choose a different rank or do not target this specific layer."
-            )
 
         # Background on grouped convolutions: grouping effectively splits one conv layer into several independent conv
         # layers, each getting 1/groups part of the input and output channels. The weight of each group only connects
@@ -304,6 +301,13 @@ class _ConvNd(nn.Module, DummyLayer):
         # r // groups to out_channels // groups channels per group. This requires r to be divisible by groups. With
         # this choice, the low-rank update of each group is simply B_g @ A_g, so the full delta weight can be
         # reconstructed per group for merging.
+        if r % base_layer.groups != 0:
+            raise ValueError(
+                f"Targeting a {base_layer.__class__.__name__} with groups={base_layer.groups} and rank {r}. "
+                "Currently, support is limited to conv layers where the rank is divisible by groups. "
+                "Either choose a different rank or do not target this specific layer."
+            )
+
         conv_layer = type(base_layer)
         self.dummy_lora_A[adapter_name] = conv_layer(
             base_layer.in_channels,
