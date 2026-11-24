@@ -33,9 +33,11 @@ from transformers import (
 from peft import (
     AdaLoraConfig,
     FrodConfig,
+    HiraConfig,
     IA3Config,
     LoKrConfig,
     LoraConfig,
+    OFTConfig,
     PeftModel,
     PeftWarning,
     PveraConfig,
@@ -905,6 +907,49 @@ class TestPeftStateDict:
 
         assert tuple(state_dict) == keys_before
         assert all(state_dict[key] is value for key, value in values_before.items())
+
+    @pytest.mark.parametrize(
+        "config_cls, config_kwargs",
+        [
+            (LoraConfig, {"r": 2, "target_modules": ["embed_tokens"]}),
+            (OFTConfig, {"r": 0, "oft_block_size": 4, "target_modules": ["embed_tokens"]}),
+            (HiraConfig, {"r": 2, "target_modules": ["embed_tokens"]}),
+            (TinyLoraConfig, {"r": 2, "u": 4, "target_modules": ["embed_tokens"]}),
+        ],
+    )
+    def test_save_merged_embedding_adapter_raises(self, config_cls, config_kwargs, tmp_path):
+        # Regression test for #4215: saving a merged adapter targeting embeddings would store
+        # W + ΔW as base weights, causing ΔW to be added twice on reload.
+        config = LlamaConfig(
+            vocab_size=16,
+            hidden_size=8,
+            intermediate_size=16,
+            num_hidden_layers=1,
+            num_attention_heads=2,
+            num_key_value_heads=2,
+            tie_word_embeddings=False,
+        )
+        base_model = AutoModelForCausalLM.from_config(config).eval()
+        peft_config = config_cls(**config_kwargs)
+        model = get_peft_model(base_model, peft_config)
+        model.merge_adapter()
+
+        msg = "is currently merged with adapter"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model_state_dict(model, save_embedding_layers="auto")
+
+        with pytest.raises(ValueError, match=msg):
+            model.save_pretrained(tmp_path, save_embedding_layers="auto")
+
+        with pytest.raises(ValueError, match=msg):
+            model.save_pretrained(tmp_path, save_embedding_layers=True)
+
+        # save_embedding_layers=False should succeed without error
+        model.save_pretrained(tmp_path / "no_emb", save_embedding_layers=False)
+
+        # unmerge_adapter() restores base weights and allows save_pretrained to succeed
+        model.unmerge_adapter()
+        model.save_pretrained(tmp_path / "unmerged", save_embedding_layers="auto")
 
 
 class TestGetBaseModelStateDict:

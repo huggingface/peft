@@ -384,9 +384,23 @@ def get_peft_model_state_dict(
 
     if save_embedding_layers and hasattr(model, "get_input_embeddings"):
         for layer in [model.get_input_embeddings(), model.get_output_embeddings()]:
+            if layer is None:
+                continue
             # Either the layer is not targeted, then it must have been resized and needs saving. Or it is targeted and
             # therefore has a valid base layer, then we'll save it as well.
             if not embedding_is_targeted or has_valid_embedding_base_layer(layer):
+                is_merged = getattr(layer, "merged", False) or bool(getattr(layer, "merged_adapters", []))
+                if is_merged:
+                    embedding_module_name = (
+                        get_embedding_layer_name(model, layer, embedding_is_targeted) or "embeddings"
+                    )
+                    raise ValueError(
+                        f"The embedding layer '{embedding_module_name}' is currently merged with adapter(s) "
+                        f"{getattr(layer, 'merged_adapters', [])}. Saving the embedding layer while merged would store "
+                        "the merged weights as base weights, causing adapter weights to be applied twice upon reload. "
+                        "Please call `model.unmerge_adapter()` before saving, or pass `save_embedding_layers=False`."
+                    )
+
                 embedding_module_name = get_embedding_layer_name(model, layer, embedding_is_targeted)
                 if embedding_module_name:
                     embedding_prefix = f"{remove_torch_wrapper_names(embedding_module_name)}."
