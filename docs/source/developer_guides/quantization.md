@@ -264,7 +264,7 @@ model = get_peft_model(model, config)
 
 ## HQQ quantization
 
-PEFT support for HQQ is deprecated and will be removed in v1.2. Pin `peft<1.2` if you still use HQQ, but we recommend to switch to bitsandbytes for new runs. Please open an issue on PEFT if you still use EETQ and want us to keep supporting it.
+PEFT support for HQQ is deprecated and will be removed in v1.2. Pin `peft<1.2` if you still use HQQ, but we recommend to switch to bitsandbytes for new runs. Please open an issue on PEFT if you still use HQQ and want us to keep supporting it.
 
 The models that are quantized using Half-Quadratic Quantization of Large Machine Learning Models ([HQQ](https://mobiusml.github.io/hqq_blog/)) support LoRA adapter tuning. To tune the quantized model, you'll need to install the `hqq` library with: `pip install hqq`.
 
