@@ -2437,11 +2437,11 @@ class MultiheadAttention(nn.Module, LoraLayer):
         return "lora." + rep
 
 
-class _LoraProxy(nn.Module):
+class _LoraProxyBase(nn.Module):
     """Base class for LoRA parametrization proxies used by `ParamWrapper`."""
 
 
-class _LoraParameterProxy(_LoraProxy):
+class _LoraParameterProxy(_LoraProxyBase):
     """This proxies an `nn.Parameter` that is targeted with LoRA.
     Intended to be used in conjunction with `nn.utils.parametrize`, see `ParamWrapper`.
     """
@@ -2475,7 +2475,7 @@ class _LoraParameterProxy(_LoraProxy):
         return W + self.delta_weight
 
 
-class _LoraFactorsProxy(_LoraProxy):
+class _LoraFactorsProxy(_LoraProxyBase):
     """This proxies an `nn.Parameter` that is targeted with a single LoRA adapter, keeping the low-rank factors.
 
     Folding `W + scaling * lhs @ rhs` into one `baddbmm` avoids materialising a delta the size of the full parameter
@@ -2806,7 +2806,7 @@ class ParamWrapper(nn.Module, LoraLayer):
         reversed_indices = reversed(range(len(param_list)))
         for i in reversed_indices:
             module = param_list[i]
-            if isinstance(module, _LoraProxy):
+            if isinstance(module, _LoraProxyBase):
                 del param_list[i]
                 break
         else:  # no break encountered
