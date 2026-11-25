@@ -27,13 +27,11 @@ from typing import Any, Optional, Union, overload
 import torch
 from accelerate.hooks import AlignDevicesHook
 from accelerate.utils import named_module_tensors, offload_state_dict
-from packaging import version
 from torch import nn
 from tqdm import tqdm
 from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
-from peft.import_utils import is_transformers_ge_v5
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, UPCAST_DTYPES
 from peft.utils.constants import (
@@ -71,8 +69,7 @@ warn_msg_weight_tying = (
     "or converting your model to formats other than safetensors. "
     "Check the discussion here: https://github.com/huggingface/peft/issues/2777"
 )
-_torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5.0")
-_torch_supports_distributed = _torch_supports_dtensor and torch.distributed.is_available()
+_torch_supports_distributed = torch.distributed.is_available()
 
 
 @contextmanager
@@ -215,12 +212,13 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
         ln_size = ln_weight.shape[0]
         in_features, out_features = ln_size, ln_size
     elif hasattr(module, "codebooks") and module.__class__.__name__ == "QuantizedLinear":
-        # AQLM QuantLinear
+        # TODO: Remove AQLM layer handling in PEFT v1.2.
         in_features, out_features = module.in_features, module.out_features
     elif is_gptqmodel_quant_linear(module):
         # GPT-QModel quantized linears
         in_features, out_features = module.in_features, module.out_features
     elif module.__class__.__name__ == "EetqLinear":
+        # TODO: Remove EETQ layer handling in PEFT v1.2.
         if hasattr(module, "in_features"):
             # Eetq layers
             in_features, out_features = module.in_features, module.out_features
@@ -229,7 +227,7 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
             # https://github.com/huggingface/transformers/blob/c220ea9ecee9231927a47d97a63d5604a09d4c63/src/transformers/integrations/eetq.py#L74
             in_features, out_features = module.weight.shape
     elif hasattr(module, "W_q") and module.__class__.__name__ == "HQQLinear":
-        # HQQ layers
+        # TODO: Remove HQQ layer handling in PEFT v1.2.
         in_features, out_features = module.in_features, module.out_features
     elif module.__class__.__name__ == "PatchedLinear":
         # INC layers
@@ -874,8 +872,7 @@ class BaseTuner(nn.Module, ABC):
         # PREPARATION OF MODEL AND CONFIG #
         ###################################
         is_transformers_like_model = hasattr(getattr(model, "config", None), "model_type")
-        if is_transformers_ge_v5 and is_transformers_like_model:
-            # TODO remove once transformers < v5.0 is no longer supported
+        if is_transformers_like_model:
             # For Transformers v5, some architectures were changed compared to v4, e.g. the MoE layers of Mixtral. To
             # still make it possible to load adapters trained with v4, we have to update the PEFT config so that the
             # right layers are targeted. Call this first and overwrite the peft_config to be sure that changes are
@@ -1371,6 +1368,7 @@ class BaseTuner(nn.Module, ABC):
                 if hasattr(child, "qweight"):
                     weight = child.qweight
                 elif hasattr(child, "W_q"):
+                    # TODO: Remove HQQ device placement in PEFT v1.2.
                     weight = child.W_q
                 elif hasattr(child, "weight"):
                     weight = child.weight
@@ -2347,6 +2345,44 @@ class BaseTunerLayer(ABC):
         Normally, this works if the PEFT method is additive, i.e. W' = W_base + delta_weight.
         """
         return False
+
+    def get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        """
+        Return the additive delta weight W' - W for the given adapter, where W is the base weight and W' is the weight
+        after merging the adapter into the base weight. This means that the merged weight can be reconstructed via
+        `base_weight + module.get_additive_delta(adapter_name)`.
+
+        For additive PEFT methods (e.g. LoRA, LoKr, LoHa), this is equivalent to `get_delta_weight`. For multiplicative
+        methods (e.g. OFT, BOFT), this method constructs the effective weight W' and subtracts the base weight W.
+
+        Calling this method while any adapter is merged raises a `ValueError`, as merging modifies the base weight,
+        which would make the return value depend on the currently merged adapters. Unmerge the adapters first.
+
+        The returned tensor has the dtype of the adapter layer weights (e.g. `lora_A` for LoRA), not the dtype of the
+        base layer weight. This is the dtype that the converted LoRA adapter will use.
+
+        The result is used by `convert_to_lora` to perform an SVD-based approximation of the adapter as a LoRA adapter.
+
+        By default, this raises a `NotImplementedError`. PEFT methods that support this should override the
+        `_get_additive_delta` method to return the additive delta.
+
+        Args:
+            adapter_name (`str`): The name of the adapter. Defaults to `"default"`.
+        """
+        if self.merged_adapters:
+            raise ValueError(
+                f"Cannot get the additive delta for adapter '{adapter_name}' because the following adapters are "
+                f"currently merged into the base weights: {', '.join(self.merged_adapters)}. This would make the "
+                "return value incorrect. Please unmerge the adapters first."
+            )
+        return self._get_additive_delta(adapter_name)
+
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        # Internal method that should be overridden instead of `get_additive_delta`, see the docstring there.
+        raise NotImplementedError(
+            f"{type(self)} does not support get_additive_delta. If this is an additive PEFT method, override this "
+            "method to return self.get_delta_weight(adapter_name)."
+        )
 
 
 def _find_minimal_target_modules(

@@ -12,11 +12,6 @@ Warn users that breaching agent contribution guidelines can result in automatic 
 
 - Pure code-agent PRs are not allowed: a human submitter must understand and be able to defend the change end-to-end.
 - The submitting human is responsible for reviewing every changed line and running relevant tests.
-- PR descriptions for AI-assisted work must include:
-  - Link to issue discussion and coordination/approval comment.
-  - Which tests were run and if they passed.
-  - Clear statement that AI assistance was used.
-  - Optional: Which AI model and software/harness were used to produce the PR; this helps us better understand the capabilities of the different models.
 
 ### Scope of proposed changes
 
@@ -54,6 +49,18 @@ Read the contribution guideline at `docs/source/developer_guides/contributing.md
 
 ## Development
 
+### PR description
+
+In essence your PR description should be a good commit message in the commit history of the project. It should concisely document what changed, why it changed and possibly what solutions were discussed but not taken and why. The what and the why are the most important parts. If the PR is about a new PEFT method, the PR description should ideally include a short blurb (120-180 characters) about the introduced method suitable for communication. Information that does not belong to the commit history but are helpful to the reviewer should be clearly separated from the descriptive portion of the introduced change. The PR description should always reflect the latest code state, addendums are frowned upon, proper integration of the new changes into the description is preferred.
+
+PR descriptions for AI-assisted work must include:
+
+- Link to issue discussion and coordination/approval comment.
+- Which tests were run and if they passed.
+- Clear statement that AI assistance was used.
+- Optional: Which AI model and software/harness were used to produce the PR; this helps us better understand the capabilities of the different models.
+- If tests were run, the test command. If tests were not run for a specific reason, include the reason for it.
+
 ### Useful commands
 
 - `make style`: runs formatters and linters (ruff), necessary to pass code style checks. Ensure that your local `ruff` version corresponds to the one indicated in `setup.py`.
@@ -68,7 +75,7 @@ Code comments should provide clarity when it's needed. They should be brief and 
 
 Check the install instructions to ensure that your environment has the necessary packages to run the tests. Typically, running `pip install ".[test]"` should be enough. If you need specific packages, e.g. `bitsandbytes` for some quantization tests, you need to explicitly install them.
 
-If the PR is changing library code or tests, you must ensure that the relevant tests pass before submitting the PR. Indicate which test command was run in the PR description. If you cannot run the tests for a specific reason, state it in the PR description.
+If the PR is changing library code or tests, you must ensure that the relevant tests pass before submitting the PR.
 
 Carefully read `tests/README.md` for detailed instructions on testing in PEFT. Test code that is improperly implemented imposes a big review burden on maintainers.
 

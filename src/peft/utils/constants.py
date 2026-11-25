@@ -13,9 +13,6 @@
 # limitations under the License.
 
 import torch
-from transformers import BloomPreTrainedModel
-
-from ..import_utils import is_transformers_le_4_53
 
 
 # needed for prefix-tuning of bloom model
@@ -45,19 +42,7 @@ def starcoder_model_postprocess_past_key_value(past_key_values: tuple[torch.Tens
     return tuple(result)
 
 
-# TODO: remove this once transformers 4.53 is no longer supported
 TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {}
-if is_transformers_le_4_53:
-    TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING["gpt_bigcode"] = (
-        starcoder_model_postprocess_past_key_value
-    )
-
-
-if hasattr(BloomPreTrainedModel, "_convert_to_standard_cache"):
-    # special handling for bloom architecture was fixed in:
-    # https://github.com/huggingface/transformers/pull/31445
-    # the _convert_to_standard_cache method is removed in the PR and thus serves as an indicator
-    TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING["bloom"] = bloom_model_postprocess_past_key_value
 
 
 #######################################

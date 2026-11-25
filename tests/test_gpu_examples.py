@@ -27,20 +27,17 @@ from typing import Any, Union
 from unittest.mock import patch
 
 import numpy as np
-import packaging
 import pytest
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn.functional as F
-import transformers
 from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import get_backend, run_command
 from accelerate.utils import patch_environment
 from accelerate.utils.imports import is_bf16_available
 from accelerate.utils.memory import clear_device_cache
 from datasets import Audio, Dataset, DatasetDict, load_dataset
-from packaging import version
 from parameterized import parameterized
 from safetensors.torch import load_file, save_file
 from torch.distributed import init_process_group
@@ -101,7 +98,6 @@ from peft.import_utils import (
     is_diffusers_available,
     is_te_available,
     is_torchao_ge_v0_18_0,
-    is_transformers_ge_v5,
     is_transformers_ge_v5_13_0,
     is_xpu_available,
 )
@@ -4117,13 +4113,10 @@ class MixedPrecisionTests(unittest.TestCase):
             trainer.train()  # does not raise
 
 
+# TODO: Remove the AQLM GPU tests in PEFT v1.2.
 @require_non_xpu
 @require_torch_gpu
 @require_aqlm
-@pytest.mark.skipif(
-    not version.parse(importlib.metadata.version("transformers")) >= version.parse("4.38.0"),
-    reason="test requires `transformers>=4.38.0`",
-)
 class PeftAqlmGPUTests(unittest.TestCase):
     r"""
     AQLM + peft tests
@@ -4170,7 +4163,11 @@ class PeftAqlmGPUTests(unittest.TestCase):
                 bias="none",
                 task_type="CAUSAL_LM",
             )
-            model = get_peft_model(model, config)
+            with pytest.warns(
+                FutureWarning,
+                match=r"AQLM support is deprecated and will be removed in PEFT v1\.2",
+            ):
+                model = get_peft_model(model, config)
 
             data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
@@ -4202,13 +4199,10 @@ class PeftAqlmGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
+# TODO: Remove the HQQ GPU tests in PEFT v1.2.
 @require_non_xpu
 @require_torch_gpu
 @require_hqq
-@pytest.mark.skipif(
-    not version.parse(importlib.metadata.version("transformers")) >= version.parse("4.36.1"),
-    reason="test requires `transformers>=4.36.1`",
-)
 class PeftHqqGPUTests(unittest.TestCase):
     r"""
     HQQ + peft tests
@@ -4227,7 +4221,6 @@ class PeftHqqGPUTests(unittest.TestCase):
 
     @pytest.mark.xfail(
         reason="HQQ is not yet supported by Transformers v5",
-        condition=is_transformers_ge_v5,
         strict=True,
         raises=NotImplementedError,
     )
@@ -4264,7 +4257,8 @@ class PeftHqqGPUTests(unittest.TestCase):
                 task_type="CAUSAL_LM",
                 use_dora=use_dora,
             )
-            model = get_peft_model(model, config)
+            with pytest.warns(FutureWarning, match=r"HQQ support is deprecated and will be removed in PEFT v1\.2"):
+                model = get_peft_model(model, config)
 
             data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
@@ -4297,7 +4291,6 @@ class PeftHqqGPUTests(unittest.TestCase):
 
     @pytest.mark.xfail(
         reason="HQQ is not yet supported by Transformers v5",
-        condition=is_transformers_ge_v5,
         strict=True,
         raises=NotImplementedError,
     )
@@ -4341,7 +4334,8 @@ class PeftHqqGPUTests(unittest.TestCase):
             quantization_config=quant_config,
         )
         torch.manual_seed(0)
-        model = get_peft_model(model, config).eval()
+        with pytest.warns(FutureWarning, match=r"HQQ support is deprecated and will be removed in PEFT v1\.2"):
+            model = get_peft_model(model, config).eval()
         with torch.inference_mode():
             output_hqq = model(**inputs).logits
 
@@ -4373,7 +4367,8 @@ class PeftHqqGPUTests(unittest.TestCase):
                 dtype=compute_dtype,
                 quantization_config=quant_config,
             )
-            model = PeftModel.from_pretrained(model, tmp_dir)
+            with pytest.warns(FutureWarning, match=r"HQQ support is deprecated and will be removed in PEFT v1\.2"):
+                model = PeftModel.from_pretrained(model, tmp_dir)
             with torch.inference_mode():
                 output_loaded = model(**inputs).logits
 
@@ -4560,6 +4555,7 @@ class PeftAwqGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
+# TODO: Remove the EETQ GPU tests in PEFT v1.2.
 @require_non_xpu
 @require_torch_gpu
 @require_eetq
@@ -4616,7 +4612,8 @@ class PeftEetqGPUTests(unittest.TestCase):
                 bias="none",
                 task_type="CAUSAL_LM",
             )
-            model = get_peft_model(model, config)
+            with pytest.warns(FutureWarning, match=r"EETQ support is deprecated and will be removed in PEFT v1\.2"):
+                model = get_peft_model(model, config)
 
             data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
@@ -4685,7 +4682,8 @@ class PeftEetqGPUTests(unittest.TestCase):
                 task_type="CAUSAL_LM",
             )
 
-            model = get_peft_model(model, config)
+            with pytest.warns(FutureWarning, match=r"EETQ support is deprecated and will be removed in PEFT v1\.2"):
+                model = get_peft_model(model, config)
 
             data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
@@ -7533,15 +7531,7 @@ def _test_load_adapter_save(rank, world_size, tmp_dir_reference, tmp_dir_tp):
             )
 
 
-# transformers >= 5.4.0 is required for TP integration
-# transformers >= 5.6.0 is required for PreTrainedModel.load_adapter with TP models integration
-is_transformers_ge_v5_6_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.6.0")
-
-
 @require_torch_gpu
-@pytest.mark.skipif(
-    not is_transformers_ge_v5_6_0, reason="transformers TP integration supported for transformers >= 5.6.0"
-)
 @pytest.mark.multi_gpu_tests
 class TestLoraTensorParallel:
     def _spawn(self, fn, *extra_args):

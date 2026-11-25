@@ -19,10 +19,12 @@ import torch
 from peft.import_utils import is_aqlm_available
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.utils.quantization_utils import warn_deprecated_quantization
 
 from .config import LoraConfig
 
 
+# TODO: Remove this AQLM integration in PEFT v1.2.
 if is_aqlm_available():
     from aqlm import QuantizedLinear
 
@@ -100,6 +102,7 @@ def dispatch_aqlm(
         target_base_layer = target
 
     if is_aqlm_available() and isinstance(target_base_layer, QuantizedLinear):
+        warn_deprecated_quantization("AQLM")
         new_module = AqlmLoraLinear(target, adapter_name, config=config, **kwargs)
         target.qweight = target_base_layer.codes
 
