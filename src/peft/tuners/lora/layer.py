@@ -2434,7 +2434,11 @@ class MultiheadAttention(nn.Module, LoraLayer):
         return "lora." + rep
 
 
-class _LoraParameterProxy(nn.Module):
+class _LoraProxyBase(nn.Module):
+    """Base class for LoRA parametrization proxies used by `ParamWrapper`."""
+
+
+class _LoraParameterProxy(_LoraProxyBase):
     """This proxies an `nn.Parameter` that is targeted with LoRA.
     Intended to be used in conjunction with `nn.utils.parametrize`, see `ParamWrapper`.
     """
@@ -2468,7 +2472,7 @@ class _LoraParameterProxy(nn.Module):
         return W + self.delta_weight
 
 
-class _LoraFactorsProxy(nn.Module):
+class _LoraFactorsProxy(_LoraProxyBase):
     """This proxies an `nn.Parameter` that is targeted with a single LoRA adapter, keeping the low-rank factors.
 
     Folding `W + scaling * lhs @ rhs` into one `baddbmm` avoids materialising a delta the size of the full parameter
@@ -2795,12 +2799,11 @@ class ParamWrapper(nn.Module, LoraLayer):
 
         # If there are multiple parametrizations for the same parameter_name, we only want to remove the LoRA proxy.
         # Unfortunately, PyTorch does not support this directly, so we need to take care of it manually. To achieve
-        # this, we check the ParameterList from the back until we find the _LoraParameterProxy instance and then remove
-        # it.
+        # this, we check the ParameterList from the back until we find the LoRA proxy instance and then remove it.
         reversed_indices = reversed(range(len(param_list)))
         for i in reversed_indices:
             module = param_list[i]
-            if isinstance(module, _LoraParameterProxy):
+            if isinstance(module, _LoraProxyBase):
                 del param_list[i]
                 break
         else:  # no break encountered
