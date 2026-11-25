@@ -73,7 +73,8 @@ for param in model.parameters():
         # cast the small parameters (e.g. layernorm) to fp32 for stability
         param.data = param.data.to(torch.float32)
 
-# model.gradient_checkpointing_enable()  # reduce number of stored activations
+# model.activation_checkpointing_enable()  # reduce number of stored activations
+# Note: it's called gradient_checkpointing_enable in older Transformers versions
 # model.model.decoder.project_in = lambda x: x.requires_grad_(True)
 
 

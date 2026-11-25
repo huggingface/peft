@@ -1,0 +1,30 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "exclude_modules": null,
+  "inference_mode": false,
+  "init_weights": true,
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "modules_to_save": null,
+  "paca_alpha": 43,
+  "peft_type": "PACA",
+  "peft_version": "0.21.3.dev0@UNKNOWN",
+  "r": 43,
+  "random_seed": 0,
+  "revision": null,
+  "target_modules": [
+    "add_v_proj",
+    "to_add_out",
+    "to_q",
+    "to_qkv_mlp_proj",
+    "linear_in",
+    "add_k_proj",
+    "to_k",
+    "add_q_proj",
+    "to_v",
+    "to_out.0",
+    "linear_out"
+  ],
+  "task_type": null
+}

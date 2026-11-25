@@ -81,6 +81,7 @@ def __getattr__(name):
 
         return Linear4bit
 
+    # TODO: Remove the lazy EETQ export in PEFT v1.2.
     if (name == "EetqLoraLinear") and is_eetq_available():
         from .eetq import EetqLoraLinear
 

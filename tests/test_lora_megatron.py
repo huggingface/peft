@@ -173,7 +173,7 @@ if is_megatron_available():
     def test_megatron_core_unknown_package_raises(tmp_path):
         # Mimic loading a megatron model with a adversarial `megatron_core` value to emulate
         # a code execution attack. See #3085 and `AutoPeftModel.from_pretrained` (import_allowlist) for details.
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
 

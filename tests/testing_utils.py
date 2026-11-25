@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
+import platform
 from contextlib import contextmanager
 from functools import lru_cache, wraps
 from unittest import mock
@@ -39,7 +40,6 @@ from peft.import_utils import (
     is_hqq_available,
     is_optimum_available,
     is_torchao_available,
-    is_transformers_ge_v5,
 )
 
 
@@ -196,6 +196,7 @@ def require_gptqmodel(test_case):
     return pytest.mark.skipif(not is_gptqmodel_available(), reason="test requires gptqmodel")(test_case)
 
 
+# TODO: Remove the AQLM, HQQ, and EETQ test decorators in PEFT v1.2.
 def require_aqlm(test_case):
     """
     Decorator marking a test that requires aqlm. These tests are skipped when aqlm isn't installed.
@@ -319,7 +320,7 @@ def set_init_weights_false(config_cls, kwargs):
 
 
 @contextmanager
-def hub_online_once(model_id: str):
+def hub_online_once(model_id: str, *, is_custom_model: bool = False):
     """Set env[HF_HUB_OFFLINE]=1 (and patch transformers/hugging_face_hub to think that it was always that way)
     for model ids that were already to avoid contacting the hub twice for the same model id in the context. The global
     variable `_HUB_MODEL_ACCESSES` tracks the number of hits per model id between `hub_online_once` calls.
@@ -347,7 +348,19 @@ def hub_online_once(model_id: str):
     It is best to avoid using this context manager in *yield* fixtures (normal fixtures are fine) as this is equivalent
     to wrapping the whole test in the context manager without explicitly writing it out, leading to unexpected
     `HF_HUB_OFFLINE` behavior in the test body.
+
+    In the nightly MacOS CI run, we set `PEFT_TEST_TINY_MODELS_ONLY=1`, which allows the CI to skip Hub models without
+    "tiny" in their cache key to limit memory usage (only 7 GB). Set `is_custom_model=True` for small, handcrafted
+    models that do not load weights from the Hub.
     """
+    if (
+        os.environ.get("PEFT_TEST_TINY_MODELS_ONLY") == "1"
+        and platform.system() == "Darwin"
+        and not is_custom_model
+        and "tiny" not in model_id.lower()
+    ):
+        pytest.skip(f"Skipping non-tiny model on macOS: {model_id}")
+
     override = {}
 
     try:
@@ -364,13 +377,9 @@ def hub_online_once(model_id: str):
             # probably still a good idea to have it if there's some dynamic code that checks it.
             mock.patch.dict(os.environ, override),
             mock.patch("huggingface_hub.constants.HF_HUB_OFFLINE", is_offline),
+            mock.patch("transformers.utils.hub.is_offline_mode", return_value=is_offline),
         ):
-            if is_transformers_ge_v5:
-                with mock.patch("transformers.utils.hub.is_offline_mode", lambda: is_offline):
-                    yield
-            else:  # TODO remove if transformers <= 4 no longer supported
-                with mock.patch("transformers.utils.hub._is_offline_mode", is_offline):
-                    yield
+            yield
     except Exception:
         # in case of an error we have to assume that we didn't access the model properly from the hub
         # for the first time, so the next call cannot be considered cached.

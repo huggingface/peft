@@ -96,6 +96,53 @@ config = LoraConfig(init_lora_weights=False, ...)
 ```
 
 <hfoptions id="initializations">
+<hfoption id="NoRA">
+[Normalized Low-Rank Adaptation (NoRA)](https://huggingface.co/papers/2608.31036) normalizes the LoRA down-projection matrices. PEFT applies this normalization only at initialization through `init_lora_weights="nora"` in [`LoraConfig`]: it normalizes the columns of the randomly initialized LoRA A weight and initializes the LoRA B weight to zero. Both matrices remain trainable, and the base weights are left unchanged.
+
+For a linear layer, the adapter weight update is $\Delta W = sBA$, where $A$ has shape `(r, in_features)`, $B$ has shape `(out_features, r)`, and $s$ is the LoRA scaling factor. NoRA starts from the random A weight created by the LoRA linear layer and normalizes each column across the rank dimension:
+
+$$
+A_{:,j} \leftarrow \frac{A_{:,j}}{\max(\lVert A_{:,j} \rVert_2, 10^{-6})}, \qquad B \leftarrow 0.
+$$
+
+Since B is zero, the adapter weight update is zero before training. With `bias="none"` and `lora_bias=False`, the adapter initially preserves the base model output. NoRA does not require a calibration dataset or a weight decomposition.
+
+> [!IMPORTANT]
+> For NoRA, the recommended setting is `lora_alpha` equal to `r` (a 1:1 alpha/rank ratio), for example, `r=8, lora_alpha=8`. With the default `use_rslora=False`, this keeps a scaling factor of 1; enabling rank-stabilized LoRA changes it to `lora_alpha / sqrt(r)`.
+
+The following example applies NoRA to two linear layers in a small PyTorch model:
+
+```py
+from torch import nn
+
+from peft import LoraConfig, get_peft_model
+
+model = nn.Sequential(
+    nn.Linear(32, 32),
+    nn.ReLU(),
+    nn.Linear(32, 16),
+)
+
+config = LoraConfig(
+    r=8,
+    lora_alpha=8,
+    target_modules=["0", "2"],
+    init_lora_weights="nora",
+    bias="none",
+    lora_bias=False,
+    use_rslora=False,
+)
+model = get_peft_model(model, config)
+model.print_healthcheck()
+```
+
+For a Transformers model, set `target_modules` to the names of the linear layers you want to adapt, such as `["q_proj", "v_proj"]` when those names are present in the model.
+
+NoRA uses the existing LoRA configuration, training, saving, and loading APIs, so there is no separate `NoraConfig` or `NoraModel` class. For the shared configuration and model APIs, see [`LoraConfig`] and [`LoraModel`].
+
+NoRA supports `torch.nn.Linear` target modules or `nn.Parameter`s passed directly with `target_parameters`. It is not supported for embeddings, conv layers, etc.
+</hfoption>
+
 <hfoption id="PiSSA">
 [PiSSA](https://huggingface.co/papers/2404.02948) initializes the LoRA adapter using the principal singular values and singular vectors. This straightforward modification allows PiSSA to converge more rapidly than LoRA and ultimately attain superior performance. Moreover, PiSSA reduces the quantization error compared to QLoRA, leading to further enhancements.
 
@@ -778,7 +825,6 @@ model.delete_adapter("dpo")
 LoRA supports [Tensor Parallelism (TP)](https://huggingface.co/docs/transformers/main/en/perf_train_gpu_many#tensor-parallelism) as provided by Transformers. When a base model is loaded with a `tp_plan`, PEFT automatically detects the TP configuration of each target module and adds the appropriate hooks to the LoRA adapter weights so that they participate correctly in the tensor-parallel computation.
 
 > [!WARNING]
-> Tensor Parallelism support for LoRA requires `transformers >= 5.4.0`.
 > The DTensor-based Tensor Parallelism API requires `peft >= 0.21.1` and `transformers >= 5.17.0`.
 
 Usage is identical to the standard LoRA workflow — simply load the base model with a `tp_plan` before wrapping it with PEFT:
@@ -793,6 +839,14 @@ model = get_peft_model(model, lora_config)
 ```
 
 Saving and loading work as usual via `save_pretrained` / `from_pretrained`. PEFT gathers the sharded adapter weights back to full tensors before saving, so checkpoints are portable and independent of the number of devices used during training.
+
+If you apply tensor parallelism without a TP plan, e.g. with PyTorch's `parallelize_module`, PEFT sizes the LoRA weights of a sharded `nn.Linear` to its local shard if the weight's device mesh has a dimension named `"tp"`, and to the full layer shape otherwise (as with FSDP2). PEFT does not add TP hooks to these LoRA weights or gather them when saving. If your TP mesh dimension has a different name, add it before creating the PEFT model:
+
+```py
+from peft.utils.integrations import TpMeshDimRegistry
+
+TpMeshDimRegistry.register("tp_dim")
+```
 
 
 ## Inference
@@ -824,6 +878,7 @@ The tokenizer is the base model's tokenizer. Use `add_special_tokens=False` to a
 * aLoRA weights cannot be merged into the base model by definition, since the adapter weights are selectively applied to a subset of tokens. Attempts to merge will throw errors.
 * Beam search is not yet supported.
 * It is generally not recommended to add new tokens to the tokenizer that are not present in the base model. This can complicate the target use case of both the base model and adapter model operating on overlapping context. You can workaround this by adding [trainable tokens](../package_reference/trainable_tokens) to the base model prior to training the adapter.
+* aLoRA can sometimes be used as a standin for [Gated LoRA](https://huggingface.co/papers/2507.11851) (popular in some multi-token prediction implementations) since you can either use custom tokens to steer the activation of the adapter (i.e. the gating) or provide the aLoRA offsets yourself. The only difference is that once the adapter is active, there is no way to disable it until the sequence ends.
 
 #### Choice of invocation sequence and SFT design
 
@@ -1143,6 +1198,13 @@ To encode general knowledge, GenKnowSub subtracts the average of the provided ge
 #### LoftQConfig
 
 [[autodoc]] tuners.lora.config.LoftQConfig
+
+
+### PiSSA
+
+#### replace_lora_weights_pissa
+
+[[autodoc]] utils.loftq_utils.replace_lora_weights_pissa
 
 
 ### Eva

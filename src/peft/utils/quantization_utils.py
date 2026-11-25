@@ -14,6 +14,7 @@
 
 import copy
 import operator
+import warnings
 from abc import ABC
 from typing import Any, Literal
 
@@ -39,6 +40,18 @@ from peft.utils.other import is_gptqmodel_awq_layer
 
 # extend if needed
 LayerType = Literal["linear", "embedding", "conv2d"]
+
+
+# TODO: Remove the EETQ, AQLM, and HQQ deprecation warning in PEFT v1.2.
+def warn_deprecated_quantization(backend_name: str) -> None:
+    warnings.warn(
+        f"{backend_name} support is deprecated and will be removed in PEFT v1.2 since it is barely used. "
+        f"Pin `peft<1.2` if you use {backend_name}, but we recommend bitsandbytes, the best-supported quantization "
+        f"backend in PEFT. If you still need {backend_name} support, please open an issue at "
+        "https://github.com/huggingface/peft/issues.",
+        FutureWarning,
+        stacklevel=2,
+    )
 
 
 class QuantizationBackend(ABC):
@@ -179,6 +192,7 @@ class Bnb4bitBackend(QuantizationBackend):
         return x.clone()
 
 
+# TODO: Remove the HQQ backend in PEFT v1.2.
 class HqqBackend(QuantizationBackend):
     """Backend for HQQ quantized layers (`hqq.core.quantize.HQQLinear`)."""
 
@@ -272,11 +286,12 @@ def resolve_quantization_backend(base_layer: nn.Module, **kwargs) -> Quantizatio
         if isinstance(base_layer, bnb.nn.Linear4bit):
             return Bnb4bitBackend()
 
-    # HQQ
+    # TODO: Remove HQQ dispatch in PEFT v1.2.
     if is_hqq_available():
         from hqq.core.quantize import HQQLinear
 
         if isinstance(base_layer, HQQLinear):
+            warn_deprecated_quantization("HQQ")
             return HqqBackend()
 
     # torchao
@@ -300,18 +315,20 @@ def resolve_quantization_backend(base_layer: nn.Module, **kwargs) -> Quantizatio
                     backend.supports_merge = False
             return backend
 
-    # AQLM
+    # TODO: Remove AQLM dispatch in PEFT v1.2.
     if is_aqlm_available():
         from aqlm import QuantizedLinear
 
         if isinstance(base_layer, QuantizedLinear):
+            warn_deprecated_quantization("AQLM")
             return ForwardOnlyQuantizationBackend("aqlm")
 
-    # EETQ
+    # TODO: Remove EETQ dispatch in PEFT v1.2.
     if is_eetq_available():
         from eetq import EetqLinear
 
         if isinstance(base_layer, EetqLinear):
+            warn_deprecated_quantization("EETQ")
             return ForwardOnlyQuantizationBackend("eetq")
 
     # GPTQ (via gptqmodel)

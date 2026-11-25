@@ -29,7 +29,9 @@ from peft import (
     load_peft_weights,
     prompt_embeddings_from_past_key_values,
 )
+from peft.import_utils import get_transformers_cache_name
 from peft.tuners import PrefixTuningConfig
+from peft.utils import activation_checkpointing_enable
 
 from .testing_utils import hub_online_once
 
@@ -76,7 +78,7 @@ def test_cartridge_offsets_position_ids_in_forward(monkeypatch, base_model):
     assert torch.equal(captured["position_ids"], position_ids + peft_config.num_virtual_tokens)
 
 
-def test_cartridge_prefill_4d_mask_uses_cache_position(monkeypatch, base_model):
+def test_cartridge_prefill_4d_mask(monkeypatch, base_model):
     base = base_model
     peft_config = CartridgeConfig(num_virtual_tokens=4, num_frozen_tokens=1, task_type="CAUSAL_LM")
     model = get_peft_model(base, peft_config)
@@ -86,15 +88,13 @@ def test_cartridge_prefill_4d_mask_uses_cache_position(monkeypatch, base_model):
     def fake_create_attention_mask(
         model,
         *,
-        model_input,
         attention_mask,
         past_key_values,
-        cache_position,
         batch_size,
         sequence_length,
         position_ids,
     ):
-        captured["cache_position"] = cache_position
+        captured["attention_mask"] = attention_mask
         return attention_mask
 
     # NOTE: this replaces create_attention_mask at its import location inside peft.peft_model; if the 4d mask handling
@@ -112,14 +112,16 @@ def test_cartridge_prefill_4d_mask_uses_cache_position(monkeypatch, base_model):
             "input_ids": input_ids,
             "attention_mask": attention_mask_4d,
             "cache_position": cache_position,
-            "past_key_values": None,
+            get_transformers_cache_name(): None,
         }
 
     model.base_model_prepare_inputs_for_generation = fake_prepare_inputs_for_generation
-    _ = model.prepare_inputs_for_generation(input_ids)
+    model_kwargs = model.prepare_inputs_for_generation(input_ids)
 
-    assert captured["cache_position"] is not None
-    assert torch.equal(captured["cache_position"], cache_position)
+    assert captured["attention_mask"].shape == (1, input_ids.shape[1] + peft_config.num_virtual_tokens)
+    assert torch.equal(
+        model_kwargs["cache_position"], torch.arange(input_ids.shape[1]) + peft_config.num_virtual_tokens
+    )
 
 
 @pytest.mark.parametrize("num_frozen_tokens", [0, 2])
@@ -176,7 +178,7 @@ def test_cartridge_init_from_past_key_values_and_compose(tmp_path, base_model, m
     with model.disable_adapter():
         outputs = model(input_ids=input_ids, use_cache=True)
     prompt_embeddings = initialize_kv_prefix_from_past_key_values(
-        model, past_key_values=outputs.past_key_values, num_virtual_tokens=4
+        model, past_key_values=getattr(outputs, get_transformers_cache_name()), num_virtual_tokens=4
     )
     assert prompt_embeddings.shape[0] == 4
     assert model.prompt_encoder[model.active_adapter].weight.device == prompt_embeddings.device
@@ -193,7 +195,7 @@ def test_cartridge_init_from_past_key_values_and_compose(tmp_path, base_model, m
     with model2.disable_adapter():
         outputs2 = model2(input_ids=input_ids, use_cache=True)
     _ = initialize_kv_prefix_from_past_key_values(
-        model2, past_key_values=outputs2.past_key_values, num_virtual_tokens=4
+        model2, past_key_values=getattr(outputs2, get_transformers_cache_name()), num_virtual_tokens=4
     )
     model2.save_pretrained(a2)
 
@@ -214,11 +216,11 @@ def test_cartridge_prompt_embeddings_from_past_key_values_matches_init(base_mode
     with model.disable_adapter():
         outputs = model(input_ids=input_ids, use_cache=True)
 
-    pe = prompt_embeddings_from_past_key_values(outputs.past_key_values, num_virtual_tokens=4)
+    pe = prompt_embeddings_from_past_key_values(getattr(outputs, get_transformers_cache_name()), num_virtual_tokens=4)
     assert pe.shape[0] == 4
 
     pe2 = initialize_kv_prefix_from_past_key_values(
-        model, past_key_values=outputs.past_key_values, num_virtual_tokens=4
+        model, past_key_values=getattr(outputs, get_transformers_cache_name()), num_virtual_tokens=4
     )
     assert pe.device == pe2.device
     assert torch.allclose(pe, pe2)
@@ -252,7 +254,7 @@ def test_cartridge_inference_mode_disables_grads_and_forward_works(num_frozen_to
 
 def test_cartridge_gradient_checkpointing_raises(base_model):
     base = base_model
-    base.gradient_checkpointing_enable()
+    activation_checkpointing_enable(base)
     peft_config = CartridgeConfig(num_virtual_tokens=4, num_frozen_tokens=0, task_type="CAUSAL_LM")
 
     with pytest.raises(ValueError, match="does not work with gradient checkpointing"):
@@ -268,9 +270,9 @@ def test_prefix_tuning_can_be_initialized_from_past_key_values_when_no_projectio
     with model.disable_adapter():
         outputs = model(input_ids=input_ids, use_cache=True)
 
-    pe = prompt_embeddings_from_past_key_values(outputs.past_key_values, num_virtual_tokens=4)
+    pe = prompt_embeddings_from_past_key_values(getattr(outputs, get_transformers_cache_name()), num_virtual_tokens=4)
     pe2 = initialize_kv_prefix_from_past_key_values(
-        model, past_key_values=outputs.past_key_values, num_virtual_tokens=4
+        model, past_key_values=getattr(outputs, get_transformers_cache_name()), num_virtual_tokens=4
     )
     assert pe.device == pe2.device
     assert torch.allclose(pe, pe2)

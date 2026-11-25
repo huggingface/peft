@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import json
-import platform
 import tempfile
 from unittest.mock import Mock, call, patch
 
@@ -52,6 +51,7 @@ from peft import (
     MultitaskPromptTuningConfig,
     OFTConfig,
     OSFConfig,
+    PacaConfig,
     PeftModel,
     PrefixTuningConfig,
     PromptEmbedding,
@@ -73,8 +73,15 @@ from peft import (
     WaveFTConfig,
     get_peft_model,
 )
+from peft.import_utils import get_transformers_cache_name
+from peft.utils import activation_checkpointing_enable
 
-from .testing_common import PeftCommonTester, skip_non_prompt_learning
+from .testing_common import (
+    CONV1D_UNSUPPORTED_CONFIGS,
+    PeftCommonTester,
+    _skip_if_merging_not_supported,
+    skip_non_prompt_learning,
+)
 from .testing_utils import device_count, hub_online_once, load_dataset_english_quotes, set_init_weights_false
 
 
@@ -83,7 +90,7 @@ PEFT_DECODER_MODELS_TO_TEST = [
     "peft-internal-testing/tiny-random-OPTForCausalLM",
     "peft-internal-testing/tiny-random-GPT2LMHeadModel",
     "peft-internal-testing/tiny-random-GPTJForCausalLM",
-    "trl-internal-testing/tiny-random-LlamaForCausalLM",
+    "peft-internal-testing/tiny-random-LlamaForCausalLM",
     "peft-internal-testing/tiny-dummy-qwen2",
     "hf-internal-testing/tiny-random-Gemma3ForCausalLM",
 ]
@@ -93,7 +100,7 @@ SMALL_GRID_MODELS = [
     "peft-internal-testing/tiny-random-OPTForCausalLM",
     "hf-internal-testing/tiny-random-MistralForCausalLM",
     "peft-internal-testing/tiny-dummy-qwen2",
-    "trl-internal-testing/tiny-random-LlamaForCausalLM",
+    "peft-internal-testing/tiny-random-LlamaForCausalLM",
 ]
 
 
@@ -338,6 +345,14 @@ ALL_CONFIGS = [
         },
     ),
     (
+        PacaConfig,
+        {
+            "r": 2,
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+        },
+    ),
+    (
         ShiraConfig,
         {
             "r": 1,
@@ -454,24 +469,8 @@ ALL_CONFIGS = [
 
 
 def _skip_if_not_conv1d_supported(model_id, config_cls):
-    if "GPT2LMHeadModel" in model_id and config_cls in [
-        BeftConfig,
-        BOFTConfig,
-        GloraConfig,
-        HRAConfig,
-        OFTConfig,
-        OSFConfig,
-        RoadConfig,
-        ShiraConfig,
-        SupertuningConfig,
-        C3AConfig,
-        MissConfig,
-        DeloraConfig,
-        PsoftConfig,
-    ]:
-        pytest.skip(
-            "Skipping Beft/BOFT/GLoRA/HRA/OFT/Road/SHiRA/Supertuning/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel"
-        )
+    if "GPT2LMHeadModel" in model_id and config_cls in CONV1D_UNSUPPORTED_CONFIGS:
+        pytest.skip("This PEFT method does not support Conv1D layers, skipping this test.")
 
 
 def _skip_alora_no_activation(config_cls, config_kwargs):
@@ -487,9 +486,10 @@ def _skip_osf_disable_adapter_test(config_cls):
 
 
 def check_beft_config(config_cls, model_id, config_kwargs):
-    if isinstance(config_cls, BeftConfig):
+    if config_cls != BeftConfig:
         return
-    elif "gptj" in model_id.lower():
+
+    if "gptj" in model_id.lower():
         config_kwargs["target_modules"] = ["fc_out"]
     elif "llama" in model_id.lower():
         pytest.skip("Skip tests for Llama models because layers have no bias term")
@@ -663,6 +663,13 @@ class TestDecoderModels(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_load_adapter_no_warning(self, model_id, config_cls, config_kwargs, recwarn, tmp_path):
+        _skip_if_not_conv1d_supported(model_id, config_cls)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_load_no_warning(model_id, config_cls, config_kwargs.copy(), recwarn, tmp_path)
+
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_pickle(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
@@ -784,6 +791,18 @@ class TestDecoderModels(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         check_beft_config(config_cls, model_id, config_kwargs)
         self._test_merge_layers_nan(model_id, config_cls, config_kwargs.copy())
+
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16], ids=["fp32", "bf16", "fp16"])
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_get_additive_delta_corresponds_to_merged_weight(self, model_id, config_cls, config_kwargs, dtype):
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        check_beft_config(config_cls, model_id, config_kwargs)
+        self._test_get_additive_delta_corresponds_to_merged_weight(
+            model_id, config_cls, config_kwargs.copy(), dtype=dtype
+        )
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
@@ -970,18 +989,10 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_passing_input_embeds_works(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
-        if (platform.system() == "Darwin") and (config_cls == PrefixTuningConfig):
-            # the error is:
-            # > RuntimeError: unsupported operation: more than one element of the written-to tensor refers to a single
-            # > memory location. Please clone() the tensor before performing the operation.
-            # in transformers sdpa_mask_older_torch. As we (currently) cannot upgrade PyTorch on MacOS GH runners, we're
-            # stuck with this error.
-            # TODO: remove if torch can be upgraded on MacOS or if MacOS CI is removed
-            pytest.skip("Prefix tuning fails on MacOS in this case, not worth fixing")
         self._test_passing_input_embeds_works("", model_id, config_cls, config_kwargs.copy())
 
     def test_lora_layer_replication(self):
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         config_kwargs = {
             "target_modules": ["down_proj", "up_proj"],
             "task_type": "CAUSAL_LM",
@@ -1031,7 +1042,7 @@ class TestDecoderModels(PeftCommonTester):
 
     def test_prefix_tuning_qwen3_with_grouped_query_attention(self):
         # See 2881, fixes a bug with handling GQA
-        model_id = "trl-internal-testing/tiny-Qwen3ForCausalLM"
+        model_id = "peft-internal-testing/tiny-Qwen3ForCausalLM"
         with hub_online_once(model_id):
             base_model = AutoModelForCausalLM.from_pretrained(model_id)
             peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM")
@@ -1040,9 +1051,42 @@ class TestDecoderModels(PeftCommonTester):
             # does not raise
             model(x)
 
+    def test_prefix_tuning_cpu_and_disk_offload(self, tmp_path):
+        # See 3619: when the device map only contains CPU and disk entries, there is no accelerator to place the prefix
+        # cache on, and the forward pass of the offloaded model used to raise a StopIteration in get_layer_device_map.
+        # Comparing its logits with those of the non-offloaded model is only a sanity check on top of that.
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+        device_map = {
+            "model.decoder.embed_tokens": "cpu",
+            "model.decoder.embed_positions": "cpu",
+            "model.decoder.final_layer_norm": "cpu",
+            "model.decoder.layers.0": "cpu",
+            "model.decoder.layers.1": "cpu",
+            "model.decoder.layers.2": "cpu",
+            "model.decoder.layers.3": "disk",
+            "model.decoder.layers.4": "disk",
+            "lm_head": "cpu",
+        }
+        with hub_online_once(model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(model_id)
+            offloaded_base_model = AutoModelForCausalLM.from_pretrained(
+                model_id, device_map=device_map, offload_folder=tmp_path
+            )
+        model = get_peft_model(base_model, PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM"))
+        offloaded_model = get_peft_model(
+            offloaded_base_model, PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM")
+        )
+        offloaded_model.prompt_encoder.load_state_dict(model.prompt_encoder.state_dict())
+
+        x = torch.tensor([[1, 2, 3]])
+        with torch.no_grad():
+            expected = model(x).logits
+            actual = offloaded_model(x).logits  # raised StopIteration before the fix
+        torch.testing.assert_close(actual, expected)
+
     def test_prefix_tuning_offsets_position_ids_in_forward(self, monkeypatch):
         # Regression: RoPE models need position_ids offset for prefix tuning.
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             base = AutoModelForCausalLM.from_pretrained(model_id)
         peft_config = PrefixTuningConfig(num_virtual_tokens=4, task_type="CAUSAL_LM", prefix_projection=False)
@@ -1073,7 +1117,7 @@ class TestDecoderModels(PeftCommonTester):
     def test_prompt_learning_position_ids_warns_and_drops(self, monkeypatch):
         # Counterpart to test_prefix_tuning_offsets_position_ids_in_forward for prompt learning methods that extend
         # inputs_embeds instead of the KV cache: passing position_ids is not supported, PEFT warns and removes them.
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             base = AutoModelForCausalLM.from_pretrained(model_id)
         peft_config = PromptTuningConfig(num_virtual_tokens=4, task_type="CAUSAL_LM")
@@ -1156,7 +1200,7 @@ class TestDecoderModels(PeftCommonTester):
                 "input_ids": input_ids,
                 "attention_mask": attention_mask.clone(),
                 "cache_position": cache_position.clone(),
-                "past_key_values": None,
+                get_transformers_cache_name(): None,
             }
 
         model.base_model_prepare_inputs_for_generation = fake_prepare_inputs_for_generation
@@ -1190,7 +1234,7 @@ class TestDecoderModels(PeftCommonTester):
                 "input_ids": input_ids,
                 "attention_mask": attention_mask.clone(),
                 "cache_position": cache_position.clone(),
-                "past_key_values": None,
+                get_transformers_cache_name(): None,
             }
 
         model.base_model_prepare_inputs_for_generation = fake_prepare_inputs_for_generation
@@ -1198,9 +1242,10 @@ class TestDecoderModels(PeftCommonTester):
 
         assert torch.equal(model_kwargs["input_ids"], input_ids)
         assert "inputs_embeds" not in model_kwargs
-        past_key_values = model_kwargs["past_key_values"]
+        past_key_values = model_kwargs[get_transformers_cache_name()]
         assert isinstance(past_key_values, Cache)
         assert past_key_values.get_seq_length() == num_virtual_tokens
+        assert {"cache", "past_key_values"}.intersection(model_kwargs) == {get_transformers_cache_name()}
         assert model_kwargs["attention_mask"].shape == (2, num_virtual_tokens + input_ids.shape[1])
         # the cache already contains the virtual tokens, so the cache position of the input starts after them
         assert torch.equal(model_kwargs["cache_position"], cache_position + num_virtual_tokens)
@@ -1218,7 +1263,7 @@ class TestDecoderModels(PeftCommonTester):
         input_ids = torch.tensor([[1, 2, 3], [4, 5, 6]])
         with torch.no_grad():
             outputs = model(input_ids=input_ids, use_cache=True)
-        past_key_values = outputs.past_key_values
+        past_key_values = getattr(outputs, get_transformers_cache_name())
         assert past_key_values.get_seq_length() == num_virtual_tokens + input_ids.shape[1]
 
         # simulate the next decoding step: one new token, the 2d attention mask covers the tokens seen so far
@@ -1231,7 +1276,7 @@ class TestDecoderModels(PeftCommonTester):
                 "input_ids": next_input_ids,
                 "attention_mask": attention_mask,
                 "cache_position": cache_position,
-                "past_key_values": past_key_values,
+                get_transformers_cache_name(): past_key_values,
             }
 
         model.base_model_prepare_inputs_for_generation = fake_prepare_inputs_for_generation
@@ -1239,7 +1284,8 @@ class TestDecoderModels(PeftCommonTester):
 
         assert torch.equal(model_kwargs["input_ids"], next_input_ids[:, -1:])
         assert "inputs_embeds" not in model_kwargs
-        assert model_kwargs["past_key_values"] is past_key_values
+        assert model_kwargs[get_transformers_cache_name()] is past_key_values
+        assert {"cache", "past_key_values"}.intersection(model_kwargs) == {get_transformers_cache_name()}
         assert model_kwargs["attention_mask"].shape == (2, num_virtual_tokens + next_input_ids.shape[1])
         assert "cache_position" not in model_kwargs
 
@@ -1262,7 +1308,7 @@ class TestDecoderModels(PeftCommonTester):
                 "input_ids": input_ids,
                 "attention_mask": {"full_attention": attention_mask.clone()},
                 "cache_position": cache_position.clone(),
-                "past_key_values": None,
+                get_transformers_cache_name(): None,
             }
 
         model.base_model_prepare_inputs_for_generation = fake_prepare_single_mask
@@ -1278,7 +1324,7 @@ class TestDecoderModels(PeftCommonTester):
                     "sliding_attention": attention_mask.clone(),
                 },
                 "cache_position": cache_position.clone(),
-                "past_key_values": None,
+                get_transformers_cache_name(): None,
             }
 
         model.base_model_prepare_inputs_for_generation = fake_prepare_multiple_masks
@@ -1341,7 +1387,7 @@ class TestDecoderModels(PeftCommonTester):
                     "input_ids": input_ids,
                     "attention_mask": attention_mask_4d,
                     "cache_position": cache_position.clone(),
-                    "past_key_values": DynamicCache(),
+                    get_transformers_cache_name(): DynamicCache(),
                 }
 
             model.base_model_prepare_inputs_for_generation = fake_prepare_inputs_for_generation
@@ -1416,7 +1462,7 @@ class TestDecoderModels(PeftCommonTester):
             pytest.skip("Skip on multi-GPU setups")
         peft_config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
         base_model = self.transformers_class.from_pretrained(model_id)
-        base_model.gradient_checkpointing_enable()
+        activation_checkpointing_enable(base_model)
 
         try:
             model = get_peft_model(base_model, peft_config)
@@ -1459,7 +1505,7 @@ class TestDecoderModels(PeftCommonTester):
         ],
     )
     def test_save_pretrained_targeting_lora_to_embedding_layer(self, save_embedding_layers, tmp_path, peft_config):
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
 
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
@@ -1566,6 +1612,27 @@ class TestDecoderModels(PeftCommonTester):
             with pytest.raises(TypeError, match=msg):
                 model.set_requires_grad(adapter_names="adpater0")
 
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_merge_adapter_prompt_learning_raises(self, config_cls, config_kwargs):
+        # Test that for prompt learning, calling merge_adapter or unmerge_adapter raises an error with an appropriate
+        # error message instead of an AttributeError from the underlying Transformers model.
+        model_id = PEFT_DECODER_MODELS_TO_TEST[0]  # it's enough to test this with one model
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        if not config.is_prompt_learning:
+            pytest.skip("This test is only for prompt learning methods.")
+
+        with hub_online_once(model_id + config_kwargs.get("tokenizer_name_or_path", "")):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            model = get_peft_model(model, config)
+            msg = "Merging is not supported for prompt learning methods like"
+            with pytest.raises(TypeError, match=msg):
+                model.merge_adapter()
+            with pytest.raises(TypeError, match=msg):
+                model.unmerge_adapter()
+
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_lora_conversion(self, model_id, config_cls, config_kwargs):
@@ -1587,7 +1654,7 @@ class TestDecoderModels(PeftCommonTester):
 
     def test_merge_and_unload_fixes_tie_word_embeddings_config(self):
         # See https://github.com/huggingface/transformers/issues/45127
-        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id, tie_word_embeddings=True)
             assert model.config.tie_word_embeddings

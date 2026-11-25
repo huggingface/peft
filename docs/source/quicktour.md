@@ -113,7 +113,7 @@ Model:
 Environment:
   peft: 0.21.0, transformers: 5.18.0.dev0, torch: 2.14.0+cu130, Python: 3.13.9
 Runtime:
-  training: True, devices: cpu, dtypes: bfloat16=1,235,814,400, float32=851,968, gradient checkpointing: False
+  training: True, devices: cpu, dtypes: bfloat16=1,235,814,400, float32=851,968, activation checkpointing: False
 Parameters:
   trainable: 851,968, total: 1,236,666,368, percent trainable: 0.0689%, adapter layers: 32
 State:

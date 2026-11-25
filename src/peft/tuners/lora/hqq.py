@@ -22,11 +22,13 @@ import torch
 from peft.import_utils import is_hqq_available
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.other import transpose
+from peft.utils.quantization_utils import warn_deprecated_quantization
 
 from .config import LoraConfig
 from .layer import LoraLayer, LoraVariant
 
 
+# TODO: Remove this HQQ integration in PEFT v1.2.
 if is_hqq_available():
     from hqq.core.quantize import HQQLinear
 
@@ -241,6 +243,7 @@ def dispatch_hqq(target: torch.nn.Module, adapter_name: str, config: LoraConfig,
         target_base_layer = target
 
     if is_hqq_available() and isinstance(target_base_layer, HQQLinear):
+        warn_deprecated_quantization("HQQ")
         new_module = HqqLoraLinear(target_base_layer, adapter_name, config=config, **kwargs)
 
     return new_module

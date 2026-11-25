@@ -97,6 +97,8 @@ You're all set for training with whichever training method you prefer!
 
 [LoftQ](https://hf.co/papers/2310.08659) initializes LoRA weights such that the quantization error is minimized, and it can improve performance when training quantized models. To get started, follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/loftq_finetuning).
 
+LoftQ is only applied to linear layers, including those targeted via `target_parameters`. Embedding and convolutional layers are not supported and use the default LoRA initialization instead. `nn.MultiheadAttention` layers are not supported and raise an error.
+
 In general, for LoftQ to work best, it is recommended to target as many layers with LoRA as possible, since those not targeted cannot have LoftQ applied. This means that passing `LoraConfig(..., target_modules="all-linear")` will most likely give the best results. Also, you should use `nf4` as quant type in your quantization config when using 4bit quantization, i.e. `BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4")`.
 
 In general, for LoftQ to work best, it is recommended to target as many layers with LoRA as possible, since those not targeted cannot have LoftQ applied. This means that passing `LoraConfig(..., target_modules="all-linear")` will most likely give the best results. Also, you should use `nf4` as quant type in your quantization config when using 4bit quantization, i.e. `BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4")`.
@@ -135,6 +137,34 @@ At the moment, `replace_lora_weights_loftq` has these additional limitations:
 - Model files must be stored as a `safetensors` file.
 - Only bitsandbytes 4bit quantization is supported.
 
+### PiSSA initialization
+
+[PiSSA](https://hf.co/papers/2404.02948) cannot be applied to quantized weights. It is normally applied to the non-quantized base model, then the resulting residual is saved and loaded with quantization, which requires the whole non-quantized model to fit into memory.
+
+As an alternative, `replace_lora_weights_pissa` takes a quantized PEFT model and streams the weights of the non-quantized model from the weights file, one layer at a time. Each layer's LoRA weights are initialized with PiSSA and its base weight is replaced by the re-quantized residual.
+
+```python
+from peft import replace_lora_weights_pissa
+from transformers import BitsAndBytesConfig
+
+bnb_config = BitsAndBytesConfig(load_in_4bit=True, ...)
+base_model = AutoModelForCausalLM.from_pretrained(..., quantization_config=bnb_config)
+# note: don't pass init_lora_weights="pissa" here!
+lora_config = LoraConfig(task_type="CAUSAL_LM")
+peft_model = get_peft_model(base_model, lora_config)
+replace_lora_weights_pissa(peft_model, init_lora_weights="pissa_niter_4")
+```
+
+Both `"pissa"` and `"pissa_niter_[number of iters]"` are supported.
+
+Since the base weights are modified, saving only the adapter is not enough to restore the model. As for other PiSSA initializations, either save the base model as well or convert the trained adapter using the `path_initial_model_for_weight_conversion` argument of [`~PeftModel.save_pretrained`].
+
+At the moment, `replace_lora_weights_pissa` has these additional limitations:
+
+- Model files must be stored as a `safetensors` file.
+- Only bitsandbytes 4bit quantization is supported.
+- LoRA variants such as DoRA are not supported.
+
 ### QLoRA-style training
 
 QLoRA adds trainable weights to all the linear layers in the transformer architecture. Since the attribute names for these linear layers can vary across architectures, set `target_modules` to `"all-linear"` to add LoRA to all the linear layers:
@@ -169,7 +199,11 @@ tokenizer.save_pretrained("./opt-125m-gptq")
 
 Once quantized, you can post-train GPTQ models with PEFT APIs.
 
+<!-- TODO: Remove the AQLM, EETQ, and HQQ sections and the AQLM introduction bullet in PEFT v1.2. -->
+
 ## AQLM quantization
+
+PEFT support for AQLM is deprecated and will be removed in v1.2. Pin `peft<1.2` if you still use AQLM, but we recommend to switch to bitsandbytes for new runs. Please open an issue on PEFT if you still use AQLM and want us to keep supporting it.
 
 Additive Quantization of Language Models ([AQLM](https://huggingface.co/papers/2401.06118)) is a Large Language Models compression method. It quantizes multiple weights together and takes advantage of interdependencies between them. AQLM represents groups of 8-16 weights as a sum of multiple vector codes. This allows it to compress models down to as low as 2-bit with considerably low accuracy losses.
 
@@ -191,6 +225,8 @@ quantized_model = get_peft_model(quantized_model, peft_config)
 You can refer to the [Google Colab](https://colab.research.google.com/drive/12GTp1FCj5_0SnnNQH18h_2XFh9vS_guX?usp=sharing) example for an overview of AQLM+LoRA finetuning.
 
 ## EETQ quantization
+
+PEFT support for EETQ is deprecated and will be removed in v1.2. Pin `peft<1.2` if you still use EETQ, but we recommend to switch to bitsandbytes for new runs. Please open an issue on PEFT if you still use EETQ and want us to keep supporting it.
 
 You can also perform LoRA fine-tuning on EETQ quantized models. [EETQ](https://github.com/NetEase-FuXi/EETQ) package offers simple and efficient way to perform 8-bit quantization, which is claimed to be faster than the `LLM.int8()` algorithm. First, make sure that you have a transformers version that is compatible with EETQ (e.g. by installing it from latest pypi or from source).
 
@@ -227,6 +263,8 @@ model = get_peft_model(model, config)
 ```
 
 ## HQQ quantization
+
+PEFT support for HQQ is deprecated and will be removed in v1.2. Pin `peft<1.2` if you still use HQQ, but we recommend to switch to bitsandbytes for new runs. Please open an issue on PEFT if you still use HQQ and want us to keep supporting it.
 
 The models that are quantized using Half-Quadratic Quantization of Large Machine Learning Models ([HQQ](https://mobiusml.github.io/hqq_blog/)) support LoRA adapter tuning. To tune the quantized model, you'll need to install the `hqq` library with: `pip install hqq`.
 

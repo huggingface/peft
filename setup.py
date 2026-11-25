@@ -15,7 +15,7 @@
 from setuptools import find_packages, setup
 
 
-VERSION = "0.21.3.dev0"
+VERSION = "1.0.0.dev0"
 
 extras = {}
 extras["quality"] = [
@@ -70,8 +70,8 @@ setup(
         "packaging>=20.0",
         "psutil",
         "pyyaml",
-        "torch>=1.13.0",
-        "transformers",
+        "torch>=2.6.0",
+        "transformers>=5.6.0",
         "tqdm",
         "accelerate>=0.21.0",
         "safetensors",
