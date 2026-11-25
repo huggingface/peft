@@ -2961,6 +2961,24 @@ class TestPeftCustomModel(PeftCommonTester):
         config_kwargs = {"target_modules": ["lin0"], **config_kwargs}
         self._test_get_merge_targets_returns_merged_tensors("MLP", GloraConfig, config_kwargs)
 
+    @pytest.mark.parametrize(
+        "config_cls, config_kwargs, expected",
+        [
+            (LoraConfig, {"lora_bias": True}, ["weight"]),
+            (IA3Config, {"feedforward_modules": []}, ["weight"]),
+            (RoadConfig, {"group_size": 2}, ["weight"]),
+            (AdamssConfig, {"r": 8}, ["weight"]),
+            (GloraConfig, {}, ["weight"]),
+            (BeftConfig, {}, []),
+        ],
+        ids=["LoRA", "IA3", "RoAd", "AdaMSS", "GLoRA", "BEFT"],
+    )
+    def test_get_merge_targets_without_bias(self, config_cls, config_kwargs, expected):
+        # get_merge_targets must not return the bias if the base layer has none
+        model = get_peft_model(MLP(bias=False), config_cls(target_modules=["lin0"], **config_kwargs))
+        layer = model.base_model.model.lin0
+        assert layer.get_merge_targets(layer.active_adapters) == expected
+
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_safe_merge_non_finite_bias_leaves_base_layer_unchanged(
         self, test_name, model_id, config_cls, config_kwargs

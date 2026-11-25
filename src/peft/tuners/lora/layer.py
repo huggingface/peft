@@ -927,7 +927,8 @@ class LoraLayer(BaseTunerLayer):
 
     def get_merge_targets(self, adapter_names: list[str]) -> list[str]:
         # with lora_bias, the bias of lora_B is merged into the bias of the base layer
-        if any(self.lora_bias.get(adapter_name, False) for adapter_name in adapter_names):
+        has_bias = getattr(self.get_base_layer(), "bias", None) is not None
+        if has_bias and any(self.lora_bias.get(adapter_name, False) for adapter_name in adapter_names):
             return ["weight", "bias"]
         return ["weight"]
 

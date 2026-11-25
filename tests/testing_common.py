@@ -1219,9 +1219,7 @@ class PeftCommonTester:
 
         candidates = []
         for layer in self._get_mergeable_tuner_layers(model):
-            base_layer = layer.get_base_layer()
             targets = layer.get_merge_targets(layer.active_adapters)
-            targets = [target for target in targets if getattr(base_layer, target, None) is not None]
             if targets:
                 candidates.append((layer, targets))
         if not candidates:
@@ -1290,9 +1288,7 @@ class PeftCommonTester:
                 base_layer = layer.get_base_layer()
                 tensors = {name: param.detach().clone() for name, param in base_layer.named_parameters(recurse=False)}
                 tensors_before[layer] = (base_layer, tensors)
-                # get_merge_targets can return names that the base layer doesn't have, like "bias" for a layer without
-                # bias, so restrict the expected targets to the tensors that the base layer has
-                expected_targets[layer] = set(layer.get_merge_targets(layer.active_adapters)) & set(tensors)
+                expected_targets[layer] = set(layer.get_merge_targets(layer.active_adapters))
         if not tensors_before:
             pytest.skip("No tuner layers in this model.")
 

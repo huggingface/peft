@@ -76,9 +76,9 @@ class IA3Layer(BaseTunerLayer):
 
     def get_merge_targets(self, adapter_names: list[str]) -> list[str]:
         # for layers that are not feedforward, the output is scaled, which includes the bias
-        if self.is_feedforward:
-            return ["weight"]
-        return ["weight", "bias"]
+        if not self.is_feedforward and getattr(self.get_base_layer(), "bias", None) is not None:
+            return ["weight", "bias"]
+        return ["weight"]
 
 
 class Linear(nn.Module, IA3Layer):

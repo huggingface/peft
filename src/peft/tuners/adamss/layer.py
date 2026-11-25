@@ -309,8 +309,10 @@ class AdamssLayer(BaseTunerLayer):
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def get_merge_targets(self, adapter_names: list[str]) -> list[str]:
-        # the bias is updated as well (if the base layer has one)
-        return ["weight", "bias"]
+        # the bias is updated as well
+        if getattr(self.get_base_layer(), "bias", None) is not None:
+            return ["weight", "bias"]
+        return ["weight"]
 
 
 class Linear(nn.Module, AdamssLayer):
