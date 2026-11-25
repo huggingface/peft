@@ -25,14 +25,12 @@ from typing import Literal, Optional, Union
 
 import packaging.version
 import torch
-import transformers
 from torch import nn
 
 from peft.import_utils import (
     is_bnb_4bit_available,
     is_bnb_available,
     is_transformers_dtensor_tp,
-    is_transformers_ge_v5_4_0,
     is_transformers_ge_v5_17_0,
 )
 from peft.tuners.tuners_utils import (
@@ -63,7 +61,16 @@ from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .inc import dispatch_inc
-from .layer import Embedding, LoraLayer, MultiheadAttention, ParamWrapper, _ConvNd, dispatch_default
+from .layer import (
+    _LINEAR_SUPPORTED_TP_PLANS,
+    _SUPPORTED_TP_PLANS,
+    Embedding,
+    LoraLayer,
+    MultiheadAttention,
+    ParamWrapper,
+    _ConvNd,
+    dispatch_default,
+)
 from .te import dispatch_transformer_engine
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
@@ -130,10 +137,13 @@ def get_tp_plan_and_mesh(model, current_key: str):
 def add_lora_tp_hooks_dtensor(tp_module: nn.Module, tp_plan_name: str, device_mesh, *, module_name: str) -> None:
     from transformers.distributed.tensor_parallel import ALL_PARALLEL_STYLES
 
-    style = ALL_PARALLEL_STYLES[tp_plan_name]
-    if tp_plan_name not in ("colwise", "rowwise"):
-        raise ValueError(f"Unsupported TP plan {tp_plan_name} for LoRA: only colwise and rowwise are supported.")
+    if tp_plan_name not in _LINEAR_SUPPORTED_TP_PLANS:
+        raise ValueError(
+            f"Unsupported TP plan {tp_plan_name} for LoRA linear hooks. "
+            f"Supported plans: {', '.join(_LINEAR_SUPPORTED_TP_PLANS)}."
+        )
 
+    style = ALL_PARALLEL_STYLES[tp_plan_name]
     for p_name, _ in list(tp_module.named_parameters(recurse=False)):
         style.validate_param(tp_module, p_name, device_mesh, parameter_name=f"{module_name}.{p_name}")
         style.shard_param(tp_module, p_name, device_mesh)
@@ -148,7 +158,7 @@ class LoraModel(BaseTuner):
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.
-        config ([`LoraConfig`]): The configuration of the Lora model.
+        peft_config ([`LoraConfig`]): The configuration of the Lora model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             Create empty adapter weights on meta device. Useful to speed up the loading process.
@@ -319,6 +329,7 @@ class LoraModel(BaseTuner):
         except AttributeError:
             pass
 
+        # TODO: Remove AQLM config handling in PEFT v1.2.
         quant_methods = ["gptq", "aqlm", "awq"]
         for quant_method in quant_methods:
             quantization_config = get_quantization_config(self.model, method=quant_method)
@@ -378,18 +389,8 @@ class LoraModel(BaseTuner):
 
         # If the module has a tp_plan, we add hooks to the LoRA layers to make sure they respect the plan
         if tp_plan is not None:
-            if not is_transformers_ge_v5_4_0:
-                raise RuntimeError(
-                    "The base model is tensor-parallel sharded but the installed version of Transformers does not "
-                    "support LoRA with Tensor Parallelism. Please upgrade to transformers >= 5.4.0."
-                )
-
             if not is_transformers_dtensor_tp:
-                from transformers.integrations.tensor_parallel import (
-                    add_tensor_parallel_hooks_to_module,
-                )
-
-            _SUPPORTED_TP_PLANS = ("colwise", "rowwise", "embedding_rowwise")
+                from transformers.integrations.tensor_parallel import add_tensor_parallel_hooks_to_module
 
             if tp_plan == "colwise_gather_output" and is_transformers_dtensor_tp:
                 # The input and output of the base layer (e.g. lm_head) are replicated, so the LoRA layers are
@@ -429,7 +430,7 @@ class LoraModel(BaseTuner):
                             tp_layer_name,
                             device_mesh,
                         )
-                else:  # embedding_rowwise
+                elif tp_plan == "embedding_rowwise":
                     # TP hooks are  handled in the `_embed` method in lora/layer.py where they are explicitly called.
                     # Here we simply register the TP plans.
                     tp_plan_keys.append(f"{generic_key}.base_layer.weight")
@@ -466,6 +467,7 @@ class LoraModel(BaseTuner):
                 if hasattr(child, "qweight"):
                     weight = child.qweight
                 elif hasattr(child, "W_q"):
+                    # TODO: Remove HQQ device placement in PEFT v1.2.
                     weight = child.W_q
                 elif hasattr(child, "weight"):
                     weight = child.weight
@@ -513,6 +515,7 @@ class LoraModel(BaseTuner):
 
             dispatchers.append(dispatch_bnb_4bit)
 
+        # TODO: Remove the EETQ, AQLM, and HQQ LoRA dispatchers in PEFT v1.2.
         dispatchers.extend(
             [
                 dispatch_eetq,
@@ -557,14 +560,6 @@ class LoraModel(BaseTuner):
         hook_handles = []
 
         if alora_offsets is not None:
-            # TODO: remove once transformers 4.52 is no longer supported. Note that 4.52.0 is yanked, so 4.52.1
-            # is the first 4.52 release.
-            transformers_lt_4_52 = packaging.version.parse(transformers.__version__) < packaging.version.parse(
-                "4.52.1"
-            )
-            if transformers_lt_4_52:
-                raise ValueError("Using aLoRA requires transformers >= 4.52.1.")
-
             from transformers.modeling_layers import GradientCheckpointingLayer
 
             for n, layer in self.named_modules():
@@ -1112,6 +1107,9 @@ class LoraModel(BaseTuner):
                 tensors_lora[name] = torch.cat(
                     [output_state_dict[name], -mutated_init_state_dict[".".join(name.split(".")[1:])]], dim=1
                 )
+            elif "lora_" not in name:
+                # weights that are not part of the LoRA update, e.g. modules_to_save, are kept as they are
+                tensors_lora[name] = output_state_dict[name]
 
         return tensors_lora
 

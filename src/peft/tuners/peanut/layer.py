@@ -158,7 +158,7 @@ class Linear(nn.Module, PeanutLayer):
             delta_w = delta_w + residuals[res_num - 1 - i]
 
         delta_w = peanut_B(delta_w)
-        return (delta_w * scaling).transpose(0, 1)
+        return delta_w.mul_(scaling).transpose(0, 1)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         base_weight = self.get_base_layer().weight

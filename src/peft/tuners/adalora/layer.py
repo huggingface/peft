@@ -15,10 +15,9 @@
 import warnings
 from typing import Any, Optional
 
-import packaging
 import torch
-import transformers
 from torch import nn
+from transformers.integrations import deepspeed_config
 
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import check_adapters_to_merge
@@ -26,12 +25,6 @@ from peft.utils import transpose
 from peft.utils.integrations import _skip_init_on_device
 
 from .config import AdaLoraConfig
-
-
-if packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.33.0"):
-    from transformers.integrations import deepspeed_config
-else:
-    from transformers.deepspeed import deepspeed_config
 
 
 class AdaLoraLayer(LoraLayer):
@@ -224,6 +217,8 @@ class SVDConv2d(nn.Module, AdaLoraLayer):
         inference_mode = config.inference_mode
         if r < 0:
             raise ValueError(f"`r` should be a positive integer or 0, but the value passed is {r}")
+        if self.get_base_layer().groups > 1:
+            raise ValueError("AdaLoRA does not support Conv2d layers with groups > 1.")
 
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
@@ -332,14 +327,7 @@ class SVDConv2d(nn.Module, AdaLoraLayer):
                 delta_w = (lora_B @ (lora_A * lora_E) * scaling / ranknum).reshape(base.weight.shape)
                 # Use in-place add so result keeps its original dtype (matches SVDLinear);
                 # otherwise result would be upcast to lora_A.dtype and break subsequent fp16/bf16 ops.
-                result += nn.functional.conv2d(
-                    dropout(x),
-                    delta_w,
-                    stride=base.stride,
-                    padding=base.padding,
-                    dilation=base.dilation,
-                    groups=base.groups,
-                )
+                result += base._conv_forward(dropout(x), delta_w, None)
         return result
 
     def __repr__(self) -> str:
@@ -352,7 +340,7 @@ class RankAllocator:
     The RankAllocator for AdaLoraModel. Paper: https://openreview.net/pdf?id=lq62uWRJjiY
 
     Args:
-        config ([`AdaLoraConfig`]): The configuration of the AdaLora model.
+        peft_config ([`AdaLoraConfig`]): The configuration of the AdaLora model.
         model: the model that we apply AdaLoRA to.
 
     """

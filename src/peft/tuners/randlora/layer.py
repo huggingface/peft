@@ -322,7 +322,7 @@ class Linear(nn.Linear, RandLoraLayer):
         output_tensor = transpose(update, self.fan_in_fan_out)
 
         scaling = self.scaling[adapter]
-        return output_tensor * scaling
+        return output_tensor.mul_(scaling)
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
@@ -347,6 +347,9 @@ class Linear(nn.Linear, RandLoraLayer):
 
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
         return True
+
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        return self.get_delta_weight(adapter_name)
 
     def __repr__(self) -> str:
         rep = super().__repr__()

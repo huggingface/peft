@@ -31,7 +31,7 @@ class GraloraModel(BaseTuner):
 
     Args:
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
-        config ([`GraloraConfig`]): The configuration of the Gralora model.
+        peft_config ([`GraloraConfig`]): The configuration of the Gralora model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
 
     Returns:

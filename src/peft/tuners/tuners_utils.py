@@ -27,13 +27,11 @@ from typing import Any, Optional, Union, overload
 import torch
 from accelerate.hooks import AlignDevicesHook
 from accelerate.utils import named_module_tensors, offload_state_dict
-from packaging import version
 from torch import nn
 from tqdm import tqdm
 from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
-from peft.import_utils import is_transformers_ge_v5
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, UPCAST_DTYPES
 from peft.utils.constants import (
@@ -44,7 +42,7 @@ from peft.utils.constants import (
     SEQ_CLS_HEAD_NAMES,
 )
 from peft.utils.error import NoMatchingPeftModuleError
-from peft.utils.integrations import TpMeshDimRegistry, init_empty_weights
+from peft.utils.integrations import TpMeshDimRegistry, init_empty_weights, remove_torch_wrapper_names
 from peft.utils.other import (
     AuxiliaryTrainingWrapper,
     ModulesToSaveWrapper,
@@ -71,8 +69,7 @@ warn_msg_weight_tying = (
     "or converting your model to formats other than safetensors. "
     "Check the discussion here: https://github.com/huggingface/peft/issues/2777"
 )
-_torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5.0")
-_torch_supports_distributed = _torch_supports_dtensor and torch.distributed.is_available()
+_torch_supports_distributed = torch.distributed.is_available()
 
 
 @contextmanager
@@ -173,24 +170,25 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     This function covers a broad range of layers, some of which the caller might not support. Therefore, just because
     this function returns a valid result does not imply that the layer type is supported.
     """
-    if isinstance(module, nn.Linear):
+    if isinstance(module, (nn.Linear, nn.Embedding)):
+        if isinstance(module, nn.Embedding):
+            in_features, out_features = module.num_embeddings, module.embedding_dim
+        else:
+            in_features, out_features = module.in_features, module.out_features
         if _torch_supports_distributed and isinstance(module.weight, torch.distributed.tensor.DTensor):
             # Transformers TP initializes full-shaped adapters and shards them with the TP hooks afterwards.
             # Without a Transformers TP plan, only registered TP mesh dimensions use the local shard shape.
-            # All other meshes use the full shape, as FSDP2 gathers the base weight before the projection.
+            # All other meshes use the full shape, as FSDP2 gathers the base weight before the forward.
             has_tp_dim = any(
                 TpMeshDimRegistry.is_registered(name) for name in module.weight.device_mesh.mesh_dim_names or ()
             )
             if has_tp_dim and getattr(module, "_hf_tp_plan", None) is None:
-                out_features, in_features = module.weight.to_local().shape
-            else:
-                in_features, out_features = module.in_features, module.out_features
-        else:
-            in_features, out_features = module.in_features, module.out_features
+                if isinstance(module, nn.Embedding):
+                    in_features, out_features = module.weight.to_local().shape
+                else:
+                    out_features, in_features = module.weight.to_local().shape
     elif isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
         in_features, out_features = module.in_channels, module.out_channels
-    elif isinstance(module, nn.Embedding):
-        in_features, out_features = module.num_embeddings, module.embedding_dim
     elif isinstance(module, Conv1D):
         in_features, out_features = (
             module.weight.ds_shape if hasattr(module.weight, "ds_shape") else module.weight.shape
@@ -214,12 +212,13 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
         ln_size = ln_weight.shape[0]
         in_features, out_features = ln_size, ln_size
     elif hasattr(module, "codebooks") and module.__class__.__name__ == "QuantizedLinear":
-        # AQLM QuantLinear
+        # TODO: Remove AQLM layer handling in PEFT v1.2.
         in_features, out_features = module.in_features, module.out_features
     elif is_gptqmodel_quant_linear(module):
         # GPT-QModel quantized linears
         in_features, out_features = module.in_features, module.out_features
     elif module.__class__.__name__ == "EetqLinear":
+        # TODO: Remove EETQ layer handling in PEFT v1.2.
         if hasattr(module, "in_features"):
             # Eetq layers
             in_features, out_features = module.in_features, module.out_features
@@ -228,7 +227,7 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
             # https://github.com/huggingface/transformers/blob/c220ea9ecee9231927a47d97a63d5604a09d4c63/src/transformers/integrations/eetq.py#L74
             in_features, out_features = module.weight.shape
     elif hasattr(module, "W_q") and module.__class__.__name__ == "HQQLinear":
-        # HQQ layers
+        # TODO: Remove HQQ layer handling in PEFT v1.2.
         in_features, out_features = module.in_features, module.out_features
     elif module.__class__.__name__ == "PatchedLinear":
         # INC layers
@@ -446,7 +445,7 @@ class BaseTuner(nn.Module, ABC):
         A helper method to check if the passed module's key name matches any of the tied modules
 
         Args:
-            config (`PeftConfig`):
+            peft_config (`PeftConfig`):
                 A config to match target modules from.
             key (`str`):
                 A key to search any matches in config.
@@ -467,7 +466,7 @@ class BaseTuner(nn.Module, ABC):
         adapter_config.
 
         Args:
-            config (`PeftConfig`):
+            peft_config (`PeftConfig`):
                 A config to match target modules from.
             key (`str`):
                 A key to search any matches in config.
@@ -521,10 +520,10 @@ class BaseTuner(nn.Module, ABC):
         # parameter names against self.prefix, so that a base model module whose name happens to contain the prefix is
         # not treated as an adapter module.
         adapter_prefixes = _get_tuner_state_dict_key_prefixes(model)
-        adapter_param_names = set(_filter_state_dict_by_key_prefixes(dict(model.named_parameters()), adapter_prefixes))
         aux_module_names = {n for n, m in model.named_modules() if isinstance(m, AuxiliaryTrainingWrapper)}
         for n, p in model.named_parameters():
-            if n in adapter_param_names:
+            # the prefixes are made to match the state_dict keys, which don't contain the torch wrapper names
+            if _is_key_under_prefixes(remove_torch_wrapper_names(n), adapter_prefixes):
                 continue
             if _is_key_under_prefixes(n, aux_module_names):
                 # auxiliary modules like ModulesToSaveWrapper manage the requires_grad state of their parameters
@@ -873,8 +872,7 @@ class BaseTuner(nn.Module, ABC):
         # PREPARATION OF MODEL AND CONFIG #
         ###################################
         is_transformers_like_model = hasattr(getattr(model, "config", None), "model_type")
-        if is_transformers_ge_v5 and is_transformers_like_model:
-            # TODO remove once transformers < v5.0 is no longer supported
+        if is_transformers_like_model:
             # For Transformers v5, some architectures were changed compared to v4, e.g. the MoE layers of Mixtral. To
             # still make it possible to load adapters trained with v4, we have to update the PEFT config so that the
             # right layers are targeted. Call this first and overwrite the peft_config to be sure that changes are
@@ -1370,6 +1368,7 @@ class BaseTuner(nn.Module, ABC):
                 if hasattr(child, "qweight"):
                     weight = child.qweight
                 elif hasattr(child, "W_q"):
+                    # TODO: Remove HQQ device placement in PEFT v1.2.
                     weight = child.W_q
                 elif hasattr(child, "weight"):
                     weight = child.weight
@@ -1448,8 +1447,6 @@ class BaseTuner(nn.Module, ABC):
         Args:
             model (`nn.Module`):
                 Model to get the config from.
-            default (`dict|None`, *optional*)::
-                What to return if model does not have a config attribute.
         """
         model_config = getattr(model, "config", DUMMY_MODEL_CONFIG)
         if hasattr(model_config, "to_dict"):
@@ -1631,8 +1628,7 @@ class BaseTuner(nn.Module, ABC):
         bias_state_dict = {}
         if bias.endswith("_only"):  # e.g. 'lora_only'
             for module_name, module in model.named_modules():
-                if module_name.startswith("_fsdp_wrapped_module."):
-                    module_name = module_name.removeprefix("_fsdp_wrapped_module.")
+                module_name = remove_torch_wrapper_names(module_name)
                 if not isinstance(module, BaseTunerLayer):
                     continue
                 # the bias of the targeted module is located on the base layer of the tuner layer
@@ -1847,10 +1843,7 @@ def _get_tuner_state_dict_key_prefixes(model: nn.Module, adapter_name: Optional[
     # layers nested inside of it
     aux_module_names = set()
     for module_name, module in model.named_modules():
-        if module_name.startswith("_fsdp_wrapped_module."):
-            # If FSDP is used, the state_dict is from the unwrapped model, which would result in a key mismatch if we
-            # didn't remove the FSDP-specific prefix
-            module_name = module_name.removeprefix("_fsdp_wrapped_module.")
+        module_name = remove_torch_wrapper_names(module_name)
 
         if isinstance(module, AuxiliaryTrainingWrapper):
             aux_module_names.add(module_name)
@@ -1922,9 +1915,7 @@ class BaseTunerLayer(ABC):
     r"""
     A tuner layer mixin that provides the common methods and attributes for all tuners.
 
-    Args:
-        is_pluggable (`bool`, *optional*):
-            Whether the adapter layer can be plugged to any pytorch module
+    Attributes:
         active_adapters (Union[List[`str`], `str`], *optional*):
             The name of the active adapter.
     """
@@ -2350,6 +2341,44 @@ class BaseTunerLayer(ABC):
         Normally, this works if the PEFT method is additive, i.e. W' = W_base + delta_weight.
         """
         return False
+
+    def get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        """
+        Return the additive delta weight W' - W for the given adapter, where W is the base weight and W' is the weight
+        after merging the adapter into the base weight. This means that the merged weight can be reconstructed via
+        `base_weight + module.get_additive_delta(adapter_name)`.
+
+        For additive PEFT methods (e.g. LoRA, LoKr, LoHa), this is equivalent to `get_delta_weight`. For multiplicative
+        methods (e.g. OFT, BOFT), this method constructs the effective weight W' and subtracts the base weight W.
+
+        Calling this method while any adapter is merged raises a `ValueError`, as merging modifies the base weight,
+        which would make the return value depend on the currently merged adapters. Unmerge the adapters first.
+
+        The returned tensor has the dtype of the adapter layer weights (e.g. `lora_A` for LoRA), not the dtype of the
+        base layer weight. This is the dtype that the converted LoRA adapter will use.
+
+        The result is used by `convert_to_lora` to perform an SVD-based approximation of the adapter as a LoRA adapter.
+
+        By default, this raises a `NotImplementedError`. PEFT methods that support this should override the
+        `_get_additive_delta` method to return the additive delta.
+
+        Args:
+            adapter_name (`str`): The name of the adapter. Defaults to `"default"`.
+        """
+        if self.merged_adapters:
+            raise ValueError(
+                f"Cannot get the additive delta for adapter '{adapter_name}' because the following adapters are "
+                f"currently merged into the base weights: {', '.join(self.merged_adapters)}. This would make the "
+                "return value incorrect. Please unmerge the adapters first."
+            )
+        return self._get_additive_delta(adapter_name)
+
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        # Internal method that should be overridden instead of `get_additive_delta`, see the docstring there.
+        raise NotImplementedError(
+            f"{type(self)} does not support get_additive_delta. If this is an additive PEFT method, override this "
+            "method to return self.get_delta_weight(adapter_name)."
+        )
 
 
 def _find_minimal_target_modules(

@@ -22,21 +22,11 @@ import torch
 import transformers
 
 
-is_transformers_ge_v5 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.0.0.dev0")
-
-is_transformers_ge_v5_1_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.1.0")
-
-is_transformers_ge_v5_4_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.4.0")
-
-is_transformers_ge_v5_6_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.6.0.dev0")
-
 # transformers 5.13.0 introduced the `distributed_config` kwarg for `from_pretrained`,
 # replacing the `tp_plan` and `tp_size` kwargs (removed in 5.15.0).
 is_transformers_ge_v5_13_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse(
     "5.13.0.dev0"
 )
-
-is_transformers_le_4_53 = packaging.version.parse(transformers.__version__) < packaging.version.parse("4.54.0.dev0")
 
 is_transformers_ge_v5_17_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.17.0")
 
@@ -46,6 +36,20 @@ try:
     is_transformers_dtensor_tp = True
 except ImportError:
     is_transformers_dtensor_tp = False
+
+
+@lru_cache
+def get_transformers_cache_name() -> str:
+    """Return the cache argument and output field name used by Transformers.
+
+    Note that for the longest time, the argument was called `past_key_values` but it was deprecated in
+    https://github.com/huggingface/transformers/pull/50585 and is henceforth called `cache`. Therefore, the name is not
+    hard-coded.
+    """
+    # TODO: Remove the old name once support for Transformers < 5.24.0 is dropped.
+    if packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.24.0.dev0"):
+        return "cache"
+    return "past_key_values"
 
 
 @lru_cache
@@ -123,6 +127,7 @@ def is_torch_tpu_available(check_device=True) -> bool:
     return False
 
 
+# TODO: Remove the AQLM, EETQ, and HQQ availability checks in PEFT v1.2.
 @lru_cache
 def is_aqlm_available() -> bool:
     return importlib.util.find_spec("aqlm") is not None

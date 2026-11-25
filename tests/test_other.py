@@ -20,6 +20,7 @@ from unittest.mock import patch
 import pytest
 import torch
 from torch import nn
+from torch.utils.checkpoint import checkpoint
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForQuestionAnswering,
@@ -41,7 +42,6 @@ from peft import (
     get_peft_model,
     get_peft_model_state_dict,
 )
-from peft.import_utils import is_transformers_ge_v5_1_0, is_transformers_ge_v5_6_0
 from peft.utils.other import (
     ModulesToSaveWrapper,
     _get_module_names_tied_with_embedding,
@@ -1005,39 +1005,12 @@ class TestGetNoSplitModules:
         model_id = "hf-internal-testing/tiny-random-LlavaForConditionalGeneration"
         model = LlavaForConditionalGeneration.from_pretrained(model_id)
 
-        # model._no_split_modules is recursively generated as of transformers 5.1.0 so
-        # depending on which transformers version we have in the test environment the
-        # attribute will deliver either the same result as `_get_no_split_modules`
-        # or an empty list.
-        #
-        # TODO remove this distinction once transformers <5.1.0 is not supported anymore
-        if not is_transformers_ge_v5_1_0:
-            # sanity check: just visiting the model itself is not enough:
-            assert model._no_split_modules == []
-            no_split_modules = _get_no_split_modules(model)
-            assert no_split_modules == {"CLIPEncoderLayer", "LlamaDecoderLayer"}
-        elif not is_transformers_ge_v5_6_0:
-            # TODO remove this once transformers <5.6.0 is not supported anymore
-            assert model._no_split_modules == {"CLIPEncoderLayer", "LlamaDecoderLayer"}
-            no_split_modules = _get_no_split_modules(model)
-            assert no_split_modules == {"CLIPEncoderLayer", "LlamaDecoderLayer"}
-        else:
-            # in transformers > 5.5.0, the structure of the model was changed, see
-            # https://github.com/huggingface/transformers/pull/45361
-            # https://github.com/huggingface/transformers/pull/45448
-            assert model._no_split_modules == {
-                "CLIPEncoderLayer",
-                "CLIPTextEmbeddings",
-                "CLIPVisionEmbeddings",
-                "LlamaDecoderLayer",
-            }
-            no_split_modules = _get_no_split_modules(model)
-            assert no_split_modules == {
-                "CLIPEncoderLayer",
-                "CLIPTextEmbeddings",
-                "CLIPVisionEmbeddings",
-                "LlamaDecoderLayer",
-            }
+        assert _get_no_split_modules(model) == {
+            "CLIPEncoderLayer",
+            "CLIPTextEmbeddings",
+            "CLIPVisionEmbeddings",
+            "LlamaDecoderLayer",
+        }
 
 
 class TestGetModuleNamesTiedWithEmbedding:
@@ -1179,6 +1152,23 @@ class TestPrepareModelForKbitTraining:
         ):
             prepare_model_for_kbit_training(fp16_model, use_gradient_checkpointing=False, auto_clear_cache=False)
         mock_empty_cache.assert_not_called()
+
+    def test_gradient_checkpointing_defaults_to_non_reentrant(self):
+        # We want the default to be use_reentrant=False
+        model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+
+        with patch("transformers.modeling_utils.checkpoint", wraps=checkpoint) as mock_checkpoint:
+            # Exercise k-bit checkpointing setup without requiring a quantization backend.
+            with patch.object(model, "is_loaded_in_4bit", True, create=True):
+                prepare_model_for_kbit_training(model)
+            model = get_peft_model(model, LoraConfig())
+            model.train()
+            model(input_ids=torch.tensor([[1, 2, 3]]), use_cache=False)
+
+        assert mock_checkpoint.call_count == 2  # 2 layers
+        assert all(call.kwargs.get("use_reentrant") is False for call in mock_checkpoint.call_args_list)
 
 
 # The task-type subclasses that add their head to modules_to_save. One tiny BERT checkpoint covers all three, since the

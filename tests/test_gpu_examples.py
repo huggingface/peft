@@ -24,22 +24,20 @@ from dataclasses import dataclass
 from functools import lru_cache, partial
 from pathlib import Path
 from typing import Any, Union
+from unittest.mock import patch
 
 import numpy as np
-import packaging
 import pytest
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn.functional as F
-import transformers
 from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import get_backend, run_command
 from accelerate.utils import patch_environment
 from accelerate.utils.imports import is_bf16_available
 from accelerate.utils.memory import clear_device_cache
 from datasets import Audio, Dataset, DatasetDict, load_dataset
-from packaging import version
 from parameterized import parameterized
 from safetensors.torch import load_file, save_file
 from torch.distributed import init_process_group
@@ -71,6 +69,7 @@ from peft import (
     EvaConfig,
     FrodConfig,
     HiraConfig,
+    IA3Config,
     LoftQConfig,
     LoraConfig,
     PeftModel,
@@ -90,6 +89,7 @@ from peft import (
     inject_adapter_in_model,
     prepare_model_for_kbit_training,
     replace_lora_weights_loftq,
+    replace_lora_weights_pissa,
     set_peft_model_state_dict,
 )
 from peft.helpers import KappaTuneSelector, find_kappa_target_modules
@@ -97,7 +97,6 @@ from peft.import_utils import (
     is_diffusers_available,
     is_te_available,
     is_torchao_ge_v0_18_0,
-    is_transformers_ge_v5,
     is_transformers_ge_v5_13_0,
     is_xpu_available,
 )
@@ -106,6 +105,7 @@ from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, activation_checkpointing_enable, infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
+from peft.utils.integrations import dequantize_bnb_weight
 from peft.utils.other import fsdp_auto_wrap_policy
 from tests.testing_utils import hub_online_once
 
@@ -3206,6 +3206,105 @@ class TestPiSSA:
         assert not torch.allclose(output_finetuned_pissa, output_converted, atol=tol, rtol=tol)
 
 
+@pytest.mark.single_gpu_tests
+@require_bitsandbytes
+class TestReplaceLoraWeightsPissa:
+    """Tests for replace_lora_weights_pissa. They use a tiny model on CPU to be fast."""
+
+    model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+    input_ids = torch.tensor([[1, 2, 3, 4, 5]])
+
+    @pytest.fixture(autouse=True)
+    def seeded_svd_lowrank(self):
+        # On CPU, creating LoRA layers consumes the same RNG as the random projection of svd_lowrank, so without
+        # seeding each call, the results would depend on when the LoRA layers were created.
+        svd_lowrank = torch.svd_lowrank
+
+        def seeded(*args, **kwargs):
+            torch.manual_seed(0)
+            return svd_lowrank(*args, **kwargs)
+
+        with patch("torch.svd_lowrank", seeded):
+            yield
+
+    @pytest.fixture
+    def model_path(self, tmp_path):
+        with hub_online_once(self.model_id):
+            model = AutoModelForCausalLM.from_pretrained(self.model_id, dtype=torch.bfloat16)
+        model.save_pretrained(tmp_path / "base")
+        return str(tmp_path / "base")
+
+    @staticmethod
+    def load_quantized(path, quant_storage=torch.uint8):
+        config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.float32,
+            bnb_4bit_quant_storage=quant_storage,
+        )
+        return AutoModelForCausalLM.from_pretrained(path, quantization_config=config, device_map={"": "cpu"})
+
+    @staticmethod
+    def lora_config(init_lora_weights=True, **kwargs):
+        return LoraConfig(
+            r=2, lora_alpha=4, target_modules="all-linear", init_lora_weights=init_lora_weights, **kwargs
+        )
+
+    @staticmethod
+    def get_layers(model):
+        return {name: module for name, module in model.named_modules() if isinstance(module, LoraLayer)}
+
+    @staticmethod
+    def dequantized(layer):
+        weight = layer.get_base_layer().weight
+        return dequantize_bnb_weight(weight, state=weight.quant_state)
+
+    @pytest.mark.parametrize("quant_storage", [torch.uint8, torch.bfloat16])
+    @pytest.mark.parametrize("init_lora_weights", ["pissa", "pissa_niter_4"])
+    def test_same_as_quantizing_the_residual(self, model_path, tmp_path, init_lora_weights, quant_storage):
+        # The result should be identical to the procedure without replace_lora_weights_pissa, i.e. applying PiSSA on
+        # the non-quantized model, saving the residual, and loading it with quantization.
+        model = AutoModelForCausalLM.from_pretrained(model_path, dtype=torch.bfloat16)
+        model = get_peft_model(model, self.lora_config(init_lora_weights))
+        model.peft_config["default"].init_lora_weights = True
+        model.save_pretrained(tmp_path / "adapter")
+        model.unload().save_pretrained(tmp_path / "residual")
+        expected = PeftModel.from_pretrained(
+            self.load_quantized(tmp_path / "residual", quant_storage), tmp_path / "adapter"
+        ).eval()
+
+        model = get_peft_model(self.load_quantized(model_path, quant_storage), self.lora_config()).eval()
+        replace_lora_weights_pissa(model, model_path=model_path, init_lora_weights=init_lora_weights)
+
+        layers, layers_expected = self.get_layers(model), self.get_layers(expected)
+        assert layers
+        assert layers.keys() == layers_expected.keys()
+        for name, layer in layers.items():
+            layer_expected = layers_expected[name]
+            assert torch.equal(self.dequantized(layer), self.dequantized(layer_expected))
+            assert torch.equal(layer.lora_A["default"].weight, layer_expected.lora_A["default"].weight)
+            assert torch.equal(layer.lora_B["default"].weight, layer_expected.lora_B["default"].weight)
+
+        with torch.inference_mode():
+            assert torch.equal(model(self.input_ids).logits, expected(self.input_ids).logits)
+
+    def test_not_quantized_raises(self, model_path):
+        model = get_peft_model(AutoModelForCausalLM.from_pretrained(model_path), self.lora_config())
+        with pytest.raises(ValueError, match="No bnb LoRA module found on the model"):
+            replace_lora_weights_pissa(model, model_path=model_path)
+
+    def test_invalid_init_lora_weights_raises(self, model_path):
+        model = get_peft_model(self.load_quantized(model_path), self.lora_config())
+        with pytest.raises(ValueError, match="init_lora_weights should be 'pissa'"):
+            replace_lora_weights_pissa(model, model_path=model_path, init_lora_weights="invalid")
+
+    def test_dora_raises(self, model_path):
+        model = get_peft_model(self.load_quantized(model_path), self.lora_config(use_dora=True))
+        with pytest.raises(ValueError, match="does not support LoRA variants"):
+            replace_lora_weights_pissa(model, model_path=model_path)
+
+
 @pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
 @pytest.mark.single_gpu_tests
 @require_bitsandbytes
@@ -4012,13 +4111,10 @@ class MixedPrecisionTests(unittest.TestCase):
             trainer.train()  # does not raise
 
 
+# TODO: Remove the AQLM GPU tests in PEFT v1.2.
 @require_non_xpu
 @require_torch_gpu
 @require_aqlm
-@pytest.mark.skipif(
-    not version.parse(importlib.metadata.version("transformers")) >= version.parse("4.38.0"),
-    reason="test requires `transformers>=4.38.0`",
-)
 class PeftAqlmGPUTests(unittest.TestCase):
     r"""
     AQLM + peft tests
@@ -4065,7 +4161,11 @@ class PeftAqlmGPUTests(unittest.TestCase):
                 bias="none",
                 task_type="CAUSAL_LM",
             )
-            model = get_peft_model(model, config)
+            with pytest.warns(
+                FutureWarning,
+                match=r"AQLM support is deprecated and will be removed in PEFT v1\.2",
+            ):
+                model = get_peft_model(model, config)
 
             data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
@@ -4097,13 +4197,10 @@ class PeftAqlmGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
+# TODO: Remove the HQQ GPU tests in PEFT v1.2.
 @require_non_xpu
 @require_torch_gpu
 @require_hqq
-@pytest.mark.skipif(
-    not version.parse(importlib.metadata.version("transformers")) >= version.parse("4.36.1"),
-    reason="test requires `transformers>=4.36.1`",
-)
 class PeftHqqGPUTests(unittest.TestCase):
     r"""
     HQQ + peft tests
@@ -4122,7 +4219,6 @@ class PeftHqqGPUTests(unittest.TestCase):
 
     @pytest.mark.xfail(
         reason="HQQ is not yet supported by Transformers v5",
-        condition=is_transformers_ge_v5,
         strict=True,
         raises=NotImplementedError,
     )
@@ -4159,7 +4255,8 @@ class PeftHqqGPUTests(unittest.TestCase):
                 task_type="CAUSAL_LM",
                 use_dora=use_dora,
             )
-            model = get_peft_model(model, config)
+            with pytest.warns(FutureWarning, match=r"HQQ support is deprecated and will be removed in PEFT v1\.2"):
+                model = get_peft_model(model, config)
 
             data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
@@ -4192,7 +4289,6 @@ class PeftHqqGPUTests(unittest.TestCase):
 
     @pytest.mark.xfail(
         reason="HQQ is not yet supported by Transformers v5",
-        condition=is_transformers_ge_v5,
         strict=True,
         raises=NotImplementedError,
     )
@@ -4236,7 +4332,8 @@ class PeftHqqGPUTests(unittest.TestCase):
             quantization_config=quant_config,
         )
         torch.manual_seed(0)
-        model = get_peft_model(model, config).eval()
+        with pytest.warns(FutureWarning, match=r"HQQ support is deprecated and will be removed in PEFT v1\.2"):
+            model = get_peft_model(model, config).eval()
         with torch.inference_mode():
             output_hqq = model(**inputs).logits
 
@@ -4268,7 +4365,8 @@ class PeftHqqGPUTests(unittest.TestCase):
                 dtype=compute_dtype,
                 quantization_config=quant_config,
             )
-            model = PeftModel.from_pretrained(model, tmp_dir)
+            with pytest.warns(FutureWarning, match=r"HQQ support is deprecated and will be removed in PEFT v1\.2"):
+                model = PeftModel.from_pretrained(model, tmp_dir)
             with torch.inference_mode():
                 output_loaded = model(**inputs).logits
 
@@ -4455,6 +4553,7 @@ class PeftAwqGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
+# TODO: Remove the EETQ GPU tests in PEFT v1.2.
 @require_non_xpu
 @require_torch_gpu
 @require_eetq
@@ -4511,7 +4610,8 @@ class PeftEetqGPUTests(unittest.TestCase):
                 bias="none",
                 task_type="CAUSAL_LM",
             )
-            model = get_peft_model(model, config)
+            with pytest.warns(FutureWarning, match=r"EETQ support is deprecated and will be removed in PEFT v1\.2"):
+                model = get_peft_model(model, config)
 
             data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
@@ -4580,7 +4680,8 @@ class PeftEetqGPUTests(unittest.TestCase):
                 task_type="CAUSAL_LM",
             )
 
-            model = get_peft_model(model, config)
+            with pytest.warns(FutureWarning, match=r"EETQ support is deprecated and will be removed in PEFT v1\.2"):
+                model = get_peft_model(model, config)
 
             data = load_dataset_english_quotes()
             data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
@@ -5318,19 +5419,12 @@ class TestUnshardedLoRASaveUnderZeRO3:
     """
 
     @pytest.mark.single_gpu_tests
-    @require_torch_gpu
     def test_zero3_ungathered_save_warns_and_gather_succeeds(self, tmp_path):
         deepspeed = pytest.importorskip("deepspeed")
+        if dist.is_initialized():
+            _teardown_dist()
+        _setup_dist(rank=0, world_size=1, port=29555)
 
-        os.environ.setdefault("MASTER_ADDR", "localhost")
-        os.environ.setdefault("MASTER_PORT", "29555")
-        os.environ.setdefault("LOCAL_RANK", "0")
-        os.environ.setdefault("RANK", "0")
-        os.environ.setdefault("WORLD_SIZE", "1")
-
-        we_initialized_pg = not dist.is_initialized()
-        if we_initialized_pg:
-            init_process_group(world_size=1, rank=0)
         try:
             ds_config = {"train_batch_size": dist.get_world_size(), "zero_optimization": {"stage": 3}}
             with deepspeed.zero.Init(config_dict_or_path=ds_config):
@@ -5349,8 +5443,34 @@ class TestUnshardedLoRASaveUnderZeRO3:
             lora_a = next(v for k, v in sd.items() if "lora_A" in k)
             assert lora_a.ndim == 2 and all(d > 0 for d in lora_a.shape)
         finally:
-            if we_initialized_pg and dist.is_initialized():
-                dist.destroy_process_group()
+            _teardown_dist()
+
+    @pytest.mark.single_gpu_tests
+    @pytest.mark.parametrize("lora_bias", [True, "all", "lora_only"])
+    def test_zero3_gathered_save_doesnt_warn(self, tmp_path, recwarn, lora_bias):
+        deepspeed = pytest.importorskip("deepspeed")
+        if dist.is_initialized():
+            _teardown_dist()
+        _setup_dist(rank=0, world_size=1, port=29555)
+
+        try:
+            ds_config = {"train_batch_size": dist.get_world_size(), "zero_optimization": {"stage": 3}}
+            with deepspeed.zero.Init(config_dict_or_path=ds_config):
+                model = get_peft_model(
+                    SimpleModel(),
+                    LoraConfig(target_modules=["linear_transform"], r=8, lora_bias=lora_bias),
+                )
+            engine, *_ = deepspeed.initialize(model=model, config=ds_config, model_parameters=model.parameters())
+
+            lora_params = [p for n, p in engine.module.named_parameters() if "lora_A" in n or "lora_B" in n]
+            with deepspeed.zero.GatheredParameters(lora_params, modifier_rank=0):
+                engine.module.save_pretrained(tmp_path / "gathered")
+
+            for warning in recwarn.list:
+                assert "not gathered" not in str(warning.message)
+
+        finally:
+            _teardown_dist()
 
 
 class TestBOFT:
@@ -6135,7 +6255,7 @@ class TestHotSwapping:
         # prepare_model_for_compiled_hotswap, as we use the same LoRA shapes. Due to (re-)compilation, the test is
         # relatively slow.
         atol, rtol = 1e-6, 1e-6
-        model_id = "trl-internal-testing/tiny-GptOssForCausalLM"
+        model_id = "peft-internal-testing/tiny-GptOssForCausalLM"
         inputs = torch.arange(10).view(1, -1).to(self.torch_device)
 
         def strong_init(model):
@@ -6476,7 +6596,7 @@ class TestDtypeAutocastBnb:
 
     """
 
-    model_id = "trl-internal-testing/tiny-Qwen2ForCausalLM-2.5"
+    model_id = "peft-internal-testing/tiny-Qwen2ForCausalLM-2.5"
     # no need to check each possible peft type, a selection should be enough
     peft_types_to_test = ["lora", "vera", "lora-target-param"]
 
@@ -7222,10 +7342,26 @@ def _test_save_unsharded_weights(rank, world_size, tmp_dir_reference, tmp_dir_tp
             )
 
 
+@require_torch_multi_accelerator
+@pytest.mark.multi_gpu_tests
+class TestFsdp2StateDict:
+    @pytest.mark.parametrize("config_cls", [LoraConfig, IA3Config])
+    def test_save_load_without_tp_metadata(self, config_cls, tmp_path):
+        from .test_parallelism import TestFsdp2StateDict as CpuFsdp2StateDict
+
+        mp.spawn(
+            CpuFsdp2StateDict._save_load,
+            args=(2, str(tmp_path), torch_device, config_cls),
+            nprocs=2,
+            join=True,
+        )
+
+
 def _test_save_gathers_only_adapter_weights(rank, world_size):
     """
     Test that get_peft_model_state_dict only gathers the adapter weights of a TP model, gathering the whole state dict
-    would materialize the full base model on every rank.
+    would materialize the full base model on every rank. This guards TP saving; the FSDP2/HSDP save regression is
+    covered separately by TestFsdp2StateDict.
     """
     from torch.distributed.tensor import DTensor
     from transformers.integrations import tensor_parallel
@@ -7239,18 +7375,25 @@ def _test_save_gathers_only_adapter_weights(rank, world_size):
     lora_config = LoraConfig(r=4, target_modules=["q_proj", "o_proj"], init_lora_weights=False)
     model = get_peft_model(model, lora_config)
 
+    state_dict = model.state_dict()
+    tensor_names = {id(value): name for name, value in state_dict.items()}
     gathered_keys = []
+    full_tensor = DTensor.full_tensor
     gather_state_dict_for_save = tensor_parallel.gather_state_dict_for_save
+
+    def spy_full_tensor(tensor, *args, **kwargs):
+        gathered_keys.append(tensor_names[id(tensor)])
+        return full_tensor(tensor, *args, **kwargs)
 
     def spy_gather_state_dict_for_save(state_dict, *args):
         gathered_keys.extend(state_dict)
         return gather_state_dict_for_save(state_dict, *args)
 
-    tensor_parallel.gather_state_dict_for_save = spy_gather_state_dict_for_save
-    try:
-        peft_state_dict = get_peft_model_state_dict(model)
-    finally:
-        tensor_parallel.gather_state_dict_for_save = gather_state_dict_for_save
+    # Observe the collective itself for DTensor TP and the Transformers helper for legacy TP.
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(DTensor, "full_tensor", spy_full_tensor)
+        monkeypatch.setattr(tensor_parallel, "gather_state_dict_for_save", spy_gather_state_dict_for_save)
+        peft_state_dict = get_peft_model_state_dict(model, state_dict=state_dict)
 
     assert gathered_keys
     non_adapter_keys = [key for key in gathered_keys if "lora_" not in key]
@@ -7386,15 +7529,7 @@ def _test_load_adapter_save(rank, world_size, tmp_dir_reference, tmp_dir_tp):
             )
 
 
-# transformers >= 5.4.0 is required for TP integration
-# transformers >= 5.6.0 is required for PreTrainedModel.load_adapter with TP models integration
-is_transformers_ge_v5_6_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.6.0")
-
-
 @require_torch_gpu
-@pytest.mark.skipif(
-    not is_transformers_ge_v5_6_0, reason="transformers TP integration supported for transformers >= 5.6.0"
-)
 @pytest.mark.multi_gpu_tests
 class TestLoraTensorParallel:
     def _spawn(self, fn, *extra_args):

@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from contextlib import contextmanager
 from typing import Any, Optional, Self, Union
 
@@ -28,7 +29,8 @@ from peft.utils.constants import DUMMY_MODEL_CONFIG
 from .config import PeftConfig
 from .peft_model import PeftModel
 from .tuners import MixedModel
-from .utils import _set_adapter, _set_trainable, is_activation_checkpointing
+from .tuners.tuners_utils import BaseTunerLayer
+from .utils import AuxiliaryTrainingWrapper, _set_adapter, _set_trainable, is_activation_checkpointing
 
 
 def _prepare_model_for_gradient_checkpointing(model: nn.Module) -> None:
@@ -41,6 +43,7 @@ def _prepare_model_for_gradient_checkpointing(model: nn.Module) -> None:
     if not is_activation_checkpointing(model, default=True):
         return model
 
+    # TODO: Skip this workaround for use_reentrant=False if Transformers exposes a public API to check it.
     if not (
         getattr(model, "is_loaded_in_8bit", False)
         or getattr(model, "is_loaded_in_4bit", False)
@@ -89,12 +92,10 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
     Args:
         model (`torch.nn.Module`):
             The model to be tuned.
-        config (`PeftConfig`):
+        peft_config (`PeftConfig`):
             The config of the model to be tuned. The adapter type must be compatible.
         adapter_name (`str`, `optional`, defaults to `"default"`):
             The name of the first adapter.
-        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
-            Create empty adapter weights on meta device. Useful to speed up the loading process.
     """
 
     def __init__(self, model: nn.Module, peft_config: PeftConfig, adapter_name: str = "default") -> None:
@@ -196,11 +197,23 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         """
         Disables the adapter module.
         """
+        enabled_states = {
+            not module.disable_adapters
+            for module in self.modules()
+            if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper))
+        }
+        if len(enabled_states) > 1:
+            warnings.warn(
+                "The model contains some adapter layers that are enabled and others that are disabled. "
+                "This is most likely unintentional. After exiting the disable_adapter context, all adapters "
+                "will be enabled"
+            )
         try:
             self.base_model.disable_adapter_layers()
             yield
         finally:
-            self.base_model.enable_adapter_layers()
+            if True in enabled_states:
+                self.base_model.enable_adapter_layers()
 
     def add_adapter(
         self,

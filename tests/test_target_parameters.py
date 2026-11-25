@@ -39,7 +39,7 @@ ALL_CONFIGS = [
     ##########
     # target down_proj
     (
-        "trl-internal-testing/tiny-Llama4ForCausalLM",
+        "peft-internal-testing/tiny-Llama4ForCausalLM",
         LoraConfig,
         {
             "task_type": TaskType.CAUSAL_LM,
@@ -52,7 +52,7 @@ ALL_CONFIGS = [
     ),
     # target gate_up_proj and down_proj, but not on the same module
     (
-        "trl-internal-testing/tiny-Llama4ForCausalLM",
+        "peft-internal-testing/tiny-Llama4ForCausalLM",
         LoraConfig,
         {
             "task_type": TaskType.CAUSAL_LM,
@@ -66,7 +66,7 @@ ALL_CONFIGS = [
     ),
     # target down_proj and gate_up_proj on the same module
     (
-        "trl-internal-testing/tiny-Llama4ForCausalLM",
+        "peft-internal-testing/tiny-Llama4ForCausalLM",
         LoraConfig,
         {
             "task_type": "CAUSAL_LM",
@@ -83,7 +83,7 @@ ALL_CONFIGS = [
     ),
     # target q_proj, v_proj as modules, and down_proj as parameter
     (
-        "trl-internal-testing/tiny-Llama4ForCausalLM",
+        "peft-internal-testing/tiny-Llama4ForCausalLM",
         LoraConfig,
         {
             "task_type": TaskType.CAUSAL_LM,
@@ -99,7 +99,7 @@ ALL_CONFIGS = [
     ###########
     # target down_proj
     (
-        "trl-internal-testing/tiny-GptOssForCausalLM",
+        "peft-internal-testing/tiny-GptOssForCausalLM",
         LoraConfig,
         {
             "task_type": TaskType.CAUSAL_LM,
@@ -112,7 +112,7 @@ ALL_CONFIGS = [
     ),
     # target gate_up_proj and down_proj, but not on the same module
     (
-        "trl-internal-testing/tiny-GptOssForCausalLM",
+        "peft-internal-testing/tiny-GptOssForCausalLM",
         LoraConfig,
         {
             "task_type": TaskType.CAUSAL_LM,
@@ -126,7 +126,7 @@ ALL_CONFIGS = [
     ),
     # target down_proj and gate_up_proj on the same module
     (
-        "trl-internal-testing/tiny-GptOssForCausalLM",
+        "peft-internal-testing/tiny-GptOssForCausalLM",
         LoraConfig,
         {
             "task_type": "CAUSAL_LM",
@@ -143,7 +143,7 @@ ALL_CONFIGS = [
     ),
     # target q_proj, v_proj as modules, and down_proj as parameter
     (
-        "trl-internal-testing/tiny-GptOssForCausalLM",
+        "peft-internal-testing/tiny-GptOssForCausalLM",
         LoraConfig,
         {
             "task_type": TaskType.CAUSAL_LM,
@@ -163,13 +163,7 @@ class MyAutoModelForCausalLM(AutoModelForCausalLM):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(*args, **kwargs)
 
-        # check that we load the original model, not, say, a trained checkpoint
-        if args[0] == "trl-internal-testing/tiny-Llama4ForCausalLM":
-            # model contains weights with values ~1e36 or nan, so we need to reinitialize with sane values
-            with torch.no_grad():
-                for param in model.parameters():
-                    param.data = torch.randn(param.shape)
-        elif args[0] == "trl-internal-testing/tiny-GptOssForCausalLM":
+        if args[0] == "peft-internal-testing/tiny-GptOssForCausalLM":
             # model is bf16, which trips up some tests that require tight tolerances
             with torch.no_grad():
                 model.float()
@@ -177,7 +171,7 @@ class MyAutoModelForCausalLM(AutoModelForCausalLM):
 
 
 def test_rank_pattern_for_moe_target_parameters(tmp_path):
-    model_id = "trl-internal-testing/tiny-Llama4ForCausalLM"
+    model_id = "peft-internal-testing/tiny-Llama4ForCausalLM"
     with hub_online_once(model_id):
         model = MyAutoModelForCausalLM.from_pretrained(model_id)
         num_experts = getattr(model.config, "num_local_experts", None) or getattr(model.config, "num_experts", None)
@@ -237,6 +231,11 @@ class TestDecoderModelsTargetParameters(PeftCommonTester):
     def test_save_pretrained(self, model_id, config_cls, config_kwargs):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs.copy())
+
+    @pytest.mark.parametrize("model_id,config_cls,config_kwargs", ALL_CONFIGS)
+    def test_load_adapter_no_warning(self, model_id, config_cls, config_kwargs, recwarn, tmp_path):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_load_no_warning(model_id, config_cls, config_kwargs.copy(), recwarn, tmp_path)
 
     @pytest.mark.parametrize("model_id,config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_pickle(self, model_id, config_cls, config_kwargs):
@@ -407,7 +406,7 @@ class TestTargetParameters:
         # test that if we target multiple nn.Parameters on the same module, all of them are being used during the
         # forward pass
         torch.manual_seed(0)
-        model_id = "trl-internal-testing/tiny-Llama4ForCausalLM"
+        model_id = "peft-internal-testing/tiny-Llama4ForCausalLM"
         with hub_online_once(model_id):
             x = torch.arange(10).view(2, 5)
             model = MyAutoModelForCausalLM.from_pretrained(model_id)
@@ -480,7 +479,7 @@ class TestTargetParameters:
         # Folding the LoRA update into the parameter uses baddbmm, which autocast casts down to the autocast dtype.
         # Since a parametrization may not change the dtype of the parameter, registering it then failed, see #3601.
         torch.manual_seed(0)
-        model_id = "trl-internal-testing/tiny-Llama4ForCausalLM"
+        model_id = "peft-internal-testing/tiny-Llama4ForCausalLM"
         with hub_online_once(model_id):
             model = MyAutoModelForCausalLM.from_pretrained(model_id)
             x = torch.arange(10).view(2, 5)
@@ -576,12 +575,63 @@ class TestTargetParameters:
         output_unloaded = unloaded(x)
         assert torch.all(output_unloaded == output_parametrized)
 
+    def test_target_parameters_3d_expert_works_with_existing_parametrization(self, qwen_model, recwarn):
+        # Regression test for #4162: on 3-D expert weights, a single active LoRA adapter uses `_LoraFactorsProxy`.
+        # When the targeted weight already has a parametrization, the LoRA proxy must still be removed after each
+        # forward pass so repeated calls do not stack the LoRA update or break disabling/unloading.
+        qwen_model.eval()
+        x = torch.arange(10).view(2, 5)
+        with torch.no_grad():
+            output_base = qwen_model(x).logits
+
+        experts = qwen_model.model.layers[1].mlp.experts
+        nn.utils.parametrizations.orthogonal(experts, name="down_proj")
+        with torch.no_grad():
+            output_parametrized = qwen_model(x).logits
+
+        # Sanity check: the pre-existing parametrization changes the model output
+        assert not torch.allclose(output_base, output_parametrized, atol=1e-4, rtol=1e-4)
+
+        config = LoraConfig(
+            r=2,
+            lora_alpha=4,
+            target_modules=[],
+            target_parameters=["model.layers.1.mlp.experts.down_proj"],
+            init_lora_weights=False,
+        )
+        model = get_peft_model(qwen_model, config)
+        wrapper = model.base_model.model.model.layers[1].mlp.experts
+        assert isinstance(wrapper, ParamWrapper)
+        assert wrapper.num_experts > 1
+
+        recwarn.clear()
+        with torch.no_grad():
+            output_lora_1 = model(x).logits
+            output_lora_2 = model(x).logits
+
+        # LoRA should change the output relative to the parametrized base model
+        assert not torch.allclose(output_lora_1, output_parametrized, atol=1e-4, rtol=1e-4)
+        # Repeated forward passes must be identical (no stacked LoRA delta drift)
+        assert torch.allclose(output_lora_1, output_lora_2, atol=1e-5, rtol=1e-5)
+        assert not any("Could not find any LoRA parametrization" in str(w.message) for w in recwarn.list)
+
+        # Disabling the adapter should recover the parametrized base output (and preserve the existing parametrization)
+        with torch.no_grad(), model.disable_adapter():
+            output_disabled = model(x).logits
+        assert torch.allclose(output_disabled, output_parametrized, atol=1e-5, rtol=1e-5)
+
+        # After unloading, the output should match the parametrized base model before LoRA was applied
+        unloaded = model.unload()
+        with torch.no_grad():
+            output_unloaded = unloaded(x).logits
+        assert torch.allclose(output_unloaded, output_parametrized, atol=1e-5, rtol=1e-5)
+
     def test_target_parameter_result_caching_works(self, monkeypatch):
         # See 2912
         # There was an issue with the caching of _LoraParameterProxy not working correctly. This test checks that the
         # results returned from the forward call are all identical to ensure they're not recomputed each time.
         torch.manual_seed(0)
-        model_id = "trl-internal-testing/tiny-GptOssForCausalLM"
+        model_id = "peft-internal-testing/tiny-GptOssForCausalLM"
 
         tensor_storage = []
 
@@ -622,7 +672,7 @@ class TestTargetParameters:
         # For target parameters, the layer type is not known. This is fine, as the in_features and out_features are
         # derived from the targeted parameter shape. But we need to ensure that there is no warning about the unknown
         # layer type.
-        model_id = "trl-internal-testing/tiny-GptOssForCausalLM"
+        model_id = "peft-internal-testing/tiny-GptOssForCausalLM"
         with hub_online_once(model_id):
             model0 = AutoModelForCausalLM.from_pretrained(model_id)
             config = LoraConfig(
@@ -639,7 +689,7 @@ class TestTargetParameters:
         # ParamWrapper(s) instead of nesting new ones. As a result, the number of ParamWrappers stays constant and each
         # of them holds both adapters.
         torch.manual_seed(0)
-        model_id = "trl-internal-testing/tiny-Llama4ForCausalLM"
+        model_id = "peft-internal-testing/tiny-Llama4ForCausalLM"
         target_parameters = ["feed_forward.experts.gate_up_proj", "feed_forward.experts.down_proj"]
         with hub_online_once(model_id):
             model = MyAutoModelForCausalLM.from_pretrained(model_id)
@@ -669,7 +719,7 @@ class TestTargetParameters:
         # which meant that the state dict for 'other' would contain an extra base layer, which meant it could not be
         # loaded unless the default adapter was loaded first.
         torch.manual_seed(0)
-        model_id = "trl-internal-testing/tiny-Llama4ForCausalLM"
+        model_id = "peft-internal-testing/tiny-Llama4ForCausalLM"
         target_parameters = ["feed_forward.experts.gate_up_proj", "feed_forward.experts.down_proj"]
         x = torch.arange(10).view(2, 5)
         with hub_online_once(model_id):
