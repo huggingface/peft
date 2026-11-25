@@ -27,6 +27,22 @@ The abstract from the paper is:
 
 *We present LLaMA-Adapter, a lightweight adaption method to efficiently fine-tune LLaMA into an instruction-following model. Using 52K self-instruct demonstrations, LLaMA-Adapter only introduces 1.2M learnable parameters upon the frozen LLaMA 7B model, and costs less than one hour for fine-tuning on 8 A100 GPUs. Specifically, we adopt a set of learnable adaption prompts, and prepend them to the input text tokens at higher transformer layers. Then, a zero-init attention mechanism with zero gating is proposed, which adaptively injects the new instructional cues into LLaMA, while effectively preserves its pre-trained knowledge. With efficient training, LLaMA-Adapter generates high-quality responses, comparable to Alpaca with fully fine-tuned 7B parameters. Furthermore, our approach can be simply extended to multi-modal input, e.g., images, for image-conditioned LLaMA, which achieves superior reasoning capacity on ScienceQA. We release our code at https://github.com/ZrrSkywalker/LLaMA-Adapter*.
 
+## When to use Llama-Adapter
+
+Llama-Adapter is a good choice when:
+
+- You want a very small checkpoint. Only the adaption prompts and their gates are trained and saved, which amounts to `adapter_layers * (adapter_len * hidden_size + 1)` parameters.
+- You are instruction-tuning a supported model (Llama, Mistral, or GPT-2), the use case the paper focuses on.
+- You want to keep several task-specific adapters for the same base model and switch between them with `set_adapter`.
+
+## When not to use Llama-Adapter
+
+Llama-Adapter may not be the best choice when:
+
+- Your model is not a Llama, Mistral, or GPT-2 model. Other architectures raise a `ValueError`. Consider [LoRA](./lora) instead.
+- You need zero inference overhead. The adapter cannot be merged into the base weights (`merge_and_unload()` is not supported), so each adapted layer attends over `adapter_len` additional tokens at inference time.
+- You want several adapters to be active at the same time. Only one adapter can be active, and adaption prompts cannot be stacked on the same attention module.
+
 ## Benchmark overview
 
 <iframe

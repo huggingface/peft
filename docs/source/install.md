@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # Installation
 
-Before you start, you will need to setup your environment, install the appropriate packages, and configure 🤗 PEFT. 🤗 PEFT is tested on **Python 3.11+**.
+Before you start, you will need to setup your environment, install the appropriate packages, and configure 🤗 PEFT. 🤗 PEFT is tested on **Python 3.11+**. Since PEFT v1.0, the minimum Transformers version is 5.6.0 and the minimum PyTorch version is 2.6.0.
 
 🤗 PEFT is available on PyPI, as well as GitHub:
 

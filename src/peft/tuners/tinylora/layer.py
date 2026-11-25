@@ -132,6 +132,9 @@ class TinyLoraLayer(BaseTunerLayer):
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
         return True
 
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        return self.get_delta_weight(adapter_name)
+
     def _get_layer_seed(self, adapter_name: str, base_seed: int) -> int:
         """Get a deterministic seed for this layer's projection matrices."""
         return base_seed + self._layer_idx
@@ -151,7 +154,6 @@ class TinyLoraLayer(BaseTunerLayer):
         tinylora_dropout = config.tinylora_dropout
         projection_seed = config.projection_seed
         inference_mode = config.inference_mode
-        fan_in_fan_out = config.fan_in_fan_out
 
         # The projection tensors P are only part of the checkpoint if save_projection is set, otherwise they are
         # regenerated from the projection seed when loading.
@@ -177,7 +179,10 @@ class TinyLoraLayer(BaseTunerLayer):
 
         # Compute truncated SVD of base weights (following LoRA-XS convention)
         # actual_r may be less than r if matrix dimensions are smaller
-        self._init_svd(adapter_name, r, fan_in_fan_out)
+        #
+        # Use the layer's fan_in_fan_out instead of the config's as this value may be changed once
+        # during creation in _create_new_module and therefore can diverge from the incoming config.
+        self._init_svd(adapter_name, r, self.fan_in_fan_out)
 
         # Initialize random projection tensors P using the actual rank
         self._init_projection(adapter_name, u, projection_seed)

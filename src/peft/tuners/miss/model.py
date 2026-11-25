@@ -37,7 +37,7 @@ def _get_tuner_layer_class(target_base_layer: torch.nn.Module) -> type[MissLayer
 
 class MissModel(BaseTuner):
     """
-    Creates Householder reflection adaptation (MiSS) model from a pretrained model. The method is described in
+    Creates Matrix Shard Sharing (MiSS) model from a pretrained model. The method is described in
     https://huggingface.co/papers/2409.15371
 
     Args:
@@ -52,32 +52,12 @@ class MissModel(BaseTuner):
 
     Example:
         ```py
-        >>> from diffusers import StableDiffusionPipeline
-        >>> from peft import MissModel, MissConfig
+        >>> from transformers import AutoModelForCausalLM
+        >>> from peft import MissConfig, get_peft_model
 
-        >>> config_te = MissConfig(
-        ...     r=8,
-        ...     target_modules=["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
-        ...     init_weights=True,
-        ... )
-        >>> config_unet = MissConfig(
-        ...     r=8,
-        ...     target_modules=[
-        ...         "proj_in",
-        ...         "proj_out",
-        ...         "to_k",
-        ...         "to_q",
-        ...         "to_v",
-        ...         "to_out.0",
-        ...         "ff.net.0.proj",
-        ...         "ff.net.2",
-        ...     ],
-        ...     init_weights=True,
-        ... )
-
-        >>> model = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5")
-        >>> model.text_encoder = MissModel(model.text_encoder, config_te, "default")
-        >>> model.unet = MissModel(model.unet, config_unet, "default")
+        >>> base_model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        >>> config = MissConfig(r=64)
+        >>> model = get_peft_model(base_model, config)
         ```
 
     **Attributes**:

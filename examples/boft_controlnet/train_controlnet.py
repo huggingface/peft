@@ -51,6 +51,7 @@ from utils.unet_2d_condition import UNet2DConditionNewModel
 
 from peft import BOFTConfig, get_peft_model
 from peft.peft_model import PeftModel
+from peft.utils import activation_checkpointing_enable
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
@@ -235,7 +236,7 @@ def main(args):
         controlnet.enable_gradient_checkpointing()
         unet.enable_gradient_checkpointing()
         if args.train_text_encoder and not (args.use_lora or args.use_boft or args.use_oft):
-            text_encoder.gradient_checkpointing_enable()
+            activation_checkpointing_enable(text_encoder)
 
     # Check that all trainable models are in full precision
     low_precision_error_string = (

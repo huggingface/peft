@@ -255,7 +255,8 @@ For large models, consider:
 - Using smaller `max_length`
 - Enabling gradient checkpointing (add to model before OSF):
   ```python
-  model.gradient_checkpointing_enable()
+  # note: call `model.gradient_checkpointing_enable()` on older Transformers versions
+  model.activation_checkpointing_enable()
   ```
 
 ### Training Speed

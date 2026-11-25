@@ -14,14 +14,10 @@
 
 from peft.utils import register_peft_method
 
+from . import _ops  # noqa: F401  # registers the custom ops used under torch.compile
 from .config import PacaConfig
-from .layer import Linear, PacaLayer, _torch_supports_custom_ops
+from .layer import Linear, PacaLayer
 from .model import PacaModel
-
-
-if _torch_supports_custom_ops:
-    # registers the custom ops used under torch.compile
-    from . import _ops  # noqa: F401
 
 
 __all__ = ["Linear", "PacaConfig", "PacaLayer", "PacaModel"]

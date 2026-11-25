@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Column swap, matmul and restore of PaCA as opaque custom ops for `torch.compile` (requires PyTorch >= 2.4).
+"""Column swap, matmul and restore of PaCA as opaque custom ops for `torch.compile`.
 
 The eager implementation writes the adapted columns into the base weight in place. Under `torch.compile`, in-place
 writes to a graph input are functionalized, i.e. every layer gets an out-of-place copy of its full weight, which costs

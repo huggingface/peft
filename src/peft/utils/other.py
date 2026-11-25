@@ -26,7 +26,6 @@ from typing import Any, Optional, Union
 
 import accelerate
 import torch
-import transformers
 from accelerate import FullyShardedDataParallelPlugin
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
 from accelerate.utils import is_npu_available, is_xpu_available
@@ -34,13 +33,11 @@ from huggingface_hub import file_exists
 from huggingface_hub.errors import EntryNotFoundError, HFValidationError
 from packaging import version
 from safetensors.torch import storage_ptr, storage_size
-from transformers import PreTrainedModel
 
 from ..import_utils import (
+    get_transformers_cache_name,
     is_gptqmodel_available,
     is_torch_tpu_available,
-    is_transformers_ge_v5,
-    is_transformers_ge_v5_1_0,
 )
 from .constants import (
     CONFIG_NAME,
@@ -154,11 +151,20 @@ def infer_device() -> str:
         return "xpu"
     elif is_npu_available():
         return "npu"
+    elif hasattr(torch, "accelerator") and torch.accelerator.is_available():
+        accelerator = torch.accelerator.current_accelerator()
+        if accelerator is not None:
+            return accelerator.type
     return "cpu"
 
 
 def prepare_model_for_kbit_training(
-    model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs=None, auto_clear_cache=True
+    model,
+    use_gradient_checkpointing=True,
+    activation_checkpointing_kwargs=None,
+    auto_clear_cache=True,
+    *,
+    gradient_checkpointing_kwargs=None,
 ):
     r"""
     Note this method only works for `transformers` models.
@@ -173,24 +179,41 @@ def prepare_model_for_kbit_training(
             The loaded model from `transformers`
         use_gradient_checkpointing (`bool`, *optional*, defaults to `True`):
             If True, use gradient checkpointing to save memory at the expense of slower backward pass.
-        gradient_checkpointing_kwargs (`dict`, *optional*, defaults to `None`):
-            Keyword arguments to pass to the gradient checkpointing function, please refer to the documentation of
+        activation_checkpointing_kwargs (`dict`, *optional*, defaults to `None`):
+            Keyword arguments to pass to the activation checkpointing function, please refer to the documentation of
             `torch.utils.checkpoint.checkpoint` for more details about the arguments that you can pass to that method.
-            Note this is only available in the latest transformers versions (> 4.34.1).
         auto_clear_cache (`bool`, *optional*, defaults to `True`):
             Whether to empty the accelerator cache after upcasting parameters to fp32. This releases memory held by the
             caching allocator, which is especially helpful on devices that share host and accelerator memory. Set to
             `False` to skip this step.
+        gradient_checkpointing_kwargs (`dict`, *optional*, defaults to `None`):
+            Keyword arguments to pass to the activation checkpointing function. This argument exists only for backwards
+            compatiblity and is deprecated, please use `activation_checkpointing_kwargs` instead. It will be removed in
+            PEFT v1.2.
     """
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
     is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
+    # TODO: Remove the AQLM, EETQ, and HQQ training preparation branches in PEFT v1.2.
     is_aqlm_quantized = getattr(model, "quantization_method", None) == "aqlm"
     is_eetq_quantized = getattr(model, "quantization_method", None) == "eetq"
     is_torchao_quantized = getattr(model, "quantization_method", None) == "torchao"
     is_hqq_quantized = getattr(model, "quantization_method", None) == "hqq" or getattr(model, "hqq_quantized", False)
 
-    if gradient_checkpointing_kwargs is None:
-        gradient_checkpointing_kwargs = {}
+    # TODO: remove gradient_checkpointing_kwargs in v1.2
+    if gradient_checkpointing_kwargs and activation_checkpointing_kwargs:
+        raise ValueError(
+            "Don't use `activation_checkpointing_kwargs` and `gradient_checkpointing_kwargs` at the same time, only "
+            "use `activation_checkpointing_kwargs`; `gradient_checkpointing_kwargs` is deprecated and will be removed "
+            "in v1.2."
+        )
+
+    if gradient_checkpointing_kwargs:
+        warnings.warn(
+            "`gradient_checkpointing_kwargs` is deprecated and will be removed in v1.2. Use "
+            "`activation_checkpointing_kwargs` instead.",
+            FutureWarning,
+        )
+        activation_checkpointing_kwargs = gradient_checkpointing_kwargs
 
     for name, param in model.named_parameters():
         # freeze base model's layers
@@ -228,8 +251,9 @@ def prepare_model_for_kbit_training(
         or is_hqq_quantized
         or is_torchao_quantized
     ) and use_gradient_checkpointing:
-        # When having `use_reentrant=False` + gradient_checkpointing, there is no need for this hack
-        if "use_reentrant" not in gradient_checkpointing_kwargs or gradient_checkpointing_kwargs["use_reentrant"]:
+        # Make sure that at least one of the model inputs requires a gradient when gradient checkpointing
+        # and `use_reentrant=True` is used (a requirement by torch.utils.checkpoint).
+        if activation_checkpointing_kwargs is not None and activation_checkpointing_kwargs.get("use_reentrant", False):
             # For backward compatibility
             if hasattr(model, "enable_input_require_grads"):
                 model.enable_input_require_grads()
@@ -240,24 +264,12 @@ def prepare_model_for_kbit_training(
 
                 model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
 
-        # To support older transformers versions, check if the model supports gradient_checkpointing_kwargs
-        _supports_gc_kwargs = "gradient_checkpointing_kwargs" in list(
-            inspect.signature(model.gradient_checkpointing_enable).parameters
-        )
-
-        if not _supports_gc_kwargs and len(gradient_checkpointing_kwargs) > 0:
-            warnings.warn(
-                "gradient_checkpointing_kwargs is not supported in this version of transformers. The passed kwargs will be ignored."
-                " if you want to use that feature, please upgrade to the latest version of transformers.",
-                FutureWarning,
-            )
-
-        gc_enable_kwargs = (
-            {} if not _supports_gc_kwargs else {"gradient_checkpointing_kwargs": gradient_checkpointing_kwargs}
-        )
-
-        # enable gradient checkpointing for memory efficiency
-        model.gradient_checkpointing_enable(**gc_enable_kwargs)
+        if hasattr(model, "activation_checkpointing_enable"):
+            # enable activation checkpointing for memory efficiency; method was renamed in Transformers v5.23
+            model.activation_checkpointing_enable(activation_checkpointing_kwargs=activation_checkpointing_kwargs)
+        else:
+            # TODO: remove this branch once Transformers < v6 is no longer supported.
+            model.gradient_checkpointing_enable(gradient_checkpointing_kwargs=activation_checkpointing_kwargs)
     return model
 
 
@@ -1311,34 +1323,14 @@ def _prepare_prompt_learning_config(peft_config, model_config):
 
 
 def _get_no_split_modules(model) -> set[str]:
-    """
-    Get the modules of the model that should not be split when using device_map. We iterate through the modules to get
-    the underlying `_no_split_modules`.
+    """Get the module classes that should stay together when using a device map.
 
     Returns:
-        `List[str]`: List of modules that should not be split
+        set[str]
+            Set of module names that should stay together when using a device map.
     """
-    # After discussion in https://github.com/huggingface/transformers/pull/38141, based on:
-    # https://github.com/huggingface/transformers/blob/1e921a3a9cea92b383ca4b0484ee45596bbdadc3/src/transformers/modeling_utils.py#L2677-L2704
-    _no_split_modules: set[str] = set()
-    if not hasattr(model, "_no_split_modules"):
-        return _no_split_modules
-
-    if is_transformers_ge_v5_1_0:
-        # See https://github.com/huggingface/transformers/commit/36ec3bfa33ebf6c3b38a1d6808292aeea4aae84d
-        return model._no_split_modules
-
-    # TODO remove once transformers <5.1.0 is not supported anymore
-    modules_to_check = [model]
-    while len(modules_to_check) > 0:
-        module = modules_to_check.pop(-1)
-        # if the module does not appear in _no_split_modules, we also check the children
-        if module.__class__.__name__ not in _no_split_modules:
-            if isinstance(module, PreTrainedModel):
-                if module._no_split_modules is not None:
-                    _no_split_modules = _no_split_modules | set(module._no_split_modules)
-            modules_to_check += list(module.children())
-    return _no_split_modules
+    # Transformers includes classes from submodels in this attribute.
+    return getattr(model, "_no_split_modules", set())
 
 
 def fsdp_auto_wrap_policy(model):
@@ -1753,72 +1745,25 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
             )
 
 
-def create_attention_mask(
-    model, *, model_input, attention_mask, past_key_values, cache_position, batch_size, sequence_length, position_ids
-):
+def create_attention_mask(model, *, attention_mask, past_key_values, batch_size, sequence_length, position_ids):
     # adapted from:
     # https://github.com/huggingface/transformers/blob/cb4c56ce0dfa1350267ed28e57760986a58a9ba4/src/transformers/generation/utils.py#L644-L680
     # In PEFT, we sometimes need to re-create the attention mask. This is because some prompt learning methods insert
     # new items into the sequence, which results in the attention mask needing an update. We re-use transformers code
     # for this as much as possible.
-    transformers_ge_4_53_1 = version.parse(transformers.__version__) >= version.parse("4.53.1")
-    if transformers_ge_4_53_1:
-        # the function already exists in v4.53.0 but has a different signature, so we check for 4.53.1
-        from transformers.masking_utils import create_masks_for_generate
-    else:
-        raise ImportError("Your transformers version is too old, please upgrade it to >= 4.53.1")
+    from transformers.masking_utils import create_masks_for_generate
 
-    # Create the causal mask with fixed shape in advance, to reduce recompilations. If the function to create
-    # the 4D causal mask exists, it should be present in the base model (XXXModel class) or in its decoder.
-    base_model = getattr(model, model.base_model_prefix, model)
-    decoder = base_model.get_decoder() if hasattr(base_model, "get_decoder") else None
-    # TODO: remove check for _prepare_4d_causal_attention_mask_with_cache_position once Transformers <= v5.2 is
-    # dropped. Note that for <= v5.2, the function may or may not exist, so the fallback in the
-    # `causal_mask_creation_function is None` case is still needed.
-    causal_mask_creation_function = getattr(base_model, "_prepare_4d_causal_attention_mask_with_cache_position", None)
-    if causal_mask_creation_function is None and decoder is not None:  # it may be in the decoder
-        causal_mask_creation_function = getattr(decoder, "_prepare_4d_causal_attention_mask_with_cache_position", None)
-
-    # If it's not defined, it means the model uses the new general mask API
-    if causal_mask_creation_function is None:  # can't be found
-        token_type_ids = getattr(model_input, "token_type_ids", None)
-        # Some models may overwrite the general one
-        causal_mask_creation_function = getattr(model, "create_masks_for_generate", create_masks_for_generate)
-        # Transforrmers only uses batch size, seq_length, and dtype of inputs_embeds to create the mask, so it's safe to
-        # create a dummy tensor here.
-        dummy_embeds = torch.empty((batch_size, sequence_length), dtype=model.dtype)
-        if is_transformers_ge_v5:
-            # transformers v5 renamed the input_embeds argument to inputs_embeds and removed cache_position
-            attention_mask = causal_mask_creation_function(
-                config=model.config,
-                inputs_embeds=dummy_embeds,
-                attention_mask=attention_mask,
-                past_key_values=past_key_values,
-                token_type_ids=token_type_ids,
-                position_ids=position_ids,
-            )
-        else:
-            attention_mask = causal_mask_creation_function(
-                config=model.config,
-                input_embeds=dummy_embeds,
-                attention_mask=attention_mask,
-                cache_position=cache_position,
-                past_key_values=past_key_values,
-                token_type_ids=token_type_ids,
-                position_ids=position_ids,
-            )
-    else:
-        attention_mask = causal_mask_creation_function(
-            attention_mask,
-            sequence_length=sequence_length,
-            target_length=past_key_values.get_max_cache_shape(),
-            dtype=model.dtype,
-            cache_position=cache_position,
-            batch_size=batch_size,
-            config=model.config,
-            past_key_values=past_key_values,
-            position_ids=position_ids,
-        )
+    causal_mask_creation_function = getattr(model, "create_masks_for_generate", create_masks_for_generate)
+    # Mask creation only uses the shape and dtype of the embeddings.
+    dummy_embeds = torch.empty((batch_size, sequence_length), dtype=model.dtype)
+    attention_mask = causal_mask_creation_function(
+        config=model.config,
+        inputs_embeds=dummy_embeds,
+        attention_mask=attention_mask,
+        **{get_transformers_cache_name(): past_key_values},
+        token_type_ids=None,
+        position_ids=position_ids,
+    )
     return attention_mask
 
 
@@ -1826,8 +1771,7 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
     """
     Get the list of the fully qualified names of the modules that are tied to the input embeddings. In case of a
     source-target-mapping `_tied_weights_keys`, it will attempt to identify the input embedding weights from the
-    mapping and return the list of tied modules accordingly. This gives a unified interface to both transformers v4
-    tied weights and v5 mapped tied weights.
+    mapping and return the list of tied modules accordingly. Custom models can also provide a list of tied keys.
 
     For example: For models which have `embed_tokens` and `lm_head` as the tied keys, this function will return
     [`lm_head`]. The PEFT model is assumed to be transparent: returned names will be relative to the base model, so
@@ -1904,7 +1848,7 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
         )
 
     elif model._tied_weights_keys is not None:
-        # TODO remove this when transformers <v5 is no longer supported
+        # Extend this in case custom models want to provide `_tied_weights_keys` as a list of tied parameter names.
         tied_weights.extend(model._tied_weights_keys)
 
     # get module names from parameter names

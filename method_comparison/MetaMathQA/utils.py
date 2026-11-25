@@ -46,7 +46,7 @@ from transformers import (
 import peft
 from peft import PeftConfig, get_peft_model
 from peft.optimizers import create_lorafa_optimizer, create_loraplus_optimizer, create_riemannian_optimizer
-from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
+from peft.utils import SAFETENSORS_WEIGHTS_NAME, activation_checkpointing_enable, infer_device
 
 
 device = infer_device()
@@ -243,7 +243,7 @@ def get_base_model(
     model = AutoModelForCausalLM.from_pretrained(**kwargs)
     if use_gc:
         model.enable_input_require_grads()
-        model.gradient_checkpointing_enable()
+        activation_checkpointing_enable(model)
 
     return model
 
