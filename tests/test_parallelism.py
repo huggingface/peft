@@ -137,8 +137,8 @@ class TestShardedBaseLayerShapes:
             "up_proj",
             "down_proj",
         ]
-        # Each data rank initializes independently and trains on a different sequence.
-        torch.manual_seed(dist.get_rank())
+        # Inject after sharding to check shape inference from FSDP-managed base weights.
+        torch.manual_seed(0)
         model = get_peft_model(model, LoraConfig(target_modules=target_modules, init_lora_weights=False))
 
         # Check that the LoRA adapters are not DTensors.
@@ -153,6 +153,25 @@ class TestShardedBaseLayerShapes:
         expected_shapes = {name: param.shape for name, param in reference.named_parameters() if "lora_" in name}
         assert shapes == expected_shapes
 
+        input_ids = torch.tensor([[1, 2, 3, 4, 5]])
+        with torch.no_grad():
+            torch.testing.assert_close(model(input_ids=input_ids).logits, reference(input_ids=input_ids).logits)
+
+    @staticmethod
+    def transformers_fsdp2_lora_gradients_match(model_id):
+        from transformers.distributed import DistributedConfig
+
+        reference = AutoModelForCausalLM.from_pretrained(model_id)
+        model = AutoModelForCausalLM.from_pretrained(model_id, distributed_config=DistributedConfig(fsdp_size=2))
+        target_modules = ["embed_tokens", "q_proj"]
+        # Each data rank initializes independently and trains on a different sequence.
+        torch.manual_seed(dist.get_rank())
+        model = get_peft_model(model, LoraConfig(target_modules=target_modules, init_lora_weights=False))
+
+        torch.manual_seed(0)
+        reference = get_peft_model(reference, LoraConfig(target_modules=target_modules, init_lora_weights=False))
+        adapters = {name: param for name, param in model.named_parameters() if "lora_" in name}
+
         batch = torch.tensor([[1, 2, 3, 4, 5], [5, 4, 3, 2, 1]])
         gradient_state = GradientState()
         for sync_gradients, microbatch in ((False, batch), (True, batch + 1)):
@@ -163,12 +182,11 @@ class TestShardedBaseLayerShapes:
             torch.testing.assert_close(output.logits, expected.logits[dist.get_rank() : dist.get_rank() + 1])
             with patch.object(dist, "all_reduce", wraps=dist.all_reduce) as reduce:
                 output.loss.backward()
-            assert reduce.call_count == (len(shapes) if sync_gradients else 0)
+            assert reduce.call_count == (len(adapters) if sync_gradients else 0)
             expected.loss.backward()
         reference_params = dict(reference.named_parameters())
-        for name, param in model.named_parameters():
-            if "lora_" in name:
-                torch.testing.assert_close(param.grad, reference_params[name].grad)
+        for name, param in adapters.items():
+            torch.testing.assert_close(param.grad, reference_params[name].grad)
 
     @staticmethod
     def pytorch_tp_lora_adapter_shapes(model_config, mesh_dim_name, register_mesh_dim, embedding_style):
@@ -361,6 +379,17 @@ class TestShardedBaseLayerShapes:
             (model_checkpoint, (1, 2), ("dp_replicate", "dp_shard")),
         ]
         self._spawn(tmp_path, self.fsdp2_lora_shapes_injected_after_sharding, cases)
+
+    @pytest.mark.skipif(
+        packaging.version.parse(transformers.__version__) < packaging.version.parse("5.24.0.dev0"),
+        reason="Requires Transformers load-time FSDP2 mesh metadata",
+    )
+    @pytest.mark.skipif(
+        packaging.version.parse(torch.__version__) < packaging.version.parse("2.8") or infer_device() != "cpu",
+        reason="The Transformers distributed loader requires torch >= 2.8 and uses the detected device",
+    )
+    def test_transformers_fsdp2_lora_gradients_match(self, tmp_path, model_checkpoint):
+        self._spawn(tmp_path, self.transformers_fsdp2_lora_gradients_match, [(model_checkpoint,)])
 
     def test_pytorch_tp_lora_adapter_shapes(self, tmp_path, model_config):
         # Run all unregistered-name checks before registration, which stays local to the spawned workers.
