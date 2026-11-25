@@ -35,7 +35,7 @@ class LilyModel(BaseTuner):
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.
-        config ([`LilyConfig`]): The configuration of the Lily model.
+        peft_config ([`LilyConfig`]): The configuration of the Lily model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
 
     Returns:

@@ -340,7 +340,7 @@ class RankAllocator:
     The RankAllocator for AdaLoraModel. Paper: https://openreview.net/pdf?id=lq62uWRJjiY
 
     Args:
-        config ([`AdaLoraConfig`]): The configuration of the AdaLora model.
+        peft_config ([`AdaLoraConfig`]): The configuration of the AdaLora model.
         model: the model that we apply AdaLoRA to.
 
     """

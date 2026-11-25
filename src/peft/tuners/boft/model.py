@@ -51,7 +51,7 @@ class BOFTModel(BaseTuner):
 
     Args:
         model ([`transformers.PreTrainedModel`]): The model to be adapted.
-        config ([`BOFTConfig`]): The configuration of the BOFT model.
+        peft_config ([`BOFTConfig`]): The configuration of the BOFT model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             Create empty adapter weights on meta device. Useful to speed up the loading process.

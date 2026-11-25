@@ -33,7 +33,7 @@ class PeanutModel(BaseTuner):
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.
-        config ([`PeanutConfig`]): The configuration of the PEANuT model.
+        peft_config ([`PeanutConfig`]): The configuration of the PEANuT model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
 
     Returns:

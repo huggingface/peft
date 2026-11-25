@@ -92,12 +92,10 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
     Args:
         model (`torch.nn.Module`):
             The model to be tuned.
-        config (`PeftConfig`):
+        peft_config (`PeftConfig`):
             The config of the model to be tuned. The adapter type must be compatible.
         adapter_name (`str`, `optional`, defaults to `"default"`):
             The name of the first adapter.
-        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
-            Create empty adapter weights on meta device. Useful to speed up the loading process.
     """
 
     def __init__(self, model: nn.Module, peft_config: PeftConfig, adapter_name: str = "default") -> None:

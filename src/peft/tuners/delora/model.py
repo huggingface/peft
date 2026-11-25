@@ -34,7 +34,7 @@ class DeloraModel(BaseTuner):
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.
-        config ([`DeloraConfig`]): The configuration of the DeLoRA model.
+        peft_config ([`DeloraConfig`]): The configuration of the DeLoRA model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
 
     Returns:
