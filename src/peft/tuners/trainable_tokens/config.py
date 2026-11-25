@@ -87,3 +87,5 @@ class TrainableTokensConfig(PeftConfig):
     def __post_init__(self):
         super().__post_init__()
         self.peft_type = PeftType.TRAINABLE_TOKENS
+        if not self.token_indices:
+            raise ValueError(f"`token_indices` must be a non-empty list of ints, got {self.token_indices}.")

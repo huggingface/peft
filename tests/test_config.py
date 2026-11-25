@@ -128,7 +128,7 @@ ALL_CONFIG_CLASSES = (
     (ShiraConfig, {}),
     (SupertuningConfig, {}),
     (TinyLoraConfig, {}),
-    (TrainableTokensConfig, {}),
+    (TrainableTokensConfig, {"token_indices": [0, 1]}),
     (VeraConfig, {}),
     (VBLoRAConfig, {}),
     (XLoraConfig, {"hidden_size": 32, "adapters": {}}),
@@ -213,6 +213,8 @@ class TestPeftConfig:
                 mandatory_config_kwargs = {"total_step": 1}
             elif expected_cls == CPTConfig:
                 mandatory_config_kwargs = {"task_type": TaskType.CAUSAL_LM}
+            elif expected_cls == TrainableTokensConfig:
+                mandatory_config_kwargs = {"token_indices": [0, 1]}
 
             config = PeftConfig.from_peft_type(peft_type=peft_type, **mandatory_config_kwargs)
             assert type(config) is expected_cls

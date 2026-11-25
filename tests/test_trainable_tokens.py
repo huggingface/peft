@@ -652,6 +652,12 @@ class TestTrainableTokens:
             model = get_peft_model(model, peft_config)
         assert f"Target modules {{{target_layer_name!r}}} not found in the base model." in str(e)
 
+    def test_empty_token_indices_raises(self):
+        # see #4197: the default (empty) token_indices used to fail late with an obscure index_copy_ dtype error
+        with pytest.raises(ValueError) as e:
+            TrainableTokensConfig(target_modules=["emb"])
+        assert "`token_indices` must be a non-empty list of ints" in str(e)
+
     def test_multiple_targets(self, model_multi_embedding):
         # tests the ability of targeting two modules with the same token indices
         original_model = copy.deepcopy(model_multi_embedding)
