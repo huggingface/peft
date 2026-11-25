@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import re
+from contextlib import nullcontext
 
 import pytest
 import torch
@@ -575,7 +576,8 @@ class TestTargetParameters:
         output_unloaded = unloaded(x)
         assert torch.all(output_unloaded == output_parametrized)
 
-    def test_nested_adapters_on_parametrized_weights_get_gradients(self):
+    @pytest.mark.parametrize("outer_cache", [False, True])
+    def test_nested_adapters_on_parametrized_weights_get_gradients(self, outer_cache):
         class Projections(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -583,7 +585,10 @@ class TestTargetParameters:
                 self.down = nn.Parameter(torch.eye(4))
 
             def forward(self, x):
-                return nn.functional.linear(nn.functional.linear(x, self.up), self.down)
+                up, down = self.up, self.down
+                assert self.up is up
+                assert self.down is down
+                return nn.functional.linear(nn.functional.linear(x, up), down)
 
         projections = Projections()
         nn.utils.parametrize.register_parametrization(projections, "up", nn.Identity())
@@ -594,14 +599,19 @@ class TestTargetParameters:
         assert len(adapters) == 2
         for adapter in adapters:
             nn.init.ones_(adapter.lora_A["default"].weight)
+            nn.init.ones_(adapter.lora_B["default"].weight)
 
-        for _ in range(2):
-            model.zero_grad(set_to_none=True)
-            model(torch.ones(2, 4)).sum().backward()
-            for adapter in adapters:
-                grad = adapter.lora_B["default"].weight.grad
-                assert grad is not None, f"{adapter.parameter_name} has no LoRA gradient"
-                assert torch.count_nonzero(grad)
+        with nn.utils.parametrize.cached() if outer_cache else nullcontext():
+            up, down = projections.up, projections.down
+            for _ in range(2):
+                model.zero_grad(set_to_none=True)
+                model(torch.ones(2, 4)).sum().backward()
+                for adapter in adapters:
+                    grad = adapter.lora_B["default"].weight.grad
+                    assert grad is not None, f"{adapter.parameter_name} has no LoRA gradient"
+                    assert torch.count_nonzero(grad)
+                torch.testing.assert_close(projections.up, up)
+                torch.testing.assert_close(projections.down, down)
 
     def test_target_parameters_3d_expert_works_with_existing_parametrization(self, qwen_model, recwarn):
         # Regression test for #4162: on 3-D expert weights, a single active LoRA adapter uses `_LoraFactorsProxy`.
