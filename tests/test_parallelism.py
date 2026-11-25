@@ -17,6 +17,7 @@ import os
 import platform
 from datetime import timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 import packaging.version
 import pytest
@@ -24,6 +25,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import transformers
+from accelerate.state import GradientState
 from safetensors.torch import load_file as safe_load_file
 from torch import nn
 from torch.distributed.device_mesh import init_device_mesh
@@ -135,8 +137,8 @@ class TestShardedBaseLayerShapes:
             "up_proj",
             "down_proj",
         ]
-        # Inject after sharding to check shape inference from FSDP-managed base weights.
-        torch.manual_seed(0)
+        # Each data rank initializes independently and trains on a different sequence.
+        torch.manual_seed(dist.get_rank())
         model = get_peft_model(model, LoraConfig(target_modules=target_modules, init_lora_weights=False))
 
         # Check that the LoRA adapters are not DTensors.
@@ -151,10 +153,22 @@ class TestShardedBaseLayerShapes:
         expected_shapes = {name: param.shape for name, param in reference.named_parameters() if "lora_" in name}
         assert shapes == expected_shapes
 
-        # Check that the forward pass matches the reference model.
-        input_ids = torch.tensor([[1, 2, 3, 4, 5]])
-        with torch.no_grad():
-            torch.testing.assert_close(model(input_ids=input_ids).logits, reference(input_ids=input_ids).logits)
+        batch = torch.tensor([[1, 2, 3, 4, 5], [5, 4, 3, 2, 1]])
+        gradient_state = GradientState()
+        for sync_gradients, microbatch in ((False, batch), (True, batch + 1)):
+            gradient_state._set_sync_gradients(sync_gradients)
+            local_input = microbatch[dist.get_rank() : dist.get_rank() + 1]
+            output = model(input_ids=local_input, labels=local_input)
+            expected = reference(input_ids=microbatch, labels=microbatch)
+            torch.testing.assert_close(output.logits, expected.logits[dist.get_rank() : dist.get_rank() + 1])
+            with patch.object(dist, "all_reduce", wraps=dist.all_reduce) as reduce:
+                output.loss.backward()
+            assert reduce.call_count == (len(shapes) if sync_gradients else 0)
+            expected.loss.backward()
+        reference_params = dict(reference.named_parameters())
+        for name, param in model.named_parameters():
+            if "lora_" in name:
+                torch.testing.assert_close(param.grad, reference_params[name].grad)
 
     @staticmethod
     def pytorch_tp_lora_adapter_shapes(model_config, mesh_dim_name, register_mesh_dim, embedding_style):
@@ -402,6 +416,7 @@ class TestShardedBaseLayerShapes:
         fully_shard(model, mesh=mesh)
         sharded_params = dict(model.named_parameters())
         assert all(isinstance(param, DTensor) for param in sharded_params.values())
+        assert not any(getattr(param, "_peft_fsdp_replicated", False) for param in sharded_params.values())
 
         model.state_dict()
         params_after = dict(model.named_parameters())

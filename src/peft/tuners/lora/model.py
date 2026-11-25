@@ -449,6 +449,54 @@ class LoraModel(BaseTuner):
                         tp_size=self.model._tp_size,
                     )
 
+        groups = self._get_fsdp_replica_groups(base_layer, current_key)
+        if groups:
+            lora_module._lora_fsdp_replica_groups = groups
+            lora_module._sync_fsdp_lora_weights(adapter_name)
+
+    def _get_fsdp_replica_groups(self, base_layer, current_key):
+        # Parameters injected after fully_shard are outside FSDP2's reduction. Find
+        # the data-parallel groups of the FSDP module that owns the base weight.
+        if not getattr(base_layer, "_is_fsdp_managed_module", False):
+            return ()
+        try:
+            from torch.distributed.fsdp import FSDPModule
+        except ImportError:
+            return ()
+
+        owner = base_layer
+        while not isinstance(owner, FSDPModule):
+            if not current_key:
+                return ()
+            current_key = current_key.rpartition(".")[0]
+            owner = self.model.get_submodule(current_key)
+
+        state = owner._get_fsdp_state()
+        if len(getattr(state, "_fsdp_param_groups", ())) > 1:
+            # Newer PyTorch permits multiple meshes within one fully_shard call.
+            weights = set(base_layer.parameters())
+            param_group = next(
+                (
+                    g
+                    for g in state._fsdp_param_groups
+                    if any(
+                        p.sharded_param in weights or getattr(p, "_unsharded_param", None) in weights
+                        for p in g.fsdp_params
+                    )
+                ),
+                None,
+            )
+        else:
+            param_group = state._fsdp_param_group
+        if param_group is None:
+            return ()
+        mesh_info = param_group.mesh_info
+        return tuple(
+            getattr(mesh_info, name)
+            for name in ("shard_process_group", "replicate_process_group")
+            if hasattr(mesh_info, name) and getattr(mesh_info, name).size() > 1
+        )
+
     def _replace_module(self, parent, child_name, new_module, child):
         # override in LoraModel to handle quantized weights properly
 
