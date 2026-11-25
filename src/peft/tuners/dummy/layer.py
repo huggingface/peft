@@ -143,17 +143,30 @@ class DummyLayer(BaseTunerLayer):
         return output_tensor
 
     def _compose_delta_weight(self, adapter: str, weight_a: torch.Tensor, weight_b: torch.Tensor) -> torch.Tensor:
-        # Implemented by subclasses; combines the low-rank factors into a full-size, scaled delta weight. The delta
-        # weight is a freshly computed tensor that nothing else references, so subclasses apply the scaling in place to
-        # avoid allocating another full-size tensor.
+        # Implemented by subclasses; combines the low-rank factors into a full-size, scaled delta weight
+        # which is eventually be used by `get_delta_weight` for merge/unmerge and, depending on the method,
+        # forward (often there are better ways than to compute the full matrix during forward).
+        #
+        # Avoid creating unnecessary allocations by using in-place operations where possible.
         raise NotImplementedError
 
     def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        # `_get_additive_delta` is used for converting PEFT tuners to LoRAs. The conversion expects the tuner to compute
+        # (W + dW) and then computes LoRA A/B matrices from the singular-value decomposition of dW. This method exists
+        # because not every tuner is doing this operation additively (e.g., OFT is applied multiplicatively to the base
+        # weights).
+        #
+        # Since we apply the delta weight of our tuner additively to the base weights in `merge()` we can simply return
+        # the dW matrix directly.
+        #
+        # See `peft.convert_to_lora` for details.
         return self.get_delta_weight(adapter_name)
 
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
         # We can easily implement `_get_additive_delta`, therefore we do support LoRA conversion (and of course
-        # because this method is also LoRA but that's besides the point).
+        # because this method is also LoRA but that's besides the point). If this were a real method and
+        # we knew that there's a more trivial path to create LoRA weights from the tuner weights than doing
+        # singular value decomposition we should think about implementing a shortcut in lora/conversion.py.
         #
         # See `peft.convert_to_lora` for details.
         return True
@@ -247,6 +260,7 @@ class Linear(nn.Module, DummyLayer):
         return output_tensor
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        # Note that we don't use early returns by convention to keep the style similar between PEFT tuners.
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
