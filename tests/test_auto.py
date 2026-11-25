@@ -15,7 +15,7 @@ import tempfile
 
 import pytest
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, OPTConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import (
     AutoPeftModel,
@@ -265,33 +265,20 @@ class TestPeftAutoModel:
 
     def test_peft_causal_lm_adapter_in_subfolder(self, tmp_path):
         # See #4035: the subfolder argument refers to the adapter and must not be used to load the base model
-        base_path = tmp_path / "base"
-        adapter_path = tmp_path / "adapter"
-        config = OPTConfig(
-            vocab_size=100,
-            hidden_size=8,
-            num_hidden_layers=2,
-            num_attention_heads=2,
-            ffn_dim=16,
-            max_position_embeddings=32,
-            word_embed_proj_dim=8,
-        )
-        torch.manual_seed(0)
-        AutoModelForCausalLM.from_config(config).save_pretrained(base_path)
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+        with hub_online_once(model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(model_id)
+        lora_config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False)
+        peft_model = get_peft_model(base_model, lora_config)
+        peft_model.save_pretrained(tmp_path / "sub")
 
-        base_model = AutoModelForCausalLM.from_pretrained(base_path)
-        lora_config = LoraConfig(target_modules=["q_proj", "v_proj"], init_lora_weights=False)
-        get_peft_model(base_model, lora_config).save_pretrained(adapter_path / "sub")
-
-        model = AutoPeftModelForCausalLM.from_pretrained(adapter_path, subfolder="sub")
+        with hub_online_once(model_id):
+            model = AutoPeftModelForCausalLM.from_pretrained(tmp_path, subfolder="sub")
         assert isinstance(model, PeftModelForCausalLM)
 
-        expected_model = PeftModel.from_pretrained(
-            AutoModelForCausalLM.from_pretrained(base_path), adapter_path, subfolder="sub"
-        )
         input_ids = torch.arange(10).unsqueeze(0)
         with torch.no_grad():
-            assert torch.allclose(model(input_ids).logits, expected_model(input_ids).logits)
+            assert torch.allclose(model(input_ids).logits, peft_model(input_ids).logits)
 
     @pytest.mark.parametrize(
         "auto_class, model_id",

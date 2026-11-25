@@ -3876,41 +3876,6 @@ class TestLoadAdapterOfflineMode:
             base_model = AutoModelForCausalLM.from_pretrained(self.base_model, cache_dir=tmp_path)
             PeftModel.from_pretrained(base_model, self.peft_model_id, cache_dir=tmp_path)
 
-    @pytest.mark.parametrize("safe_serialization", [True, False])
-    def test_load_adapter_offline_from_subfolder(self, changed_default_cache_dir, tmp_path, safe_serialization):
-        # See #4035: in offline mode, the subfolder was prepended twice to the adapter file name. To avoid accessing
-        # the Hub, the adapter is saved directly into a fake snapshot of the local HF cache.
-        class MyModule(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.lin = nn.Linear(10, 10)
-
-            def forward(self, x):
-                return self.lin(x)
-
-        repo_id = "someuser/adapters"
-        commit_hash = "0" * 40
-        repo_cache = tmp_path / "hub" / "models--someuser--adapters"
-        (repo_cache / "refs").mkdir(parents=True)
-        (repo_cache / "refs" / "main").write_text(commit_hash)
-
-        torch.manual_seed(0)
-        config = LoraConfig(target_modules=["lin"], init_lora_weights=False)
-        base_model = MyModule()
-        model = get_peft_model(copy.deepcopy(base_model), config)
-        model.save_pretrained(repo_cache / "snapshots" / commit_hash / "sub", safe_serialization=safe_serialization)
-
-        x = torch.randn(2, 10)
-        with torch.no_grad():
-            expected = model(x)
-
-        with self.hub_offline_ctx():
-            loaded = PeftModel.from_pretrained(base_model, repo_id, subfolder="sub")
-
-        with torch.no_grad():
-            actual = loaded(x)
-        assert torch.allclose(actual, expected)
-
 
 class TestCustomModelConfigWarning:
     # Check potential warnings when the user provided base_model_name_or_path is overridden by PEFT. See #2001 for

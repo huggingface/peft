@@ -780,12 +780,8 @@ def load_peft_weights(
         device = infer_device()
 
     def get_hub_filename(use_safetensors=True):
-        weights_name = SAFETENSORS_WEIGHTS_NAME if use_safetensors else WEIGHTS_NAME
-        return (
-            os.path.join(hf_hub_download_kwargs["subfolder"], weights_name)
-            if hf_hub_download_kwargs.get("subfolder", None) is not None
-            else weights_name
-        )
+        # the subfolder is not prepended, as hf_hub_download receives it via hf_hub_download_kwargs
+        return SAFETENSORS_WEIGHTS_NAME if use_safetensors else WEIGHTS_NAME
 
     if "user_agent" not in hf_hub_download_kwargs:
         hf_hub_download_kwargs["user_agent"] = http_user_agent()
@@ -798,16 +794,16 @@ def load_peft_weights(
         use_safetensors = False
     elif huggingface_hub.constants.HF_HUB_OFFLINE:
         # if in offline mode, check if we can find the adapter file locally
+        hub_filename = get_hub_filename(use_safetensors=True)
         hf_hub_download_kwargs.pop("local_files_only", None)
         try:
-            filename = hf_hub_download(
-                model_id, SAFETENSORS_WEIGHTS_NAME, local_files_only=True, **hf_hub_download_kwargs
-            )
+            filename = hf_hub_download(model_id, hub_filename, local_files_only=True, **hf_hub_download_kwargs)
             use_safetensors = True
         except LocalEntryNotFoundError:
             # Could not find safetensors, try pickle. If this also fails, it's fine to let the error be raised here, as
             # it means that the user tried to load a non-cached model in offline mode.
-            filename = hf_hub_download(model_id, WEIGHTS_NAME, local_files_only=True, **hf_hub_download_kwargs)
+            hub_filename = get_hub_filename(use_safetensors=False)
+            filename = hf_hub_download(model_id, hub_filename, local_files_only=True, **hf_hub_download_kwargs)
             use_safetensors = False
     else:
         token = hf_hub_download_kwargs.get("token", None)
@@ -815,6 +811,10 @@ def load_peft_weights(
             token = hf_hub_download_kwargs.get("use_auth_token", None)
 
         hub_filename = get_hub_filename(use_safetensors=True)
+        subfolder = hf_hub_download_kwargs.get("subfolder", None)
+        if subfolder:
+            # file_exists has no subfolder argument; like hf_hub_download, join with "/" since this is a Hub path
+            hub_filename = f"{subfolder}/{hub_filename}"
         has_remote_safetensors_file = file_exists(
             repo_id=model_id,
             filename=hub_filename,
