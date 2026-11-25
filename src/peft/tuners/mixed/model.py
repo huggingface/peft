@@ -243,7 +243,13 @@ class MixedModel(BaseTuner):
         Nested tuner layers are merged innermost first, like in the forward pass. The inherited `unmerge_adapter`
         unmerges outermost first, which is the inverse.
         """
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+        if isinstance(adapter_names, str):
+            raise TypeError(f"adapter_names should be a list of strings, got {adapter_names!r}.")
         self._check_merge_allowed()
+        _check_unique_adapter_names(adapter_names)
+
         for name, module in self.model.named_modules():
             # nested tuner layers (the base_layer of another tuner layer) are merged as part of the outermost layer's chain
             if not isinstance(module, BaseTunerLayer) or name.endswith(".base_layer"):
