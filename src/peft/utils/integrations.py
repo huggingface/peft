@@ -21,7 +21,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Literal, Optional, Union
 
-import packaging.version
 import torch
 import transformers
 from torch import nn
@@ -72,10 +71,8 @@ def dtensor_from_local_like(local_tensor: torch.Tensor, ref: torch.Tensor) -> to
 
 
 def check_deepspeed_zero3_enabled() -> bool:
-    if packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.33.0"):
-        from transformers.integrations import is_deepspeed_zero3_enabled
-    else:
-        from transformers.deepspeed import is_deepspeed_zero3_enabled
+    from transformers.integrations import is_deepspeed_zero3_enabled
+
     return is_deepspeed_zero3_enabled()
 
 
@@ -129,7 +126,8 @@ def dequantize_module_weight(module: torch.nn.Module) -> torch.nn.Parameter:
 
     If the weight is not quantized, it will be returned as is.
     """
-    if hasattr(module, "W_q"):  # For handling HQQ quantized weight
+    # TODO: Remove HQQ weight dequantization in PEFT v1.2.
+    if hasattr(module, "W_q"):
         weight = module.dequantize()
         return weight
     elif type(module.weight).__module__.startswith("torchao."):
@@ -240,16 +238,9 @@ def map_cache_to_layer_device_map(model: Any, cache: transformers.Cache) -> None
     layer_device_map = get_layer_device_map(model)
     for idx in range(model.config.num_hidden_layers):
         layer_device = layer_device_map[idx]
-        if hasattr(cache, "layers"):
-            # new transformers uses cache.layers (>v4.55)
-            layer = cache.layers[idx]
-            layer.keys = layer.keys.to(layer_device)
-            layer.values = layer.values.to(layer_device)
-        else:
-            # old transformers uses cache.{key,value}_cache (<=v4.55)
-            # TODO: remove if we drop support for transformers <= 4.55
-            cache.key_cache[idx] = cache.key_cache[idx].to(layer_device)
-            cache.value_cache[idx] = cache.value_cache[idx].to(layer_device)
+        layer = cache.layers[idx]
+        layer.keys = layer.keys.to(layer_device)
+        layer.values = layer.values.to(layer_device)
 
 
 def check_cache_in_signature(method) -> bool:
