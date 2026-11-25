@@ -459,6 +459,18 @@ class LoraModel(BaseTuner):
         # the data-parallel groups of the FSDP module that owns the base weight.
         if not getattr(base_layer, "_is_fsdp_managed_module", False):
             return ()
+        # Transformers already exposes the dense mesh for models sharded at load time.
+        mesh = getattr(self.model, "_device_mesh", None)
+        mesh_manager = getattr(self.model, "_mesh_manager", None)
+        if mesh is not None and mesh_manager is not None:
+            config = self.model.config.distributed_config
+            if config.dp_size > 1 and config.ep_size == 1:
+                if config.dp_replicate_size > 1:
+                    mesh = mesh_manager.get_mesh(("dp_replicate", "fsdp"))
+                else:
+                    mesh = mesh["fsdp"]
+                return tuple(group for group in mesh.get_all_groups() if group.size() > 1)
+
         try:
             from torch.distributed.fsdp import FSDPModule
         except ImportError:
@@ -472,30 +484,30 @@ class LoraModel(BaseTuner):
             owner = self.model.get_submodule(current_key)
 
         state = owner._get_fsdp_state()
-        if len(getattr(state, "_fsdp_param_groups", ())) > 1:
-            # Newer PyTorch permits multiple meshes within one fully_shard call.
+        param_groups = getattr(state, "_fsdp_param_groups", None)
+        if param_groups is None:
+            param_groups = [state._fsdp_param_group]
+
+        if len(param_groups) == 1:
+            param_group = param_groups[0]
+        else:
+            # A fully_shard call can assign different meshes to different base weights.
             weights = set(base_layer.parameters())
             param_group = next(
                 (
-                    g
-                    for g in state._fsdp_param_groups
-                    if any(
-                        p.sharded_param in weights or getattr(p, "_unsharded_param", None) in weights
-                        for p in g.fsdp_params
-                    )
+                    group
+                    for group in param_groups
+                    for param in group.fsdp_params
+                    if param.sharded_param in weights or getattr(param, "_unsharded_param", None) in weights
                 ),
                 None,
             )
-        else:
-            param_group = state._fsdp_param_group
         if param_group is None:
             return ()
+
         mesh_info = param_group.mesh_info
-        return tuple(
-            getattr(mesh_info, name)
-            for name in ("shard_process_group", "replicate_process_group")
-            if hasattr(mesh_info, name) and getattr(mesh_info, name).size() > 1
-        )
+        groups = (getattr(mesh_info, "shard_process_group", None), getattr(mesh_info, "replicate_process_group", None))
+        return tuple(group for group in groups if group is not None and group.size() > 1)
 
     def _replace_module(self, parent, child_name, new_module, child):
         # override in LoraModel to handle quantized weights properly
