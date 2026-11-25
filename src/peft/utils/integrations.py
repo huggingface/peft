@@ -129,7 +129,8 @@ def dequantize_module_weight(module: torch.nn.Module) -> torch.nn.Parameter:
 
     If the weight is not quantized, it will be returned as is.
     """
-    if hasattr(module, "W_q"):  # For handling HQQ quantized weight
+    # TODO: Remove HQQ weight dequantization in PEFT v1.2.
+    if hasattr(module, "W_q"):
         weight = module.dequantize()
         return weight
     elif type(module.weight).__module__.startswith("torchao."):

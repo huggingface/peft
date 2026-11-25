@@ -198,6 +198,7 @@ def prepare_model_for_kbit_training(
     """
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
     is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
+    # TODO: Remove the AQLM, EETQ, and HQQ training preparation branches in PEFT v1.2.
     is_aqlm_quantized = getattr(model, "quantization_method", None) == "aqlm"
     is_eetq_quantized = getattr(model, "quantization_method", None) == "eetq"
     is_torchao_quantized = getattr(model, "quantization_method", None) == "torchao"

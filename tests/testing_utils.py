@@ -197,6 +197,7 @@ def require_gptqmodel(test_case):
     return pytest.mark.skipif(not is_gptqmodel_available(), reason="test requires gptqmodel")(test_case)
 
 
+# TODO: Remove the AQLM, HQQ, and EETQ test decorators in PEFT v1.2.
 def require_aqlm(test_case):
     """
     Decorator marking a test that requires aqlm. These tests are skipped when aqlm isn't installed.

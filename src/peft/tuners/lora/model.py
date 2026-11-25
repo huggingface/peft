@@ -331,6 +331,7 @@ class LoraModel(BaseTuner):
         except AttributeError:
             pass
 
+        # TODO: Remove AQLM config handling in PEFT v1.2.
         quant_methods = ["gptq", "aqlm", "awq"]
         for quant_method in quant_methods:
             quantization_config = get_quantization_config(self.model, method=quant_method)
@@ -476,6 +477,7 @@ class LoraModel(BaseTuner):
                 if hasattr(child, "qweight"):
                     weight = child.qweight
                 elif hasattr(child, "W_q"):
+                    # TODO: Remove HQQ device placement in PEFT v1.2.
                     weight = child.W_q
                 elif hasattr(child, "weight"):
                     weight = child.weight
@@ -523,6 +525,7 @@ class LoraModel(BaseTuner):
 
             dispatchers.append(dispatch_bnb_4bit)
 
+        # TODO: Remove the EETQ, AQLM, and HQQ LoRA dispatchers in PEFT v1.2.
         dispatchers.extend(
             [
                 dispatch_eetq,

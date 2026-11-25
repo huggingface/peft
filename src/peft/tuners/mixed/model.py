@@ -153,6 +153,7 @@ class MixedModel(BaseTuner):
                 if hasattr(child, "qweight"):
                     weight = child.qweight
                 elif hasattr(child, "W_q"):
+                    # TODO: Remove HQQ device placement in PEFT v1.2.
                     weight = child.W_q
                 elif hasattr(child, "weight"):
                     weight = child.weight
