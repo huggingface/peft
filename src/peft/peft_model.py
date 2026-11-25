@@ -1620,6 +1620,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if torch_device is None:
             torch_device = infer_device()
 
+        existed_before = adapter_name in self.peft_config
         if adapter_name not in self.peft_config:
             # load the config
             peft_config = PEFT_TYPE_TO_CONFIG_MAPPING[
@@ -1645,9 +1646,18 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if is_trainable:
                 self.set_requires_grad(adapter_name)
 
-        adapters_weights = load_peft_weights(
-            model_id, device=torch_device, key_mapping=key_mapping, **hf_hub_download_kwargs
-        )
+        try:
+            adapters_weights = load_peft_weights(
+                model_id, device=torch_device, key_mapping=key_mapping, **hf_hub_download_kwargs
+            )
+        except Exception:
+            # the adapter was registered above but its weights never arrived, so leave no trace of it: a caller
+            # that catches the read failure and continues would otherwise be able to select an adapter holding
+            # only meta/uninitialised tensors and silently get base-model predictions. Adapters that existed before
+            # this call are not touched.
+            if not existed_before:
+                self.delete_adapter(adapter_name)
+            raise
 
         # load the weights into the model
         ignore_mismatched_sizes = kwargs.get("ignore_mismatched_sizes", False)
