@@ -888,6 +888,37 @@ class TestLoraInitialization:
             model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
         )
 
+    @pytest.mark.parametrize("init_lora_weights", ["pissa", "olora"])
+    @pytest.mark.parametrize(
+        "extra_config", [{"modules_to_save": ["embed"]}, {"trainable_token_indices": {"embed": [1, 2]}}]
+    )
+    def test_lora_init_conversion_keeps_non_lora_weights(self, init_lora_weights, extra_config, data, tmp_path):
+        # Converting PiSSA/OLoRA to LoRA used to drop all weights that are not lora_A/lora_B, e.g. a trained
+        # modules_to_save classifier, so that the converted checkpoint could not be loaded. See #4184.
+        model = self.get_model()
+
+        config = LoraConfig(init_lora_weights=init_lora_weights, target_modules=["linear"], r=8, **extra_config)
+        peft_model = get_peft_model(deepcopy(model), config)
+        peft_model.save_pretrained(tmp_path / "init-model")
+
+        # modify the weights, or else the adapter performs an identity transformation
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        if "modules_to_save" in extra_config:
+            peft_model.base_model.model.embed.modules_to_save["default"].weight.data *= 2.0
+        else:
+            peft_model.base_model.model.embed.token_adapter.trainable_tokens_delta["default"].data *= 2.0
+        output_trained = peft_model(data)
+
+        peft_model.save_pretrained(
+            tmp_path / "converted-model", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+        )
+        model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "converted-model")
+        output_converted = model_converted(data)
+
+        tol = MUTATED_BASE_TOL
+        for output_expected, output in zip(output_trained, output_converted):
+            assert torch.allclose(output_expected, output, atol=tol, rtol=tol)
+
     def test_lora_pissa_conversion_same_output_after_loading_with_alpha_pattern(self, data, tmp_path):
         # same as above, but using alpha_pattern
         model = self.get_model()

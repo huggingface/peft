@@ -1296,6 +1296,13 @@ TEST_CASES = [
         PsoftConfig,
         {"target_modules": ["lin0"], "r": 4, "psoft_alpha": 4, "ab_svd_init": "pissa_init"},
     ),
+    (
+        # fan_in_fan_out=True is not correct for nn.Linear and should be set to False when the layer is created
+        "Vanilla MLP PSOFT fan_in_fan_out",
+        "MLP",
+        PsoftConfig,
+        {"target_modules": ["lin0"], "r": 2, "psoft_alpha": 2, "fan_in_fan_out": True},
+    ),
     ########
     # Lily  #
     ########
@@ -2231,10 +2238,11 @@ class ModelConv1DGroups(nn.Module):
 
 
 class ModelConv2D(nn.Module):
-    def __init__(self, bias=True):
+    def __init__(self, bias=True, kernel_size=3, **conv_kwargs):
         super().__init__()
-        self.conv2d = nn.Conv2d(5, 10, 3, bias=bias)
+        self.conv2d = nn.Conv2d(5, 10, kernel_size, bias=bias, **conv_kwargs)
         self.relu = nn.ReLU()
+        self.pool = nn.AdaptiveAvgPool2d(1)
         self.flat = nn.Flatten()
         self.lin0 = nn.Linear(10, 2)
         self.sm = nn.LogSoftmax(dim=-1)
@@ -2242,9 +2250,12 @@ class ModelConv2D(nn.Module):
 
     def forward(self, X):
         X = X.to(self.dtype)
-        X = X.reshape(-1, 5, 3, 3)
+        # Preserve existing flattened 2D inputs while allowing direct 4D inputs for padding tests.
+        if X.ndim == 2:
+            X = X.reshape(-1, 5, 3, 3)
         X = self.conv2d(X)
         X = self.relu(X)
+        X = self.pool(X)
         X = self.flat(X)
         X = self.lin0(X)
         X = self.sm(X)
@@ -2721,12 +2732,88 @@ class TestPeftCustomModel(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers_multi(model_id, config_cls, config_kwargs)
 
+    @pytest.mark.parametrize(
+        "test_name, model_id, config_cls, config_kwargs", [case for case in TEST_CASES if case[1] == "Conv2d"]
+    )
+    @pytest.mark.parametrize(
+        "conv_kwargs",
+        [
+            pytest.param({"padding": "same"}, id="same-odd"),
+            pytest.param({"padding": "same", "kernel_size": 2, "padding_mode": "reflect"}, id="same-even-reflect"),
+            pytest.param(
+                {"padding": "same", "kernel_size": (2, 4), "dilation": (1, 2)},
+                id="same-rectangular-dilated",
+            ),
+            pytest.param({"padding": "valid", "stride": (2, 1)}, id="valid-strided"),
+            pytest.param({"padding": (2, 1), "stride": (1, 2), "dilation": (2, 1)}, id="numeric-strided"),
+            pytest.param({"padding": "valid", "kernel_size": 1, "stride": 2}, id="valid-pointwise"),
+        ],
+    )
+    @pytest.mark.parametrize("init_weights", [True, False])
+    @torch.no_grad()
+    def test_conv2d_padding(self, test_name, model_id, config_cls, config_kwargs, conv_kwargs, init_weights, request):
+        # Exercise different Conv2d padding configurations, including "same" and "valid" strings, previously broken
+        # for HRA (#4151). Check raw convolution outputs so pooling or the classifier cannot hide incorrect shapes
+        # or boundary values.
+        torch.manual_seed(0)
+        base = ModelConv2D(**conv_kwargs).to(self.torch_device).eval()
+        inputs = torch.randn(2, 5, 7, 8, device=self.torch_device)
+        expected = base(inputs)
+        expected_conv = base.conv2d(inputs)
+        config_kwargs = config_kwargs.copy()
+        config_kwargs.pop("init_lora_weights", None)
+        if not init_weights:
+            config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+
+        if config_cls is BOFTConfig and config_kwargs.get("boft_block_size"):
+            # Match each flattened filter's size so varying kernels retain valid block divisibility.
+            config_kwargs["boft_block_size"] = base.conv2d.weight[0].numel()
+        if config_cls is OFTConfig:
+            # One block fits every filter size and avoids trivial 1x1 blocks for pointwise kernels.
+            config_kwargs["r"] = 1
+            # Use exact Cayley so approximation error cannot affect the padding assertions.
+            config_kwargs["use_cayley_neumann"] = False
+
+        model = get_peft_model(base, config_cls(**config_kwargs)).eval()
+        output = model(inputs)
+        conv_output = model.get_base_model().conv2d(inputs)
+        assert conv_output.shape == expected_conv.shape
+        if init_weights:
+            torch.testing.assert_close(output, expected, atol=1e-5, rtol=1e-4)
+            torch.testing.assert_close(conv_output, expected_conv, atol=1e-5, rtol=1e-4)
+        else:
+            assert not torch.equal(conv_output, expected_conv)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_merge_layers_after_adding_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
+
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_merge_layers_after_adding_adapter(model_id, config_cls, config_kwargs)
+
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers_fp16(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    @pytest.mark.parametrize(
+        "conversion_kwargs",
+        [{"dtype": torch.float64}, {"device": "meta"}],
+        ids=["dtype", "device"],
+    )
+    def test_merge_layers_dtype_device_conversion(
+        self, test_name, model_id, config_cls, config_kwargs, conversion_kwargs
+    ):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_merge_layers_dtype_device_conversion(model_id, config_cls, config_kwargs, conversion_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_merge_layers_load_state_dict(self, test_name, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_merge_layers_load_state_dict(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_is_idempotent(self, test_name, model_id, config_cls, config_kwargs):
@@ -5263,6 +5350,22 @@ class TestPeftCustomModel(PeftCommonTester):
         assert trainable_params1 == trainable_params2 == trainable_params3
         assert all_params1 == all_params2 == all_params3
 
+    @pytest.mark.parametrize("operation", ["named_modules", "state_dict", "_restore_weights"])
+    def test_mha_parameter_identity_is_stable(self, operation):
+        model = get_peft_model(ModelMha(), LoraConfig(target_modules=["mha"]))
+        mha = model.base_model.model.mha
+        base = mha.get_base_layer()
+        in_proj_weight = base.in_proj_weight
+        out_proj_weight = base.out_proj.get_base_layer().weight
+        if operation == "named_modules":
+            list(model.named_modules())
+        elif operation == "state_dict":
+            model.state_dict()
+        else:
+            mha._restore_weights()
+        assert base.in_proj_weight is in_proj_weight
+        assert base.out_proj.get_base_layer().weight is out_proj_weight
+
     @pytest.mark.parametrize("with_forward_call", [False, True])
     def test_mha_gradients_set_correctly(self, with_forward_call):
         # check for this bug: https://github.com/huggingface/peft/issues/761#issuecomment-1893804738
@@ -5293,6 +5396,22 @@ class TestPeftCustomModel(PeftCommonTester):
         model.base_model.model.mha._restore_weights()
         assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is True
         assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is True
+
+    @pytest.mark.parametrize("merged", [False, True])
+    def test_lora_mha_traversal_preserves_parameter_identity(self, merged):
+        model = get_peft_model(ModelMha(), LoraConfig(target_modules=["mha"]))
+        if merged:
+            model.merge_adapter()
+        model.state_dict()
+        mha = model.base_model.model.mha.base_layer
+        in_proj_weight = mha.in_proj_weight
+        out_proj_weight = mha.out_proj.base_layer.weight
+
+        model.state_dict()
+        list(model.named_modules())
+
+        assert mha.in_proj_weight is in_proj_weight
+        assert mha.out_proj.base_layer.weight is out_proj_weight
 
     def test_mha_merge_applies_delta_weight_once(self):
         # check for this bug: https://github.com/huggingface/peft/pull/3774
@@ -9092,9 +9211,6 @@ class TestPeftFsdpStateDict:
             pytest.skip("Skipping FSDP + target_paramters because of clash with nn.utils.parametrize on sharded model")
         if (config_cls == DeftConfig) and config_kwargs.get("para"):
             pytest.skip(reason="DEFT with PaRa does not change the base output")
-
-        if fsdp_version == 2 and model_id == "MHA":
-            pytest.skip("FSDP2 cannot map the parameters exposed by LoRA MultiheadAttention")
 
         config_kwargs_init_false = set_init_weights_false(config_cls, config_kwargs)
         config = config_cls(**config_kwargs_init_false)

@@ -43,9 +43,12 @@ from peft import (
     IA3Config,
     LoHaConfig,
     LoraConfig,
+    MultitaskPromptTuningConfig,
     NoMatchingPeftModuleError,
     PeftError,
     PeftModel,
+    PrefixTuningConfig,
+    PromptEncoderConfig,
     PromptTuningConfig,
     VeraConfig,
     get_layer_status,
@@ -372,10 +375,6 @@ class TestPeftCustomKwargs:
             assert new_config.target_modules == expected_target_modules
 
     def test_maybe_include_all_linear_layers_diffusion(self):
-        # TODO: remove once Diffusers 0.40 is released
-        if not is_diffusers_ge_v040:
-            pytest.skip("This test fails with Diffusers < 0.40 due to a change in huggingface_hub")
-
         model_id = "hf-internal-testing/tiny-sd-pipe"
         with hub_online_once(model_id):
             model = StableDiffusionPipeline.from_pretrained(model_id)
@@ -1765,6 +1764,15 @@ class TestHealthcheck:
     and get_layer status, which are already extensively covered in TestModelAndLayerStatus.
     """
 
+    PROMPT_MODEL_ID = "peft-internal-testing/tiny-random-LlamaForCausalLM"
+    PROMPT_HEALTHCHECK_CASES = [
+        (PromptTuningConfig, {"num_virtual_tokens": 4}, "PROMPT_TUNING"),
+        (PrefixTuningConfig, {"num_virtual_tokens": 4}, "PREFIX_TUNING"),
+        (PromptEncoderConfig, {"num_virtual_tokens": 4}, "P_TUNING"),
+        (MultitaskPromptTuningConfig, {"num_virtual_tokens": 4}, "MULTITASK_PROMPT_TUNING"),
+        (AdaptionPromptConfig, {"adapter_layers": 1, "adapter_len": 2}, "ADAPTION_PROMPT"),
+    ]
+
     def get_model(self):
         class SmallModel(nn.Module):
             def __init__(self):
@@ -1778,6 +1786,10 @@ class TestHealthcheck:
         # small rank or else number of trainable parameters exceeds pre-configured threshold for warning
         config = LoraConfig(target_modules=["lin0", "lin1"], r=4)
         return get_peft_model(self.get_model(), config)
+
+    def get_tiny_llama_model(self):
+        with hub_online_once(self.PROMPT_MODEL_ID):
+            return AutoModelForCausalLM.from_pretrained(self.PROMPT_MODEL_ID)
 
     def test_healthcheck_returns_json_serializable_report(self):
         model = self.get_peft_model()
@@ -1915,7 +1927,7 @@ class TestHealthcheck:
             healthcheck = model.healthcheck()
 
             assert healthcheck["is_ready"] is False
-            expected_findings = {"NO_TRAINABLE_PARAMETERS", "ADAPTERS_DISABLED", "ACTIVE_ADAPTERS_NOT_TRAINABLE"}
+            expected_findings = {"TOO_FEW_TRAINABLE_PARAMETERS", "ADAPTERS_DISABLED", "ACTIVE_ADAPTERS_NOT_TRAINABLE"}
             assert {finding["code"] for finding in healthcheck["findings"]} == expected_findings
 
     def test_zero_trainable_parameters_are_flagged(self):
@@ -1926,7 +1938,7 @@ class TestHealthcheck:
         healthcheck = model.healthcheck()
 
         assert healthcheck["is_ready"] is False
-        expected_findings = {"NO_TRAINABLE_PARAMETERS", "ACTIVE_ADAPTERS_NOT_TRAINABLE"}
+        expected_findings = {"TOO_FEW_TRAINABLE_PARAMETERS", "ACTIVE_ADAPTERS_NOT_TRAINABLE"}
         assert {finding["code"] for finding in healthcheck["findings"]} == expected_findings
 
     def test_high_trainable_parameter_fraction_is_flagged(self):
@@ -2031,6 +2043,76 @@ class TestHealthcheck:
             assert healthcheck["adapter_configurations"]["default"]["modules_to_save"] == ["embed_tokens"]
             assert healthcheck["model_runtime"]["parameter_devices"] == ["cpu"]
             assert healthcheck["findings"] == []
+
+    @pytest.mark.parametrize("config_cls, config_kwargs, peft_type", PROMPT_HEALTHCHECK_CASES)
+    def test_healthcheck_prompt_learning(self, config_cls, config_kwargs, peft_type):
+        base_model = self.get_tiny_llama_model()
+        base_params = sum(parameter.numel() for parameter in base_model.parameters())
+        config = config_cls(task_type="CAUSAL_LM", **config_kwargs)
+        model = get_peft_model(base_model, config)
+
+        healthcheck = model.healthcheck()
+        json.dumps(healthcheck)  # does not raise
+
+        assert set(healthcheck) == {
+            "is_ready",
+            "environment",
+            "summary",
+            "adapter_configurations",
+            "model_runtime",
+            "adapter_state",
+            "findings",
+        }
+        assert healthcheck["is_ready"] is True
+        assert healthcheck["summary"]["model_id"] == self.PROMPT_MODEL_ID
+        assert healthcheck["summary"]["base_model_type"] == "LlamaForCausalLM"
+        assert healthcheck["summary"]["peft_types"] == {"default": peft_type}
+        if peft_type == "ADAPTION_PROMPT":
+            assert healthcheck["summary"]["adapter_model_type"] == "AdaptionPromptModel"
+        else:
+            assert "adapter_model_type" not in healthcheck["summary"]
+        assert healthcheck["summary"]["trainable_params"] > 0
+        assert healthcheck["summary"]["trainable_params"] == healthcheck["summary"]["total_params"] - base_params
+        assert healthcheck["summary"]["total_params"] > base_params
+        assert "num_adapter_layers" not in healthcheck["summary"]
+        assert "adapter_layer_types" not in healthcheck["summary"]
+        assert healthcheck["adapter_state"] == {
+            "active_adapters": ["default"],
+            "available_adapters": ["default"],
+        }
+        assert healthcheck["adapter_configurations"]["default"]["task_type"] == "CAUSAL_LM"
+        assert healthcheck["model_runtime"]["parameter_devices"] == ["cpu"]
+        assert healthcheck["findings"] == []
+
+    @pytest.mark.parametrize("config_cls, config_kwargs, peft_type", PROMPT_HEALTHCHECK_CASES)
+    def test_print_healthcheck_prompt_learning(self, config_cls, config_kwargs, peft_type):
+        config = config_cls(task_type="CAUSAL_LM", **config_kwargs)
+        model = get_peft_model(self.get_tiny_llama_model(), config)
+        trainable_params, total_params = model.get_nb_trainable_parameters()
+
+        sink = Mock()
+        model.print_healthcheck(sink=sink)
+        sink.assert_called_once()
+        output = sink.call_args.args[0]
+
+        assert "PEFT healthcheck" in output
+        assert f"default ({peft_type})" in output
+        assert f"trainable: {trainable_params:,}" in output
+        assert f"total: {total_params:,}" in output
+        assert "adapter layers:" not in output
+        assert "Layer types:" not in output
+
+    @pytest.mark.parametrize("config_cls, config_kwargs, peft_type", PROMPT_HEALTHCHECK_CASES)
+    def test_healthcheck_prompt_learning_with_findings(self, config_cls, config_kwargs, peft_type):
+        base_model = self.get_tiny_llama_model()
+        config = config_cls(task_type="CAUSAL_LM", **config_kwargs)
+        model = get_peft_model(base_model, config)
+        model.requires_grad_(False)
+        healthcheck = model.healthcheck()
+
+        assert healthcheck["summary"]["trainable_params"] == 0
+        assert healthcheck["is_ready"] is False
+        assert {finding["code"] for finding in healthcheck["findings"]} == {"TOO_FEW_TRAINABLE_PARAMETERS"}
 
     # randomly initialized classifier head, since the checkpoint is a causal LM
     _TASK_HEAD_MODEL_ID = "peft-internal-testing/tiny-random-OPTForCausalLM"
@@ -2924,3 +3006,47 @@ class TestTunerStateDictKeyPrefixes:
         prefixes = _get_tuner_state_dict_key_prefixes(model)
         assert len(prefixes) > 0  # sanity check
         assert not any(prefix.startswith("base_model.model.emb") for prefix in prefixes)
+
+
+class TestMarkAdaptersTrainableCustomNamedParameters:
+    # See issue #4181
+
+    @pytest.mark.xfail(
+        reason="Adapter parameters are found by matching named_parameters() names against named_modules() names",
+        raises=AssertionError,
+        strict=True,
+    )
+    def test_named_parameters_without_wrapper_level_keeps_adapter_trainable(self):
+        # Adapter parameters are found by name: a name from named_parameters() has to lie under the name its tuner
+        # layer has in named_modules(). Any named_parameters() override that changes that part of the name breaks the
+        # match, and the adapter parameters are frozen together with the base model. The wrapper below is one example:
+        # it reports the parameters of its inner model without its own name level.
+        class Inner(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.lin0(x)
+
+        class Wrapper(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.model = Inner()
+
+            def forward(self, x):
+                return self.model(x)
+
+            def named_parameters(self, prefix="", recurse=True, remove_duplicate=True):
+                return self.model.named_parameters(prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
+
+        model = get_peft_model(Wrapper(), LoraConfig(target_modules=["lin0"]))
+        lora_params = [
+            param
+            for module in model.modules()
+            if isinstance(module, LoraLayer)
+            for param in [*module.lora_A.parameters(), *module.lora_B.parameters()]
+        ]
+        assert len(lora_params) == 2  # sanity check
+        assert all(not param.requires_grad for param in model.base_model.model.model.lin0.base_layer.parameters())
+        assert all(param.requires_grad for param in lora_params)

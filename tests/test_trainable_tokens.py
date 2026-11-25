@@ -23,7 +23,6 @@ from safetensors.torch import load_file as safe_load_file
 from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer, BartConfig, BartModel
 
 from peft import AutoPeftModel, LoraConfig, PeftModel, TrainableTokensConfig, get_peft_model
-from peft.import_utils import is_transformers_ge_v5
 from peft.tuners.trainable_tokens.layer import TrainableTokensLayer
 from peft.utils import TrainableTokensWrapper, get_peft_model_state_dict
 
@@ -1370,9 +1369,6 @@ class TestTrainableTokens:
         # They should NOT share delta parameters (model doesn't have tied weights)
         assert embed_adapter.trainable_tokens_delta is not lm_head_adapter.trainable_tokens_delta
 
-    @pytest.mark.skipif(
-        not is_transformers_ge_v5, reason="Test requires transformers v5+ dict format for _tied_weights_keys"
-    )
     def test_composite_model_multiple_embed_tokens_specific_targeting(self):
         """Test that users can specify full paths to disambiguate multiple embed_tokens layers.
 

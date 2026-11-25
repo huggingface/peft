@@ -354,9 +354,6 @@ class TestStableDiffusionModel(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DIFFUSERS_SD_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", DIFFUSERS_CONFIGS)
     def test_disable_adapter(self, model_id, config_cls, config_kwargs):
-        # TODO: remove once Diffusers 0.40 is released
-        if not is_diffusers_ge_v040:
-            pytest.skip("This test fails with Diffusers < 0.40 due to a change in huggingface_hub")
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_disable_adapter(model_id, config_cls, config_kwargs)
 

@@ -28,4 +28,4 @@ __all__ = [
     "OFTModel",
 ]
 
-register_peft_method(name="oft", config_cls=OFTConfig, model_cls=OFTModel)
+register_peft_method(name="oft", config_cls=OFTConfig, model_cls=OFTModel, is_mixed_compatible=True)

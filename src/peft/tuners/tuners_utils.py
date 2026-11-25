@@ -28,13 +28,11 @@ from typing import Any, Optional, Union, overload
 import torch
 from accelerate.hooks import AlignDevicesHook
 from accelerate.utils import named_module_tensors, offload_state_dict
-from packaging import version
 from torch import nn
 from tqdm import tqdm
 from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
-from peft.import_utils import is_transformers_ge_v5
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, UPCAST_DTYPES
 from peft.utils.constants import (
@@ -72,8 +70,7 @@ warn_msg_weight_tying = (
     "or converting your model to formats other than safetensors. "
     "Check the discussion here: https://github.com/huggingface/peft/issues/2777"
 )
-_torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5.0")
-_torch_supports_distributed = _torch_supports_dtensor and torch.distributed.is_available()
+_torch_supports_distributed = torch.distributed.is_available()
 
 
 @contextmanager
@@ -216,12 +213,13 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
         ln_size = ln_weight.shape[0]
         in_features, out_features = ln_size, ln_size
     elif hasattr(module, "codebooks") and module.__class__.__name__ == "QuantizedLinear":
-        # AQLM QuantLinear
+        # TODO: Remove AQLM layer handling in PEFT v1.2.
         in_features, out_features = module.in_features, module.out_features
     elif is_gptqmodel_quant_linear(module):
         # GPT-QModel quantized linears
         in_features, out_features = module.in_features, module.out_features
     elif module.__class__.__name__ == "EetqLinear":
+        # TODO: Remove EETQ layer handling in PEFT v1.2.
         if hasattr(module, "in_features"):
             # Eetq layers
             in_features, out_features = module.in_features, module.out_features
@@ -230,7 +228,7 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
             # https://github.com/huggingface/transformers/blob/c220ea9ecee9231927a47d97a63d5604a09d4c63/src/transformers/integrations/eetq.py#L74
             in_features, out_features = module.weight.shape
     elif hasattr(module, "W_q") and module.__class__.__name__ == "HQQLinear":
-        # HQQ layers
+        # TODO: Remove HQQ layer handling in PEFT v1.2.
         in_features, out_features = module.in_features, module.out_features
     elif module.__class__.__name__ == "PatchedLinear":
         # INC layers
@@ -891,8 +889,7 @@ class BaseTuner(nn.Module, ABC):
         # PREPARATION OF MODEL AND CONFIG #
         ###################################
         is_transformers_like_model = hasattr(getattr(model, "config", None), "model_type")
-        if is_transformers_ge_v5 and is_transformers_like_model:
-            # TODO remove once transformers < v5.0 is no longer supported
+        if is_transformers_like_model:
             # For Transformers v5, some architectures were changed compared to v4, e.g. the MoE layers of Mixtral. To
             # still make it possible to load adapters trained with v4, we have to update the PEFT config so that the
             # right layers are targeted. Call this first and overwrite the peft_config to be sure that changes are
@@ -1388,6 +1385,7 @@ class BaseTuner(nn.Module, ABC):
                 if hasattr(child, "qweight"):
                     weight = child.qweight
                 elif hasattr(child, "W_q"):
+                    # TODO: Remove HQQ device placement in PEFT v1.2.
                     weight = child.W_q
                 elif hasattr(child, "weight"):
                     weight = child.weight

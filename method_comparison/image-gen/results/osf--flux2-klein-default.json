@@ -1,7 +1,7 @@
 {
   "run_info": {
-    "created_at": "2026-09-16T11:51:13+00:00",
-    "total_time": 808.7915305229981,
+    "created_at": "2026-11-19T13:54:38+00:00",
+    "total_time": 773.631520741008,
     "experiment_name": "osf/flux2-klein-default",
     "peft_branch": "main",
     "peft_worktree_is_dirty": true,
@@ -117,10 +117,10 @@
     "error_msg": ""
   },
   "train_info": {
-    "accelerator_memory_reserved_avg": 21592016945,
-    "accelerator_memory_max": 21634220032,
-    "accelerator_memory_reserved_99th": 21634220032,
-    "train_time": 666.2459074169965,
+    "accelerator_memory_reserved_avg": 21528682954,
+    "accelerator_memory_max": 21560819712,
+    "accelerator_memory_reserved_99th": 21560819712,
+    "train_time": 632.5302814509632,
     "file_size": 297179312,
     "num_trainable_params": 74285920,
     "num_total_params": 3949830496,
@@ -128,86 +128,86 @@
     "metrics": [
       {
         "step": 100,
-        "valid dino_similarity": 0.4660475254058838,
-        "train loss": 0.7562820315361023,
+        "valid dino_similarity": 0.6763373613357544,
+        "train loss": 0.7542919516563416,
         "train samples": 200,
-        "train time": 70.8817035200118,
-        "eval time": 8.741140557001927,
-        "mem allocated avg": 19752450672.64,
-        "mem reserved avg": 21629123952.64,
-        "elapsed time": 90.5291467700008
+        "train time": 67.45558315500966,
+        "eval time": 8.467721141001675,
+        "mem allocated avg": 19859865405.44,
+        "mem reserved avg": 21555723632.64,
+        "elapsed time": 86.61194458701357
       },
       {
         "step": 200,
-        "valid dino_similarity": 0.6281857490539551,
-        "train loss": 0.7603387236595154,
+        "valid dino_similarity": 0.6910196542739868,
+        "train loss": 0.7552308440208435,
         "train samples": 400,
-        "train time": 71.14680118803517,
-        "eval time": 8.491683205997106,
-        "mem allocated avg": 19750173829.12,
-        "mem reserved avg": 21615345664.0,
-        "elapsed time": 170.2026146950011
+        "train time": 66.1997240089695,
+        "eval time": 8.338986260001548,
+        "mem allocated avg": 19859935897.6,
+        "mem reserved avg": 21548236800.0,
+        "elapsed time": 161.1821607430029
       },
       {
         "step": 300,
-        "valid dino_similarity": 0.7243263721466064,
-        "train loss": 0.7531030774116516,
+        "valid dino_similarity": 0.7398589849472046,
+        "train loss": 0.7449155449867249,
         "train samples": 600,
-        "train time": 71.02812957700371,
-        "eval time": 8.797902524005622,
-        "mem allocated avg": 19749588264.96,
-        "mem reserved avg": 21596471296.0,
-        "elapsed time": 250.0636490399993
+        "train time": 66.99820458804606,
+        "eval time": 8.616281107999384,
+        "mem allocated avg": 19860361635.84,
+        "mem reserved avg": 21535653888.0,
+        "elapsed time": 236.82775017600216
       },
       {
         "step": 400,
-        "valid dino_similarity": 0.6443219184875488,
-        "train loss": 0.7337366342544556,
+        "valid dino_similarity": 0.5436228513717651,
+        "train loss": 0.7238022685050964,
         "train samples": 800,
-        "train time": 71.84857977903448,
-        "eval time": 8.729484113006038,
-        "mem allocated avg": 19750764800.0,
-        "mem reserved avg": 21577596928.0,
-        "elapsed time": 330.6766099240049
+        "train time": 67.43134669118444,
+        "eval time": 8.614402108010836,
+        "mem allocated avg": 19861300766.72,
+        "mem reserved avg": 21516779520.0,
+        "elapsed time": 312.90750391900656
       },
       {
         "step": 500,
-        "valid dino_similarity": 0.7008847594261169,
-        "train loss": 0.7451614141464233,
+        "valid dino_similarity": 0.6168419122695923,
+        "train loss": 0.7314445972442627,
         "train samples": 1000,
-        "train time": 71.16431415000261,
-        "eval time": 8.45643516999553,
-        "mem allocated avg": 19750957312.0,
-        "mem reserved avg": 21577596928.0,
-        "elapsed time": 410.33310808399983
+        "train time": 67.51398983602121,
+        "eval time": 8.530329854009324,
+        "mem allocated avg": 19861371955.2,
+        "mem reserved avg": 21516779520.0,
+        "elapsed time": 388.98298881600203
       },
       {
         "step": 600,
-        "valid dino_similarity": 0.6618947982788086,
-        "train loss": 0.7086794376373291,
+        "valid dino_similarity": 0.6540493965148926,
+        "train loss": 0.6893185973167419,
         "train samples": 1200,
-        "train time": 70.37983515098313,
-        "eval time": 8.51397476800048,
-        "mem allocated avg": 19751008512.0,
-        "mem reserved avg": 21577596928.0,
-        "elapsed time": 489.2627161500059
+        "train time": 67.49079169007018,
+        "eval time": 8.3126005330123,
+        "mem allocated avg": 19861423155.2,
+        "mem reserved avg": 21516779520.0,
+        "elapsed time": 464.8170833240001
       },
       {
         "step": 700,
-        "valid dino_similarity": 0.7594766020774841,
-        "train loss": 0.7334076762199402,
+        "valid dino_similarity": 0.7325851917266846,
+        "train loss": 0.7103462219238281,
         "train samples": 1400,
-        "train time": 71.4459955990169,
-        "eval time": 8.530810684998869,
-        "mem allocated avg": 19751059712.0,
-        "mem reserved avg": 21577596928.0,
-        "elapsed time": 569.2752809490048
+        "train time": 66.95629802395706,
+        "eval time": 8.456935360009084,
+        "mem allocated avg": 19861474355.2,
+        "mem reserved avg": 21516779520.0,
+        "elapsed time": 540.2613927210041
       },
       {
         "step": 750,
-        "test dino_similarity": 0.7016884485880533,
-        "drift": 0.2637830227613449,
-        "train loss": 0.7155925631523132,
+        "test dino_similarity": 0.6987966696421305,
+        "drift": 0.25894708931446075,
+        "train loss": 0.68967604637146,
         "train samples": 1500
       }
     ]
@@ -222,10 +222,10 @@
       "created_at": "2026-03-09T15:31:26+00:00"
     },
     "package_info": {
-      "transformers-version": "5.13.1",
+      "transformers-version": "5.23.0",
       "transformers-commit-hash": null,
-      "peft-version": "0.21.0",
-      "peft-commit-hash": "514b9e6d11fe9be9d72d04abd0d290a7a6441ddd",
+      "peft-version": "0.21.4.dev0",
+      "peft-commit-hash": "c1e3b768911406766bb7960e063a2d317f09802c",
       "datasets-version": "4.2.0",
       "datasets-commit-hash": null,
       "diffusers-version": "0.38.0",

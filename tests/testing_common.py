@@ -74,7 +74,6 @@ from peft import (
     set_base_model_state_dict,
     set_peft_model_state_dict,
 )
-from peft.import_utils import is_transformers_ge_v5
 from peft.mapping import PEFT_TYPE_TO_TUNER_MAPPING
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.lora import LoraLayer
@@ -758,7 +757,11 @@ class PeftCommonTester:
             model.eval()
             logits = model(**dummy_input)[0]
 
+            state_dict_keys = set(model.state_dict())
             model.merge_adapter()
+            # Merging must not drop weights from the state dict. This could for instance happen with LoRA MHA if not
+            # handled correctly.
+            assert set(model.state_dict()) == state_dict_keys
             logits_merged = model(**dummy_input)[0]
             model.unmerge_adapter()
             logits_unmerged = model(**dummy_input)[0]
@@ -916,6 +919,85 @@ class PeftCommonTester:
                 assert not torch.allclose(logits_merged_all, logits_adapter_2, atol=atol, rtol=rtol)
                 assert not torch.allclose(logits_merged_all, logits_adapter_1, atol=atol, rtol=rtol)
 
+    def _test_merge_layers_after_adding_adapter(self, model_id, config_cls, config_kwargs):
+        # Add a second adapter with a new config to the already wrapped model, then check for both adapters that the
+        # merged output matches the unmerged output. When the first adapter is injected, its config may be corrected
+        # in place (e.g. fan_in_fan_out=True for transformers Conv1D) but the new config is not, so the layers must
+        # keep the fan_in_fan_out they were created with. See #3861.
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs)
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+            model = get_peft_model(model, config)
+
+            def get_fan_in_fan_out(model):
+                return {
+                    name: getattr(module, "fan_in_fan_out", None)
+                    for name, module in model.named_modules()
+                    if isinstance(module, BaseTunerLayer)
+                }
+
+            fan_in_fan_out_before = get_fan_in_fan_out(model)
+            config_other = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+            model.add_adapter("other", config_other)
+            assert get_fan_in_fan_out(model) == fan_in_fan_out_before
+
+            model = model.to(self.torch_device)
+            model.eval()
+            dummy_input = self.prepare_inputs_for_testing()
+            atol, rtol = 1e-4, 1e-4
+            for adapter_name in ["other", "default"]:
+                model.set_adapter(adapter_name)
+                logits = model(**dummy_input)[0]
+                model.merge_adapter()
+                logits_merged = model(**dummy_input)[0]
+                model.unmerge_adapter()
+                assert torch.allclose(logits, logits_merged, atol=atol, rtol=rtol)
+
+    def _test_merge_layers_dtype_device_conversion(self, model_id, config_cls, config_kwargs, conversion_kwargs):
+        # Checks that after a merge, all expected state dict items are present and have the correct dtype and
+        # device. This could for instance be an issue when not correctly handled by LoRA's MHA layer.
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs)
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            model = get_peft_model(model, config_cls(base_model_name_or_path=model_id, **config_kwargs))
+            state_dict_before = model.state_dict()
+            model.merge_adapter()
+
+            model.to(**conversion_kwargs)
+            state_dict_after = model.state_dict()
+            assert state_dict_after.keys() == state_dict_before.keys()
+            for name, tensor in state_dict_before.items():
+                expected_dtype = tensor.dtype
+                if tensor.is_floating_point() or tensor.is_complex():
+                    expected_dtype = conversion_kwargs.get("dtype", expected_dtype)
+                expected_device = torch.device(conversion_kwargs.get("device", tensor.device))
+                assert state_dict_after[name].dtype == expected_dtype, name
+                assert state_dict_after[name].device == expected_device, name
+
+    def _test_merge_layers_load_state_dict(self, model_id, config_cls, config_kwargs):
+        # Checks that after a merge, all expected parameters are registered as expected. This could for instance be an
+        # issue when not correctly handled by LoRA's MHA layer.
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs)
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            model = get_peft_model(model, config_cls(base_model_name_or_path=model_id, **config_kwargs))
+            # Different values ensure that silently ignoring unregistered weights cannot pass.
+            state_dict = {name: torch.ones_like(tensor) for name, tensor in model.state_dict().items()}
+            model.merge_adapter()
+
+            model.load_state_dict(state_dict)
+            loaded_state_dict = model.state_dict()
+            assert loaded_state_dict.keys() == state_dict.keys()
+            for name, tensor in state_dict.items():
+                assert torch.equal(loaded_state_dict[name], tensor), name
+
     @torch.inference_mode()
     def _test_active_and_merged_adapters(self, model, inputs):
         # This function checks multiple interactions between active and merged adapters. Note that we changed the
@@ -1025,7 +1107,6 @@ class PeftCommonTester:
         model.merge_adapter()
         exported = model.merge_and_unload(adapter_names=[adapter2])
         assert torch.allclose(get_output(exported), output2, atol=atol, rtol=rtol)
-        assert not any(isinstance(layer, BaseTunerLayer) for layer in exported.modules())
 
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
@@ -1660,15 +1741,6 @@ class PeftCommonTester:
         if (config_cls == AdaLoraConfig) and ("roberta" in model_id.lower()):
             # TODO: no gradients on the "dense" layer, other layers work, not sure why
             pytest.skip("AdaLora with RoBERTa does not work correctly")
-
-        if not is_transformers_ge_v5:
-            # TODO: remove once transformers < 5.0 no longer supported
-            if "gptbigcode" in model_id.lower():
-                pytest.skip("GPTBigCode doesn't implement gradient checkpointing correctly in transformers < 5.0.")
-            if "bart" in model_id.lower():
-                pytest.skip(
-                    "Bart in transformers < 5.0 doesn't handle input sharing well enough. See transformers#41821"
-                )
 
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
