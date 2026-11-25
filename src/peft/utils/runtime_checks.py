@@ -26,6 +26,7 @@ and removes itself afterwards. Currently there is one check:
   weight is sharded, e.g. with FSDP. It does no collective communication: each rank checks its own batches.
 """
 
+import copy
 import warnings
 from abc import ABC, abstractmethod
 from typing import Literal
@@ -137,12 +138,12 @@ class ZeroEmbeddingCheck(RuntimeCheck):
     data.
     """
 
-    def __init__(self, mode: Literal["warn", "raise"], ignored_token_ids: set[int], adapter_layer: nn.Module | None):
+    def __init__(self, mode: Literal["warn", "raise"], ignored_token_ids: set[int], model: nn.Module):
         super().__init__(mode)
         self.ignored_token_ids = ignored_token_ids
         self.num_checked_batches = 0
         self.has_inspected_batch = False
-        self.adapter_layer = adapter_layer
+        self.model = model
 
     @staticmethod
     def get_target_module(model: nn.Module) -> nn.Module | None:
@@ -152,16 +153,17 @@ class ZeroEmbeddingCheck(RuntimeCheck):
     def create(cls, model: nn.Module, mode: Literal["warn", "raise"]) -> "ZeroEmbeddingCheck":
         embedding = _get_input_embeddings(model)
         ignored = _get_ignored_token_ids(model, embedding) if embedding is not None else set()
-        # Keep one adapter layer to observe disable_adapter() even on a bare embedding, without retaining the model.
-        from peft.tuners.tuners_utils import BaseTunerLayer
+        return cls(mode=mode, ignored_token_ids=ignored, model=model)
 
-        adapter_layer = next((module for module in model.modules() if isinstance(module, BaseTunerLayer)), None)
-        return cls(mode=mode, ignored_token_ids=ignored, adapter_layer=adapter_layer)
+    def __deepcopy__(self, memo):
+        # Hooks are deep-copied along with the module they are registered on, e.g. by `modules_to_save`; the copy must
+        # keep pointing to the same model instead of copying it.
+        return copy.copy(self)
 
     def __call__(self, module: nn.Module, args: tuple, kwargs: dict, output) -> None:
         if not (module.training and torch.is_grad_enabled()):
             return
-        if getattr(module, "disable_adapters", False) or getattr(self.adapter_layer, "disable_adapters", False):
+        if getattr(module, "disable_adapters", False) or getattr(self.model, "_adapters_disabled", False):
             # Reference forwards with disabled adapters do not consume the inspection budget.
             return
         # Every enabled training batch counts, including unsupported signatures and trainable embeddings.

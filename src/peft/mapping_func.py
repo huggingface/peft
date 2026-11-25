@@ -225,5 +225,5 @@ def get_peft_model(
         )
 
     if runtime_checks:
-        attach_runtime_checks(model, mode=runtime_checks)
+        attach_runtime_checks(peft_model, mode=runtime_checks)
     return peft_model
