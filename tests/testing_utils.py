@@ -40,7 +40,6 @@ from peft.import_utils import (
     is_hqq_available,
     is_optimum_available,
     is_torchao_available,
-    is_transformers_ge_v5,
 )
 
 
@@ -378,13 +377,9 @@ def hub_online_once(model_id: str, *, is_custom_model: bool = False):
             # probably still a good idea to have it if there's some dynamic code that checks it.
             mock.patch.dict(os.environ, override),
             mock.patch("huggingface_hub.constants.HF_HUB_OFFLINE", is_offline),
+            mock.patch("transformers.utils.hub.is_offline_mode", return_value=is_offline),
         ):
-            if is_transformers_ge_v5:
-                with mock.patch("transformers.utils.hub.is_offline_mode", lambda: is_offline):
-                    yield
-            else:  # TODO remove if transformers <= 4 no longer supported
-                with mock.patch("transformers.utils.hub._is_offline_mode", is_offline):
-                    yield
+            yield
     except Exception:
         # in case of an error we have to assume that we didn't access the model properly from the hub
         # for the first time, so the next call cannot be considered cached.

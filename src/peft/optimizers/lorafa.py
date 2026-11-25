@@ -79,8 +79,6 @@ class LoraFAOptimizer(Optimizer):
             "correct_bias": correct_bias,
         }
         super().__init__(params, defaults)
-        # Warn once per optimizer instance so the deprecation path does not spam every training step
-        self._legacy_scaling_factor_warned = False
 
     @torch.no_grad()
     def step(self, closure: Callable | None = None):
@@ -263,7 +261,6 @@ def _create_lorafa_optimizer(model: PeftModel, lr: float, *, weight_decay: float
 
     This function will:
     - Disable gradient updates for the "lora_A" parameters (these are typically frozen during LoRA training).
-    - Compute the scaling factor based on provided `lora_alpha` and rank `r` for proper gradient projection.
     - Get the scaling factor for each lora parameter based on the layer-specific configuration.
     - Create and configure parameter groups for the optimizer including specified learning rate, weight decay, and
       additional optimizer options.
@@ -282,11 +279,6 @@ def _create_lorafa_optimizer(model: PeftModel, lr: float, *, weight_decay: float
     # TODO remove in PEFT v1.2
     if lr is None:
         raise TypeError("`lr` must be a float")
-
-    active_adapters = [adapter for adapter in model.active_adapters if adapter in model.peft_config]
-    active_adapter_use_rslora = {
-        adapter: bool(getattr(model.peft_config[adapter], "use_rslora", False)) for adapter in active_adapters
-    }
 
     for name, param in model.named_parameters():
         if "lora_A" in name:

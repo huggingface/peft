@@ -13,17 +13,14 @@
 # limitations under the License.
 
 import re
-import runpy
-from importlib import import_module
 
-import packaging.version
 import pytest
 import torch
 import transformers
 from torch import nn
 from transformers import AutoModelForCausalLM, AutoModelForImageTextToText
 
-from peft import LoraConfig, PeftModel, get_peft_model, import_utils
+from peft import LoraConfig, PeftModel, get_peft_model
 from peft.tuners import lora
 from peft.utils import infer_device
 from peft.utils.integrations import init_empty_weights, skip_init_on_device
@@ -110,10 +107,6 @@ class TestInitEmptyWeights:
         assert all(p.device == expected for p in mlp1.parameters())
 
 
-@pytest.mark.skipif(
-    packaging.version.parse(transformers.__version__) < packaging.version.parse("5.4.0"),
-    reason="PEFT weight conversion is fixed in transformers 5.4.0",
-)
 class TestTransformersV5:
     """Unit tests intended to test proper working of PEFT with Transformers v5"""
 
@@ -563,39 +556,3 @@ class TestTransformersV5:
 
         assert torch.allclose(logits_before, logits_after, atol=1e-5, rtol=1e-5)
         assert set(reloaded.targeted_parameter_names) == set(peft_model.targeted_parameter_names)
-
-
-class TestPackageVersionDeprecations:
-    @pytest.mark.parametrize(
-        ("version", "num_expected_warnings"),
-        [("4.57.0", 1), ("5.5.0", 1), ("5.6.0.dev0", 0), ("5.6.0", 0)],
-    )
-    def test_transformers_deprecation_warning(self, monkeypatch, recwarn, version, num_expected_warnings):
-        transformers = import_module("transformers")
-        monkeypatch.setattr(transformers, "__version__", version)
-
-        runpy.run_path(import_utils.__file__)
-
-        matching = [
-            warning
-            for warning in recwarn
-            if issubclass(warning.category, FutureWarning) and ("Support for Transformers" in str(warning.message))
-        ]
-        assert len(matching) == num_expected_warnings
-
-    @pytest.mark.parametrize(
-        ("version", "num_expected_warnings"),
-        [("1.13.3", 1), ("2.5.0", 1), ("2.6.0", 0), ("2.15.0", 0)],
-    )
-    def test_torch_deprecation_warning(self, monkeypatch, recwarn, version, num_expected_warnings):
-        torch = import_module("torch")
-        monkeypatch.setattr(torch, "__version__", version)
-
-        runpy.run_path(import_utils.__file__)
-
-        matching = [
-            warning
-            for warning in recwarn
-            if issubclass(warning.category, FutureWarning) and ("Support for PyTorch" in str(warning.message))
-        ]
-        assert len(matching) == num_expected_warnings
