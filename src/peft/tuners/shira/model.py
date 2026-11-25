@@ -46,7 +46,7 @@ class ShiraModel(BaseTuner):
 
     Args:
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
-        config ([`ShiraConfig`]): The configuration of the SHiRA model.
+        peft_config ([`ShiraConfig`]): The configuration of the SHiRA model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
 
     Returns:

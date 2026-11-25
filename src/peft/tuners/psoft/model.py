@@ -35,7 +35,7 @@ class PsoftModel(BaseTuner):
 
     Args:
         model: The model to adapt.
-        config: PsoftConfig.
+        peft_config: PsoftConfig.
         adapter_name: Adapter name, default "default".
         low_cpu_mem_usage: Create empty adapter weights on meta device.
     """

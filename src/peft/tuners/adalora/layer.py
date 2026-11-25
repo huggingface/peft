@@ -15,10 +15,9 @@
 import warnings
 from typing import Any, Optional
 
-import packaging
 import torch
-import transformers
 from torch import nn
+from transformers.integrations import deepspeed_config
 
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import check_adapters_to_merge
@@ -26,12 +25,6 @@ from peft.utils import transpose
 from peft.utils.integrations import _skip_init_on_device
 
 from .config import AdaLoraConfig
-
-
-if packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.33.0"):
-    from transformers.integrations import deepspeed_config
-else:
-    from transformers.deepspeed import deepspeed_config
 
 
 class AdaLoraLayer(LoraLayer):
@@ -347,7 +340,7 @@ class RankAllocator:
     The RankAllocator for AdaLoraModel. Paper: https://openreview.net/pdf?id=lq62uWRJjiY
 
     Args:
-        config ([`AdaLoraConfig`]): The configuration of the AdaLora model.
+        peft_config ([`AdaLoraConfig`]): The configuration of the AdaLora model.
         model: the model that we apply AdaLoRA to.
 
     """

@@ -19,7 +19,7 @@ import math
 import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
-from typing import Any, Optional, Union
+from typing import Any, Optional, Self, Union
 
 import torch
 import torch.distributed as dist
@@ -27,7 +27,7 @@ import torch.nn.functional as F
 from torch import nn
 from transformers.pytorch_utils import Conv1D
 
-from peft.import_utils import is_transformers_dtensor_tp, is_transformers_ge_v5_4_0
+from peft.import_utils import is_transformers_dtensor_tp
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import (
     BaseTunerLayer,
@@ -1106,9 +1106,9 @@ class Linear(nn.Module, LoraLayer):
                                 f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
 
-                    base_layer.weight.data = orig_weight
+                    base_layer.weight.data.copy_(orig_weight)
                     if new_bias is not None:
-                        base_layer.bias.data = new_bias.to(orig_dtype)
+                        base_layer.bias.data.copy_(new_bias.to(orig_dtype))
 
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
@@ -1144,7 +1144,7 @@ class Linear(nn.Module, LoraLayer):
                     weight.data -= delta_weight.to(orig_dtype)
                 else:
                     unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
-                    weight.data = unmerged
+                    weight.data.copy_(unmerged)
 
                 if self.lora_bias[active_adapter]:
                     self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias * self.scaling[active_adapter]
@@ -1229,6 +1229,9 @@ class Linear(nn.Module, LoraLayer):
             return variant.supports_lora_conversion()
         return True
 
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        return self.get_delta_weight(adapter_name)
+
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "lora." + rep
@@ -1282,9 +1285,6 @@ class Embedding(nn.Module, LoraLayer):
         self.output_fns = {}
 
         if tp_plan is not None:
-            if not is_transformers_ge_v5_4_0:
-                raise RuntimeError("Tensor Parallel with LoRA is only supported for transformers v5.4.0 and above. ")
-
             if tp_plan not in _EMBEDDING_SUPPORTED_TP_PLANS:
                 raise ValueError(
                     f"Unsupported tensor parallel plan {tp_plan} for embedding layers. "
@@ -1483,7 +1483,7 @@ class Embedding(nn.Module, LoraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weight
+                    base_layer.weight.data.copy_(orig_weight)
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
                         base_layer.weight.data += self.get_delta_weight(active_adapter).to(orig_dtype)
@@ -1507,7 +1507,7 @@ class Embedding(nn.Module, LoraLayer):
                     weight.data -= self.get_delta_weight(active_adapter).to(orig_dtype)
                 else:
                     unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
-                    weight.data = unmerged
+                    weight.data.copy_(unmerged)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -1853,9 +1853,9 @@ class _ConvNd(nn.Module, LoraLayer):
                                 f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
 
-                    base_layer.weight.data = orig_weight
+                    base_layer.weight.data.copy_(orig_weight)
                     if new_bias is not None:
-                        base_layer.bias.data = new_bias.to(orig_dtype)
+                        base_layer.bias.data.copy_(new_bias.to(orig_dtype))
 
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
@@ -1890,7 +1890,7 @@ class _ConvNd(nn.Module, LoraLayer):
                     weight.data -= delta_weight.to(orig_dtype)
                 else:
                     unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
-                    weight.data = unmerged
+                    weight.data.copy_(unmerged)
 
                 if self.lora_bias[active_adapter]:
                     self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias * self.scaling[active_adapter]
@@ -2397,24 +2397,38 @@ class MultiheadAttention(nn.Module, LoraLayer):
     # from accelerate.
     @skip_init_on_device
     def _restore_weights(self):
-        # Restore the weights as registered parameters on the base layer.
-        # This is necessary because the way that weights are merged/unmerged (which is necessary for forward to work
-        # correctly), the Module "forgets" these attributes. Therefore, we need to call register_parameter explicitly.
-        # We cannot call register_parameter for merging/unmerging because that cuts them off from the autograd graph.
-        # Note that this is hacky, since we need to ensure that _restore_weights is called by each method that needs it.
+        # Merging replaces the base parameters with tensors to preserve the LoRA autograd graph. A normal forward
+        # automatically merges and then unmerges again, which re-registers the parameters. After an explicit
+        # merge_adapter(), however, they remain unregistered and would be missing from state_dict() and
+        # named_parameters(). Restore them before saving, loading, converting, or enumerating parameters.
 
         # in_proj
         # TODO work with separate weights
         base_layer = self.get_base_layer()
         weight = base_layer.in_proj_weight
-        del base_layer.in_proj_weight
-        base_layer.register_parameter("in_proj_weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad))
+        # FSDP2 tracks parameter identities across module traversals. Only restore weights that merging replaced.
+        # For example, two iterations of `self.named_modules()` would otherwise lead to different module identities.
+        if not isinstance(weight, nn.Parameter):
+            del base_layer.in_proj_weight
+            base_layer.register_parameter(
+                "in_proj_weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad)
+            )
 
         # out_proj
         base_layer = base_layer.out_proj.get_base_layer()
         weight = base_layer.weight
-        del base_layer.weight
-        base_layer.register_parameter("weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad))
+        if not isinstance(weight, nn.Parameter):
+            del base_layer.weight
+            base_layer.register_parameter("weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad))
+
+    def _apply(self, *args, **kwargs) -> Self:
+        # changes in dtype, device, etc.
+        self._restore_weights()
+        return super()._apply(*args, **kwargs)
+
+    def _load_from_state_dict(self, *args, **kwargs) -> None:
+        self._restore_weights()
+        super()._load_from_state_dict(*args, **kwargs)
 
     def state_dict(self, *args, **kwargs):
         self._restore_weights()
@@ -2430,7 +2444,11 @@ class MultiheadAttention(nn.Module, LoraLayer):
         return "lora." + rep
 
 
-class _LoraParameterProxy(nn.Module):
+class _LoraProxyBase(nn.Module):
+    """Base class for LoRA parametrization proxies used by `ParamWrapper`."""
+
+
+class _LoraParameterProxy(_LoraProxyBase):
     """This proxies an `nn.Parameter` that is targeted with LoRA.
     Intended to be used in conjunction with `nn.utils.parametrize`, see `ParamWrapper`.
     """
@@ -2464,7 +2482,7 @@ class _LoraParameterProxy(nn.Module):
         return W + self.delta_weight
 
 
-class _LoraFactorsProxy(nn.Module):
+class _LoraFactorsProxy(_LoraProxyBase):
     """This proxies an `nn.Parameter` that is targeted with a single LoRA adapter, keeping the low-rank factors.
 
     Folding `W + scaling * lhs @ rhs` into one `baddbmm` avoids materialising a delta the size of the full parameter
@@ -2791,12 +2809,11 @@ class ParamWrapper(nn.Module, LoraLayer):
 
         # If there are multiple parametrizations for the same parameter_name, we only want to remove the LoRA proxy.
         # Unfortunately, PyTorch does not support this directly, so we need to take care of it manually. To achieve
-        # this, we check the ParameterList from the back until we find the _LoraParameterProxy instance and then remove
-        # it.
+        # this, we check the ParameterList from the back until we find the LoRA proxy instance and then remove it.
         reversed_indices = reversed(range(len(param_list)))
         for i in reversed_indices:
             module = param_list[i]
-            if isinstance(module, _LoraParameterProxy):
+            if isinstance(module, _LoraProxyBase):
                 del param_list[i]
                 break
         else:  # no break encountered

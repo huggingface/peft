@@ -247,8 +247,6 @@ class PsoftLayer(BaseTunerLayer):
                 f"({self.in_features}, {self.out_features})"
             )
 
-        self.fan_in_fan_out = config.fan_in_fan_out
-
         self.r[adapter_name] = r
         self.psoft_alpha[adapter_name] = config.psoft_alpha
         self.scaling[adapter_name] = config.psoft_alpha / r
@@ -426,6 +424,11 @@ class Linear(nn.Module, PsoftLayer):
 
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
         return True
+
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        # get_delta_weight returns the delta in the dtype of the base weight, so cast to the dtype of the adapter
+        # weights
+        return self.get_delta_weight(adapter_name).to(self.psoft_R[adapter_name].weight.dtype)
 
     def unmerge(self) -> None:
         if not self.merged:

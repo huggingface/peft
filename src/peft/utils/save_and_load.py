@@ -24,11 +24,10 @@ import huggingface_hub
 import torch
 from huggingface_hub import file_exists, hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError, LocalEntryNotFoundError
-from packaging.version import parse
 from safetensors.torch import load_file as safe_load_file
 from transformers.utils import http_user_agent
 
-from peft.import_utils import is_transformers_dtensor_tp, is_transformers_ge_v5
+from peft.import_utils import is_transformers_dtensor_tp
 from peft.mapping import PEFT_TYPE_TO_TUNER_MAPPING
 
 from .constants import INCLUDE_LINEAR_LAYERS_SHORTHAND
@@ -394,7 +393,7 @@ def get_peft_model_state_dict(
     elif save_embedding_layers:
         warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
 
-    if torch.distributed.is_available() and parse(torch.__version__) >= parse("2.5"):
+    if torch.distributed.is_available():
         # FSDP2 has no TP metadata. Gather only selected entries using each tensor's mesh and placements, so
         # unselected base model weights remain sharded.
         to_return = _gather_state_dict_for_save(to_return)
@@ -642,7 +641,7 @@ def set_peft_model_state_dict(
         raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
 
     is_like_transformers_model = hasattr(getattr(model, "config", None), "model_type")
-    if is_transformers_ge_v5 and is_like_transformers_model:
+    if is_like_transformers_model:
         # apply transformers v5 weight conversion to the state_dict, if necessary
         from peft.utils.transformers_weight_conversion import convert_peft_adapter_state_dict_for_transformers
 
@@ -742,16 +741,6 @@ def set_peft_model_state_dict(
     return load_result
 
 
-# TODO: remove this function, use vanilla torch.load as soon as torch < 2.6.0 is no longer supported
-def torch_load(*args, weights_only=True, **kwargs):
-    """Call torch.load and handle weights_only.
-
-    Defaults to weights_only=True to anticipate upcoming switch on the PyTorch side.
-
-    """
-    return torch.load(*args, weights_only=weights_only, **kwargs)
-
-
 def load_peft_weights(
     model_id: str, device: Optional[str] = None, key_mapping: Optional[dict[str, str]] = None, **hf_hub_download_kwargs
 ) -> dict:
@@ -846,7 +835,7 @@ def load_peft_weights(
         else:
             adapters_weights = safe_load_file(filename, device=device)
     else:
-        adapters_weights = torch_load(filename, map_location=torch.device(device))
+        adapters_weights = torch.load(filename, map_location=torch.device(device), weights_only=True)
 
     if not key_mapping:
         remapped_adapters_weights = adapters_weights

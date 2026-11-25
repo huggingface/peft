@@ -17,7 +17,6 @@ from typing import Any, Optional
 
 import torch
 import torch.nn.functional as F
-from packaging import version
 from torch import nn
 
 from peft.tuners._buffer_dict import BufferDict
@@ -25,10 +24,6 @@ from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check
 from peft.utils import quantization_extra_repr, resolve_quantization_backend
 
 from .config import PacaConfig
-
-
-# torch.library.custom_op, used for the torch.compile path (see _ops.py), was added in PyTorch 2.4
-_torch_supports_custom_ops = version.parse(torch.__version__) >= version.parse("2.4.0")
 
 
 # use a LRU_cache so that the warning is only ever called once and not repeated for every layer/step/epoch
@@ -373,7 +368,7 @@ class Linear(nn.Module, PacaLayer):
             scalings = tuple(self.scaling[a] for a in active_adapters)
             deltas = [self.paca_delta[a] for a in active_adapters]
             bias = self.get_base_layer().bias
-            if self.quantization_backend is None and _torch_supports_custom_ops and torch.compiler.is_compiling():
+            if self.quantization_backend is None and torch.compiler.is_compiling():
                 # Under torch.compile, use opaque custom ops so that the in-place column swap is not functionalized
                 # into a copy of the full weight (see _ops.py).
                 if torch.is_autocast_enabled(x.device.type):
@@ -388,6 +383,11 @@ class Linear(nn.Module, PacaLayer):
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
         # the delta weight is non-zero in r columns only, so a LoRA adapter of rank r represents it exactly
         return True
+
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        # PaCA is additive: W' = W + Delta, so the additive delta is just the delta weight. It already has the dtype of
+        # the adapter weights (`paca_delta`), which is the dtype the converted LoRA adapter will use.
+        return self.get_delta_weight(adapter_name)
 
     def __repr__(self) -> str:
         rep = super().__repr__()
