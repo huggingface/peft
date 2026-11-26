@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import re
+from unittest import mock
 
 import pytest
 import torch
@@ -27,7 +28,7 @@ from transformers import (
 
 import peft
 from peft import LoraConfig, PeftModel, TaskType, get_peft_model
-from peft.tuners.lora.layer import Linear, LoraLayer, ParamWrapper
+from peft.tuners.lora.layer import Linear, LoraLayer, ParamWrapper, lora_grouped_mm_experts_forward
 
 from .testing_common import PeftCommonTester
 from .testing_utils import hub_online_once, set_init_weights_false
@@ -626,6 +627,46 @@ class TestTargetParameters:
             output_unloaded = unloaded(x).logits
         assert torch.allclose(output_unloaded, output_parametrized, atol=1e-5, rtol=1e-5)
 
+    @pytest.mark.parametrize("rank", [8, 3])
+    @pytest.mark.parametrize("num_adapters", [1, 2])
+    def test_target_parameters_lora_experts_forward(self, qwen_model, monkeypatch, rank, num_adapters):
+        # LoRA on experts is applied to the activations (x @ A @ B) by `lora_grouped_mm_experts_forward`, whatever the
+        # experts implementation, instead of being added to the weight: the outputs and gradients must be the same.
+        # Rank 3 is zero-padded to 8 for the grouped matmul kernel, and two adapters add up.
+        torch.manual_seed(0)
+        x = torch.arange(10).view(2, 5)
+        config = LoraConfig(
+            r=rank, target_modules=[], target_parameters=["gate_up_proj", "down_proj"], init_lora_weights=False
+        )
+        model = get_peft_model(qwen_model, config)
+        if num_adapters == 2:
+            model.add_adapter("other", config)
+            model.base_model.set_adapter(["default", "other"])
+        qwen_model.set_experts_implementation("eager")
+
+        def forward_backward():
+            output = model(x).logits
+            output.sum().backward()
+            grads = {name: param.grad.clone() for name, param in model.named_parameters() if param.requires_grad}
+            model.zero_grad()
+            return output, grads
+
+        # reference: the delta weight is added to the weight
+        with monkeypatch.context() as m:
+            m.setattr(ParamWrapper, "_lora_experts_forward_unsupported", lambda self, adapters: "reference")
+            expected, expected_grads = forward_backward()
+
+        with mock.patch.object(
+            peft.tuners.lora.layer, "lora_grouped_mm_experts_forward", wraps=lora_grouped_mm_experts_forward
+        ) as lora_forward:
+            output, grads = forward_backward()
+        lora_forward.assert_called()
+        assert torch.allclose(output, expected, atol=1e-5, rtol=1e-4)
+        for name, grad in grads.items():
+            assert torch.allclose(grad, expected_grads[name], atol=1e-5, rtol=1e-3)
+        # the experts implementation is left as it was
+        assert qwen_model.config._experts_implementation == "eager"
+
     def test_target_parameter_result_caching_works(self, monkeypatch):
         # See 2912
         # There was an issue with the caching of _LoraParameterProxy not working correctly. This test checks that the
@@ -651,6 +692,8 @@ class TestTargetParameters:
 
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
+            # the proxy is used when LoRA is added to the weight, instead of being applied to the activations
+            monkeypatch.setattr(ParamWrapper, "_lora_experts_forward_unsupported", lambda self, adapters: "testing")
             config = LoraConfig(
                 target_modules=[],
                 # for simplicity, only target a single layer

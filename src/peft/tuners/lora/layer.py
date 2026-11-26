@@ -2502,6 +2502,57 @@ def _register_parameter_or_buffer(module, name, X):
         module.register_buffer(name, X)
 
 
+def lora_grouped_mm_experts_forward(
+    self: nn.Module, hidden_states: torch.Tensor, top_k_index: torch.Tensor, top_k_weights: torch.Tensor
+) -> torch.Tensor:
+    """The `grouped_mm` experts implementation of Transformers (`grouped_mm_experts_forward`) with LoRA applied to the
+    activations: `x @ W + scaling * x @ A @ B` for the tokens of each expert, instead of `x @ (W + scaling * A @ B)`.
+
+    A weight the size of all the experts is then never built. `ParamWrapper` registers it as the `lora_grouped_mm`
+    experts implementation and selects it for the duration of its forward, with the LoRA factors `(lhs, rhs)` of each
+    targeted weight in `self.lora_factors`, such that its delta weight is `lhs @ rhs`.
+    """
+    from transformers.integrations.moe import _grouped_linear, _grouped_mm
+
+    num_tokens, hidden_dim = hidden_states.shape
+    num_top_k = top_k_index.size(-1)
+
+    # Sort the (token, expert) pairs by expert, each expert then processes a contiguous group of tokens
+    expert_ids, perm = torch.sort(top_k_index.reshape(-1))
+    hidden_states = hidden_states[perm // num_top_k]
+    histc_input = expert_ids.float() if hidden_states.device.type in ("cpu", "mps") else expert_ids.int()
+    tokens_per_expert = torch.histc(histc_input, bins=self.num_experts, min=0, max=self.num_experts - 1)
+    offsets = torch.cumsum(tokens_per_expert, dim=0, dtype=torch.int32)
+
+    def linear(input: torch.Tensor, name: str) -> torch.Tensor:
+        bias = getattr(self, f"{name}_bias")[expert_ids] if self.has_bias else None
+        output = _grouped_linear(input, getattr(self, name), offsets, bias=bias, is_transposed=self.is_transposed)
+        if name not in self.lora_factors:
+            return output
+        # the delta weight is `scaling * lhs @ rhs` in the layout of the weight, the input goes through the factors
+        # as two (num_experts, input_dim, output_dim) matrices
+        lhs, rhs = self.lora_factors[name]
+        if not self.is_transposed:
+            lhs, rhs = rhs.transpose(-2, -1), lhs.transpose(-2, -1)
+        # in the dtype of the activations, e.g. bf16 with LoRA weights in fp32
+        lhs, rhs = lhs.to(input.dtype).contiguous(), rhs.to(input.dtype).contiguous()
+        return output + _grouped_mm(_grouped_mm(input, lhs, offsets), rhs, offsets)
+
+    if self.has_gate:
+        proj_out = self._apply_gate(linear(hidden_states, "gate_up_proj"))
+    else:
+        proj_out = self.act_fn(linear(hidden_states, "up_proj"))
+    proj_out = linear(proj_out, "down_proj")
+    if self.has_post_expert_norm:
+        proj_out = self.post_expert_norm(proj_out)
+
+    # Weight each pair by its routing weight, restore the order and sum the experts of each token
+    proj_out = proj_out * top_k_weights.reshape(-1)[perm].unsqueeze(-1)
+    inv_perm = torch.empty_like(perm)
+    inv_perm[perm] = torch.arange(perm.size(0), device=perm.device)
+    return proj_out[inv_perm].view(num_tokens, num_top_k, hidden_dim).sum(dim=1).to(top_k_weights.dtype)
+
+
 class ParamWrapper(nn.Module, LoraLayer):
     """A LoRA wrapper for `nn.Parameter`. This layer is dispatched if users target a parameter directly with
     `lora_config.target_parameters`.
@@ -2560,10 +2611,14 @@ class ParamWrapper(nn.Module, LoraLayer):
     def _get_in_out_features(self, module: nn.Module) -> tuple[int, int] | tuple[None, None]:
         # For ParamWrapper, we don't derive the in_features and out_features based on the base layer type, but directly
         # from the targeted parameter.
-        param = self.get_param()
-        # Under DeepSpeed ZeRO-3 the parameter is already partitioned, so `param.shape` is empty and the real shape
-        # lives in `ds_shape` -- the same handling `tuners_utils`, `deft` and `randlora` already use.
-        shape = getattr(param, "ds_shape", param.shape)
+        if self._is_bnb_4bit():
+            # bitsandbytes 4-bit stores the weight packed, two values per byte
+            shape = self.get_base_layer().dequantized_shapes[self.parameter_name]
+        else:
+            param = self.get_param()
+            # Under DeepSpeed ZeRO-3 the parameter is already partitioned, so `param.shape` is empty and the real
+            # shape lives in `ds_shape` -- the same handling `tuners_utils`, `deft` and `randlora` already use.
+            shape = getattr(param, "ds_shape", param.shape)
         if len(shape) == 3:
             num_experts, in_features, out_features = shape
         elif len(shape) == 2:
@@ -2703,6 +2758,23 @@ class ParamWrapper(nn.Module, LoraLayer):
         param = getattr(self.get_base_layer(), self.parameter_name)
         return param
 
+    def _is_bnb_4bit(self) -> bool:
+        """Whether the parameter is a weight of experts stored in bitsandbytes 4-bit, see `Bnb4bitExperts` in
+        Transformers."""
+        return any(cls.__name__ == "Bnb4bitExperts" for cls in type(self.get_base_layer()).__mro__)
+
+    def _lora_experts_forward_unsupported(self, adapters: list[str]) -> str | None:
+        """Why LoRA can't be applied to the activations of the experts (see `lora_grouped_mm_experts_forward`) instead
+        of being added to their weight, or None if it can."""
+        experts = self.get_base_layer()
+        if self.num_experts == 1 or not hasattr(experts, "_is_expert_parallel"):
+            return "the parameter isn't a weight of experts that use the experts implementations of Transformers"
+        if experts._is_expert_parallel:
+            return "the experts are split by expert parallelism"
+        if not (self._is_bnb_4bit() or self.get_param().dtype in ALLOWED_COMPUTE_DTYPES):
+            return f"the weight is in {self.get_param().dtype}"
+        return None
+
     def get_delta_factors(self, adapter_name):
         """`(lhs, rhs, scaling)` such that the delta weight is `scaling * lhs @ rhs`.
 
@@ -2720,7 +2792,9 @@ class ParamWrapper(nn.Module, LoraLayer):
         else:
             lhs, rhs = weight_B, weight_A
         param = self.get_param()
-        return lhs.to(param.dtype), rhs.to(param.dtype), self.scaling[adapter_name]
+        if param.dtype in ALLOWED_COMPUTE_DTYPES:
+            lhs, rhs = lhs.to(param.dtype), rhs.to(param.dtype)
+        return lhs, rhs, self.scaling[adapter_name]
 
     def get_delta_weight(self, adapter_name, *args, **kwargs):
         if self.num_experts == 1:
@@ -2758,6 +2832,17 @@ class ParamWrapper(nn.Module, LoraLayer):
             return
 
         adapters = [a for a in active_adapters if a in self.lora_A]
+        unsupported = self._lora_experts_forward_unsupported(adapters)
+        if unsupported is None:
+            with self._activate_lora_experts_forward(adapters):
+                yield
+            return
+        if self._is_bnb_4bit():
+            raise ValueError(
+                f"LoRA on the 4-bit parameter '{self.parameter_name}' is applied to the activations of the experts, "
+                f"which isn't possible here: {unsupported}."
+            )
+
         param = self.get_param()
         is_low_precision = any(getattr(torch, dtype_name, None) == param.dtype for dtype_name in UPCAST_DTYPES)
         if len(adapters) == 1 and self.num_experts > 1 and not is_low_precision:
@@ -2781,6 +2866,32 @@ class ParamWrapper(nn.Module, LoraLayer):
                 yield
         finally:
             self._remove_parametrizations()
+
+    @contextmanager
+    def _activate_lora_experts_forward(self, adapter_names: list[str]):
+        from transformers.integrations.moe import ALL_EXPERTS_FUNCTIONS
+
+        ALL_EXPERTS_FUNCTIONS.register("lora_grouped_mm", lora_grouped_mm_experts_forward)
+        experts = self.get_base_layer()
+        experts_implementation = experts.config._experts_implementation
+        experts.config._experts_implementation = "lora_grouped_mm"
+
+        lora_factors = experts.__dict__.setdefault("lora_factors", {})
+        # one `(lhs, rhs, scaling)` per active adapter, such that its delta weight is `scaling * lhs @ rhs`
+        factors = [self.get_delta_factors(adapter_name) for adapter_name in adapter_names]
+        # the delta weights of the adapters add up: their factors are stacked along the rank, the scalings in `rhs`
+        lhs = torch.cat([lhs for lhs, _, _ in factors], dim=-1)
+        rhs = torch.cat([(rhs * scaling).to(lhs.dtype) for _, rhs, scaling in factors], dim=-2)
+
+        # the grouped matmul kernel needs rows of a multiple of 16 bytes: the rank is zero-padded to a multiple of 8,
+        # which leaves `lhs @ rhs` the same
+        padding = -lhs.shape[-1] % 8
+        lora_factors[self.parameter_name] = (F.pad(lhs, (0, padding)), F.pad(rhs, (0, 0, 0, padding)))
+        try:
+            yield
+        finally:
+            experts.config._experts_implementation = experts_implementation
+            del lora_factors[self.parameter_name]
 
     def _remove_parametrizations(self):
         # Remove the parametrization of this specific parameter
@@ -2815,6 +2926,8 @@ class ParamWrapper(nn.Module, LoraLayer):
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         # same as lora.Linear.merge but not hard-coding base_layer.weight and without special cases like variants removed
+        from .bnb import add_to_bnb_4bit_experts_weight
+
         adapter_names = check_adapters_to_merge(self, adapter_names)
         if not adapter_names:
             # no adapter to merge
@@ -2822,6 +2935,13 @@ class ParamWrapper(nn.Module, LoraLayer):
 
         for active_adapter in adapter_names:
             if active_adapter in self.lora_A.keys():
+                if self._is_bnb_4bit():
+                    delta_weight = self.get_delta_weight(active_adapter)
+                    add_to_bnb_4bit_experts_weight(
+                        self.get_base_layer(), self.parameter_name, delta_weight, safe_merge
+                    )
+                    self.merged_adapters.append(active_adapter)
+                    continue
                 base_layer = self.get_base_layer()
                 param = getattr(base_layer, self.parameter_name)
                 if safe_merge:
@@ -2847,12 +2967,18 @@ class ParamWrapper(nn.Module, LoraLayer):
 
     def unmerge(self) -> None:
         # same as lora.Linear.unmerge but not hard-coding base_layer.weight and without special cases like variants removed
+        from .bnb import add_to_bnb_4bit_experts_weight
+
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_A.keys():
+                if self._is_bnb_4bit():
+                    delta_weight = -self.get_delta_weight(active_adapter)
+                    add_to_bnb_4bit_experts_weight(self.get_base_layer(), self.parameter_name, delta_weight)
+                    continue
                 param = getattr(self.get_base_layer(), self.parameter_name)
                 orig_dtype = param.dtype
                 delta_weight = self.get_delta_weight(active_adapter)

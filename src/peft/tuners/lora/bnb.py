@@ -30,6 +30,22 @@ from .layer import LoraLayer, LoraVariant
 
 VARIANT_KWARG_KEYS = ["alora_offsets"]
 
+
+def add_to_bnb_4bit_experts_weight(
+    experts: torch.nn.Module, name: str, delta_weight: torch.Tensor, safe_merge: bool = False
+) -> None:
+    """Adds `delta_weight` to the weight `name` that the experts store in bitsandbytes 4-bit (`Bnb4bitExperts` in
+    Transformers): it is dequantized, updated, then quantized again."""
+    warnings.warn(
+        "Merge or unmerge lora module to 4-bit experts may get different generations due to rounding errors."
+    )
+    weight = experts.dequantize_weight(name, torch.float32) + delta_weight
+    if safe_merge and not torch.isfinite(weight).all():
+        raise ValueError(f"NaNs detected in the merged weights of {name}. The adapter seems to be broken")
+    for suffix, tensor in experts.quantize(weight).items():
+        setattr(experts, f"{name}{suffix}", tensor)
+
+
 if is_bnb_available():
 
     class Linear8bitLt(torch.nn.Module, LoraLayer):
