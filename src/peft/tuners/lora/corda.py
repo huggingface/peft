@@ -147,7 +147,8 @@ def preprocess_corda(
                 cache[f"{name}.eigens.U_WC"] = module.eigens.U_WC
                 cache[f"{name}.eigens.V_WC"] = module.eigens.V_WC
 
-            os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+            if dirname := os.path.dirname(cache_file):
+                os.makedirs(dirname, exist_ok=True)
             torch.save(cache, cache_file)
 
 
@@ -229,7 +230,8 @@ def calib_cov_distribution(
         all_covariance_matrix = {}
         for name, module in target_modules(model, config):
             all_covariance_matrix[name] = module.covariance_matrix
-        os.makedirs(os.path.dirname(covariance_file), exist_ok=True)
+        if dirname := os.path.dirname(covariance_file):
+            os.makedirs(dirname, exist_ok=True)
         torch.save(all_covariance_matrix, covariance_file)
 
 
