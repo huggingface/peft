@@ -108,7 +108,7 @@ model = AutoModelForCausalLM.from_pretrained(model_id)
 model = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.float32)
 ```
 
-If you want to save memory and bfloat16 (bf16) is good enough for your use case, use that instead -- bfloat16 is the reduced precision dtype that PyTorch supports on CPU.
+If you want to save memory and bfloat16 (bf16) is precise enough for your use case, use that instead -- bf16 is the reduced precision dtype for which PyTorch has optimized CPU kernels.
 
 ## Training runs but the model does not improve
 
