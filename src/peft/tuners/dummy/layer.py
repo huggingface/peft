@@ -103,6 +103,59 @@ class DummyLayer(BaseTunerLayer):
         else:
             nn.init.kaiming_uniform_(self.dummy_lora_B[adapter_name].weight, a=math.sqrt(5))
 
+    def _check_forward_args(self, x, *args, **kwargs):
+        """Checks whether the forward args and kwargs are compatible with the state of the adapter and the
+        requested features. For example, mixed batch inference is not possible on merged tuners.
+        """
+        adapter_names = kwargs.get("adapter_names", None)
+        if adapter_names is None:
+            return
+
+        if len(x) != len(adapter_names):
+            msg = (
+                "Length of `adapter_names` should be the same as the number of inputs, but got "
+                f"{len(adapter_names)} and {len(x)} respectively."
+            )
+            raise ValueError(msg)
+
+        if self.merged:
+            # It is unclear what would be the right thing to do if users pass adapter_names and there are merged
+            # adapters. Therefore, it is better to raise an error in this case.
+            msg = "Cannot pass `adapter_names` when there are merged adapters, please call `unmerge_adapter` first."
+            raise ValueError(msg)
+
+    def _mixed_adapter_forward_single(self, x: torch.Tensor, adapter_name: str) -> torch.Tensor:
+        # Implemented by subclasses; computes the forward for a single adapter with on a subset of the input
+        # batch as part of a mixed adapter batch forward. Theoretically it is possible to use this in forward
+        # but this is not done explicitly to keep both code paths explicit.
+        raise NotImplementedError
+
+    def _mixed_batch_forward(self, x: torch.Tensor, *args, adapter_names: list[str], **kwargs) -> torch.Tensor:
+        # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
+        # extra argument that allows mixing different adapters in the same batch at inference time while also having
+        # the ability to fall back to the base model's prediction. Naturally, this doesn't work when the tuner is
+        # merged, `_check_forward_args` makes sure of that.
+        result = self.base_layer(x, *args, **kwargs)
+        orig_dtype = result.dtype
+
+        unique_adapters = set(adapter_names)
+        sub_batch_indices_list = []
+        for adapter in unique_adapters:
+            sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
+
+        for i, active_adapter in enumerate(unique_adapters):
+            if active_adapter == "__base__":
+                continue
+            if active_adapter not in self.dummy_lora_A.keys():
+                continue
+
+            # getting the sub-batch and updating the corresponding indices of the layer output
+            sub_batch = x[sub_batch_indices_list[i]]
+            adapter_output = self._mixed_adapter_forward_single(sub_batch, active_adapter)
+            result[sub_batch_indices_list[i]] += adapter_output.to(orig_dtype)
+
+        return result
+
     def set_scale(self, adapter: str, scale: float) -> None:
         if adapter not in self.scaling:
             # Ignore the case where the adapter is not in the layer
@@ -143,17 +196,30 @@ class DummyLayer(BaseTunerLayer):
         return output_tensor
 
     def _compose_delta_weight(self, adapter: str, weight_a: torch.Tensor, weight_b: torch.Tensor) -> torch.Tensor:
-        # Implemented by subclasses; combines the low-rank factors into a full-size, scaled delta weight. The delta
-        # weight is a freshly computed tensor that nothing else references, so subclasses apply the scaling in place to
-        # avoid allocating another full-size tensor.
+        # Implemented by subclasses; combines the low-rank factors into a full-size, scaled delta weight
+        # which is eventually be used by `get_delta_weight` for merge/unmerge and, depending on the method,
+        # forward (often there are better ways than to compute the full matrix during forward).
+        #
+        # Avoid creating unnecessary allocations by using in-place operations where possible.
         raise NotImplementedError
 
     def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        # `_get_additive_delta` is used for converting PEFT tuners to LoRAs. The conversion expects the tuner to compute
+        # (W + dW) and then computes LoRA A/B matrices from the singular-value decomposition of dW. This method exists
+        # because not every tuner is doing this operation additively (e.g., OFT is applied multiplicatively to the base
+        # weights).
+        #
+        # Since we apply the delta weight of our tuner additively to the base weights in `merge()` we can simply return
+        # the dW matrix directly.
+        #
+        # See `peft.convert_to_lora` for details.
         return self.get_delta_weight(adapter_name)
 
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
         # We can easily implement `_get_additive_delta`, therefore we do support LoRA conversion (and of course
-        # because this method is also LoRA but that's besides the point).
+        # because this method is also LoRA but that's besides the point). If this were a real method and
+        # we knew that there's a more trivial path to create LoRA weights from the tuner weights than doing
+        # singular value decomposition we should think about implementing a shortcut in lora/conversion.py.
         #
         # See `peft.convert_to_lora` for details.
         return True
@@ -246,11 +312,26 @@ class Linear(nn.Module, DummyLayer):
         output_tensor.mul_(self.scaling[adapter])
         return output_tensor
 
+    def _mixed_adapter_forward_single(self, x: torch.Tensor, adapter_name: str) -> torch.Tensor:
+        # Implementation of the Linear forward case for _mixed_adapter_forward. The only difference to the
+        # 'normal' forward case is that `x` is a subset of the original batch and that we only activate
+        # a single adapter at a time instead of aggregating over all active adapters.
+        a = self.dummy_lora_A[adapter_name]
+        b = self.dummy_lora_B[adapter_name]
+        dropout = self.dummy_lora_dropout[adapter_name]
+        x = self._cast_input_dtype(x, a.weight.dtype)
+        return b(dropout(a(x))) * self.scaling[adapter_name]
+
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        # Note that we don't use early returns by convention to keep the style similar between PEFT tuners.
+        self._check_forward_args(x, *args, **kwargs)
+        adapter_names = kwargs.pop("adapter_names", None)
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
             result = self.base_layer(x, *args, **kwargs)
+        elif adapter_names is not None:
+            result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
         elif self.merged:
             # We don't have to explicitly check if there are unmerged active adapters since this is explicitly
             # forbidden to do. Merging requires the merged adapter to be active and each affected layer must merge all
@@ -359,11 +440,24 @@ class _ConvNd(nn.Module, DummyLayer):
         output_tensor.mul_(self.scaling[adapter])
         return output_tensor
 
+    def _mixed_adapter_forward_single(self, x: torch.Tensor, adapter_name: str) -> torch.Tensor:
+        a = self.dummy_lora_A[adapter_name]
+        b = self.dummy_lora_B[adapter_name]
+        dropout = self.dummy_lora_dropout[adapter_name]
+        x = self._cast_input_dtype(x, a.weight.dtype)
+        return b(dropout(a(x))) * self.scaling[adapter_name]
+
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        self._check_forward_args(x, *args, **kwargs)
+        adapter_names = kwargs.pop("adapter_names", None)
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
             result = self.base_layer(x, *args, **kwargs)
+        elif adapter_names is not None:
+            # Mixed batch forward is a feature - if you can implement it. If it complicates things you may
+            # leave it out.
+            result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
@@ -469,11 +563,22 @@ class Embedding(nn.Module, DummyLayer):
         output_tensor.mul_(self.scaling[adapter])
         return output_tensor
 
+    def _mixed_adapter_forward_single(self, x: torch.Tensor, adapter_name: str) -> torch.Tensor:
+        a = self.dummy_lora_A[adapter_name]
+        b = self.dummy_lora_B[adapter_name]
+        dropout = self.dummy_lora_dropout[adapter_name]
+        # Note: no input dtype cast here, unlike in Linear: x contains token ids that must stay integers.
+        return b(dropout(a(x))) * self.scaling[adapter_name]
+
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        self._check_forward_args(x, *args, **kwargs)
+        adapter_names = kwargs.pop("adapter_names", None)
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
             result = self.base_layer(x, *args, **kwargs)
+        elif adapter_names is not None:
+            result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:

@@ -37,6 +37,7 @@ from peft import (
     C3AConfig,
     CPTConfig,
     DeloraConfig,
+    DummyConfig,
     GloraConfig,
     GraloraConfig,
     HiraConfig,
@@ -1069,6 +1070,9 @@ class PeftCommonTester:
                 "Conv2dGroups2",
             ):
                 atol, rtol = 1e-3, 1e-3
+            elif issubclass(config_cls, DummyConfig) and model_id.startswith(("Conv", "Emb")):
+                # more instability with Conv, like for the other methods above
+                atol, rtol = 1e-3, 1e-3
 
             if config.peft_type == "ADAMSS":
                 # AdaMSS merges via B @ A @ newB (triple matmul), which accumulates more FP32
@@ -1242,7 +1246,7 @@ class PeftCommonTester:
 
     def _test_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
         # Test for mixing different adapters in a single batch by passing the adapter_names argument
-        if config_cls not in (LoraConfig, RoadConfig):
+        if config_cls not in (LoraConfig, RoadConfig, DummyConfig):
             pytest.skip(f"Mixed adapter batches not supported for {config_cls}")
 
         config = config_cls(
@@ -1310,7 +1314,7 @@ class PeftCommonTester:
     def _test_generate_with_mixed_adapter_batches_and_beam_search(self, model_id, config_cls, config_kwargs):
         # Test generating with beam search and with mixing different adapters in a single batch by passing the
         # adapter_names argument. See #2283.
-        if config_cls not in (LoraConfig,):
+        if config_cls not in (LoraConfig, DummyConfig):
             # note: RoAD supports mixed adapter batches but not beam search
             pytest.skip(f"Mixed adapter batches not supported for {config_cls}")
         if config_kwargs.get("alora_invocation_tokens") is not None:
