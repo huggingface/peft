@@ -5004,6 +5004,219 @@ class TestPeftCustomModel(PeftCommonTester):
         assert dw_merged.shape == module.base_layer.weight.shape
         assert torch.allclose(dw_merged, expected, atol=1e-5, rtol=1e-5)
 
+    @pytest.mark.parametrize(
+        "combination_type, combination_kwargs",
+        [
+            ("svd", {}),
+            ("ties_svd", {"density": 1.0}),
+            ("dare_ties_svd", {"density": 1.0}),
+            ("dare_linear_svd", {"density": 1.0}),
+            ("magnitude_prune_svd", {"density": 1.0}),
+        ],
+    )
+    @pytest.mark.parametrize("svd_full_matrices", [True, False])
+    def test_add_weighted_adapter_svd_new_rank_larger_than_layer_dims(
+        self, combination_type, combination_kwargs, svd_full_matrices
+    ):
+        # See 4240. When min(out, in) < new_rank, the SVD yields fewer than new_rank factors. They must be zero-padded
+        # to new_rank so lora_A/lora_B stay consistent with config.r instead of producing mismatched shapes.
+        torch.manual_seed(0)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(32, 32)
+                self.head = nn.Linear(32, 2)
+
+            def forward(self, X):
+                return self.head(self.fc1(X))
+
+        base_model = Model()
+        base_state_dict = copy.deepcopy(base_model.state_dict())
+        config = LoraConfig(r=8, lora_alpha=16, target_modules=["fc1", "head"], init_lora_weights=False)
+        model = get_peft_model(base_model, config, adapter_name="adapter1")
+        model.add_adapter("adapter2", config)
+        model.add_weighted_adapter(
+            adapters=["adapter1", "adapter2"],
+            weights=[0.5, 0.5],
+            adapter_name="merged",
+            combination_type=combination_type,
+            svd_full_matrices=svd_full_matrices,
+            **combination_kwargs,
+        )
+        model.set_adapter("merged")
+
+        head = model.base_model.model.head
+        assert head.r["merged"] == 8
+        assert head.lora_A["merged"].weight.shape == (8, 32)
+        assert head.lora_B["merged"].weight.shape == (2, 8)
+        assert model.peft_config["merged"].r == 8
+
+        X = torch.randn(2, 32)
+        assert model(X).shape == (2, 2)
+
+        if combination_type == "svd":
+            # the head delta weight has rank <= 2, so the capped SVD reconstructs the weighted sum exactly
+            expected = 0.5 * head.get_delta_weight("adapter1") + 0.5 * head.get_delta_weight("adapter2")
+            assert torch.allclose(head.get_delta_weight("merged"), expected, atol=1e-5)
+
+        out_unmerged = model(X)
+        model.merge_adapter()
+        out_merged = model(X)
+        model.unmerge_adapter()
+        assert torch.allclose(out_merged, out_unmerged, atol=1e-6)
+        assert torch.allclose(model(X), out_unmerged, atol=1e-6)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model.save_pretrained(tmp_dir, selected_adapters=["merged"])
+            new_base_model = Model()
+            new_base_model.load_state_dict(base_state_dict)
+            loaded = PeftModel.from_pretrained(new_base_model, os.path.join(tmp_dir, "merged"))
+            assert torch.allclose(loaded(X), model(X), atol=1e-5)
+
+    @pytest.mark.parametrize(
+        "conv_layer, input_shape",
+        [
+            (nn.Conv1d(8, 4, 3), (2, 8, 5)),
+            (nn.Conv2d(8, 4, 1), (2, 8, 3, 3)),
+        ],
+    )
+    @pytest.mark.parametrize("svd_full_matrices", [True, False])
+    def test_add_weighted_adapter_svd_new_rank_larger_than_conv_dims(self, conv_layer, input_shape, svd_full_matrices):
+        # See 4240. ConvNd used to crash when reshaping the SVD factors because min(out, in * prod(kernel)) < new_rank.
+        torch.manual_seed(0)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = conv_layer
+
+            def forward(self, X):
+                return self.conv(X)
+
+        base_model = Model()
+        base_state_dict = copy.deepcopy(base_model.state_dict())
+        config = LoraConfig(r=6, lora_alpha=12, target_modules=["conv"], init_lora_weights=False)
+        model = get_peft_model(base_model, config, adapter_name="adapter1")
+        model.add_adapter("adapter2", config)
+        model.add_weighted_adapter(
+            adapters=["adapter1", "adapter2"],
+            weights=[0.5, 0.5],
+            adapter_name="merged",
+            combination_type="svd",
+            svd_full_matrices=svd_full_matrices,
+        )
+        model.set_adapter("merged")
+
+        conv = model.base_model.model.conv
+        assert conv.r["merged"] == 6
+        assert conv.lora_A["merged"].weight.shape == (6, conv_layer.in_channels, *conv_layer.kernel_size)
+        assert conv.lora_B["merged"].weight.shape == (
+            conv_layer.out_channels,
+            6,
+            *([1] * (conv_layer.weight.dim() - 2)),
+        )
+        assert model.peft_config["merged"].r == 6
+
+        X = torch.randn(*input_shape)
+        assert model(X).shape[0] == X.shape[0]
+        # the delta weight has rank <= out_channels < 6, so the capped SVD reconstruction is exact
+        expected = 0.5 * conv.get_delta_weight("adapter1") + 0.5 * conv.get_delta_weight("adapter2")
+        assert torch.allclose(conv.get_delta_weight("merged"), expected, atol=1e-5)
+
+        out_unmerged = model(X)
+        model.merge_adapter()
+        out_merged = model(X)
+        model.unmerge_adapter()
+        assert torch.allclose(out_merged, out_unmerged, atol=1e-6)
+        assert torch.allclose(model(X), out_unmerged, atol=1e-6)
+
+    @pytest.mark.parametrize("svd_full_matrices", [True, False])
+    def test_add_weighted_adapter_svd_new_rank_larger_than_embedding_dim(self, svd_full_matrices):
+        # See 4240. With embedding_dim < new_rank, the embedding factors must be padded to new_rank as well.
+        torch.manual_seed(0)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = nn.Embedding(16, 4)
+
+            def forward(self, X):
+                return self.emb(X)
+
+        base_model = Model()
+        base_state_dict = copy.deepcopy(base_model.state_dict())
+        config = LoraConfig(r=8, lora_alpha=16, target_modules=["emb"], init_lora_weights=False)
+        model = get_peft_model(base_model, config, adapter_name="adapter1")
+        model.add_adapter("adapter2", config)
+        model.add_weighted_adapter(
+            adapters=["adapter1", "adapter2"],
+            weights=[0.5, 0.5],
+            adapter_name="merged",
+            combination_type="svd",
+            svd_full_matrices=svd_full_matrices,
+        )
+        model.set_adapter("merged")
+
+        emb = model.base_model.model.emb
+        assert emb.r["merged"] == 8
+        assert emb.lora_embedding_A["merged"].shape == (8, 16)
+        assert emb.lora_embedding_B["merged"].shape == (4, 8)
+        assert model.peft_config["merged"].r == 8
+
+        X = torch.randint(0, 16, (2, 5))
+        expected = 0.5 * emb.get_delta_weight("adapter1") + 0.5 * emb.get_delta_weight("adapter2")
+        assert torch.allclose(emb.get_delta_weight("merged"), expected, atol=1e-5)
+
+        out_unmerged = model(X)
+        model.merge_adapter()
+        out_merged = model(X)
+        model.unmerge_adapter()
+        assert torch.allclose(out_merged, out_unmerged, atol=1e-6)
+        assert torch.allclose(model(X), out_unmerged, atol=1e-6)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model.save_pretrained(tmp_dir, selected_adapters=["merged"])
+            new_base_model = Model()
+            new_base_model.load_state_dict(base_state_dict)
+            loaded = PeftModel.from_pretrained(new_base_model, os.path.join(tmp_dir, "merged"))
+            assert torch.allclose(loaded(X), model(X), atol=1e-5)
+
+    def test_add_weighted_adapter_svd_explicit_rank_larger_than_layer_dims(self):
+        # See 4240. An explicit svd_rank above min(out, in) must take the same padding path as the default rank.
+        torch.manual_seed(0)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.head = nn.Linear(32, 2)
+
+            def forward(self, X):
+                return self.head(X)
+
+        config = LoraConfig(r=4, lora_alpha=8, target_modules=["head"], init_lora_weights=False)
+        model = get_peft_model(Model(), config, adapter_name="adapter1")
+        model.add_adapter("adapter2", config)
+        model.add_weighted_adapter(
+            adapters=["adapter1", "adapter2"],
+            weights=[0.5, 0.5],
+            adapter_name="merged",
+            combination_type="svd",
+            svd_rank=12,
+        )
+        model.set_adapter("merged")
+
+        head = model.base_model.model.head
+        assert head.r["merged"] == 12
+        assert head.lora_A["merged"].weight.shape == (12, 32)
+        assert head.lora_B["merged"].weight.shape == (2, 12)
+        assert model.peft_config["merged"].r == 12
+
+        X = torch.randn(2, 32)
+        assert model(X).shape == (2, 2)
+        expected = 0.5 * head.get_delta_weight("adapter1") + 0.5 * head.get_delta_weight("adapter2")
+        assert torch.allclose(head.get_delta_weight("merged"), expected, atol=1e-5)
+
     def test_multiple_adapters_no_needless_copy_modules_to_save(self):
         # See 2206
         # The problem was that we keep a "global" modules_to_save on the model which contains all possible
