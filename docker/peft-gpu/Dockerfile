@@ -66,15 +66,16 @@ RUN conda run -n peft pip install -U --no-cache-dir \
         scipy \
         torchao \
         "fbgemm-gpu-genai>=1.2.0" \
-        git+https://github.com/huggingface/transformers \
+        # Install the `kernels` extra along with Transformers: Transformers only supports a specific
+        # `kernels` version window, so let it pull in `kernels` instead of installing it ourselves
+        "transformers[kernels] @ git+https://github.com/huggingface/transformers" \
         git+https://github.com/huggingface/accelerate \
         peft[test]@git+https://github.com/huggingface/peft \
         # TODO: Remove the AQLM dependency in PEFT v1.2.
         aqlm[gpu]>=1.0.2 \
         # TODO: Remove the HQQ dependency in PEFT v1.2.
         hqq \
-        deepspeed \
-        "kernels>=0.16"
+        deepspeed
 
 # Build Transformer Engine against the PyTorch version installed above.
 RUN NVTE_BUILD_USE_NVIDIA_WHEELS=1 \
