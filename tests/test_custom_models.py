@@ -5051,6 +5051,9 @@ class TestPeftCustomModel(PeftCommonTester):
         assert head.lora_A["merged"].weight.shape == (8, 32)
         assert head.lora_B["merged"].weight.shape == (2, 8)
         assert model.peft_config["merged"].r == 8
+        # the rank dimensions beyond min(out, in) are zero-padded, leaving U @ Vh untouched
+        assert torch.count_nonzero(head.lora_A["merged"].weight[2:, :]) == 0
+        assert torch.count_nonzero(head.lora_B["merged"].weight[:, 2:]) == 0
 
         X = torch.randn(2, 32)
         assert model(X).shape == (2, 2)
@@ -5117,6 +5120,9 @@ class TestPeftCustomModel(PeftCommonTester):
             *([1] * (conv_layer.weight.dim() - 2)),
         )
         assert model.peft_config["merged"].r == 6
+        # the rank dimensions beyond min(out, in * prod(kernel)) are zero-padded
+        assert torch.count_nonzero(conv.lora_A["merged"].weight[conv_layer.out_channels :]) == 0
+        assert torch.count_nonzero(conv.lora_B["merged"].weight[:, conv_layer.out_channels :]) == 0
 
         X = torch.randn(*input_shape)
         assert model(X).shape[0] == X.shape[0]
@@ -5163,6 +5169,9 @@ class TestPeftCustomModel(PeftCommonTester):
         assert emb.lora_embedding_A["merged"].shape == (8, 16)
         assert emb.lora_embedding_B["merged"].shape == (4, 8)
         assert model.peft_config["merged"].r == 8
+        # the rank dimensions beyond embedding_dim are zero-padded
+        assert torch.count_nonzero(emb.lora_embedding_A["merged"][4:, :]) == 0
+        assert torch.count_nonzero(emb.lora_embedding_B["merged"][:, 4:]) == 0
 
         X = torch.randint(0, 16, (2, 5))
         expected = 0.5 * emb.get_delta_weight("adapter1") + 0.5 * emb.get_delta_weight("adapter2")
