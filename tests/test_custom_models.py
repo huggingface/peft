@@ -2885,6 +2885,9 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_merge_layers_load_state_dict(self, test_name, model_id, config_cls, config_kwargs):
+        if config_cls is CortexConfig:
+            pytest.skip("Merging Cortex widens the base FFNs, so the state dict from before merging doesn't fit")
+
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers_load_state_dict(model_id, config_cls, config_kwargs)
 
