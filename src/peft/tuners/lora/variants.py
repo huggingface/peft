@@ -607,7 +607,7 @@ class ALoraLinearVariant(LoraVariant):
         result: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
-        x = x.to(module.lora_A[active_adapter].weight.dtype)
+
         T = result.shape[1] if result.ndim == 3 else 1
         offsets = _alora_offsets_as_list(kwargs.get("alora_offsets"), T)
 
@@ -618,6 +618,8 @@ class ALoraLinearVariant(LoraVariant):
         scaling = module.scaling[active_adapter]
         lora_A = module.lora_A[active_adapter]
         lora_B = module.lora_B[active_adapter]
+
+        x = module._cast_input_dtype(x, module.lora_A[active_adapter].weight.dtype)
 
         if min(offsets) == max(offsets):
             # All rows activate at the same index, so we don't need a mask. This also covers whole-sequence
