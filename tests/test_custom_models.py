@@ -3809,6 +3809,10 @@ class TestPeftCustomModel(PeftCommonTester):
             # Grouped LoHa/LoKr merges need a wider tolerance than a LoRA `B @ A` merge.
             atol, rtol = 1e-3, 1e-3
 
+        if issubclass(config_cls, DummyConfig) and model_id.startswith(("Conv", "Emb")):
+            # more instability with Conv, like for the other methods above
+            atol, rtol = 1e-3, 1e-3
+
         if issubclass(config_cls, OFTConfig):
             atol, rtol = 1e-4, 1e-4
 

@@ -103,6 +103,27 @@ class DummyLayer(BaseTunerLayer):
         else:
             nn.init.kaiming_uniform_(self.dummy_lora_B[adapter_name].weight, a=math.sqrt(5))
 
+    def _check_forward_args(self, x, *args, **kwargs):
+        """Checks whether the forward args and kwargs are compatible with the state of the adapter and the
+        requested features. For example, mixed batch inference is not possible on merged tuners.
+        """
+        adapter_names = kwargs.get("adapter_names", None)
+        if adapter_names is None:
+            return
+
+        if len(x) != len(adapter_names):
+            msg = (
+                "Length of `adapter_names` should be the same as the number of inputs, but got "
+                f"{len(adapter_names)} and {len(x)} respectively."
+            )
+            raise ValueError(msg)
+
+        if self.merged:
+            # It is unclear what would be the right thing to do if users pass adapter_names and there are merged
+            # adapters. Therefore, it is better to raise an error in this case.
+            msg = "Cannot pass `adapter_names` when there are merged adapters, please call `unmerge_adapter` first."
+            raise ValueError(msg)
+
     def set_scale(self, adapter: str, scale: float) -> None:
         if adapter not in self.scaling:
             # Ignore the case where the adapter is not in the layer
@@ -259,12 +280,46 @@ class Linear(nn.Module, DummyLayer):
         output_tensor.mul_(self.scaling[adapter])
         return output_tensor
 
+    def _mixed_batch_forward(self, x: torch.Tensor, *args, adapter_names: list[str], **kwargs) -> torch.Tensor:
+        # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
+        # extra argument that allows mixing different adapters in the same batch at inference time.
+        result = self.base_layer(x, *args, **kwargs)
+        orig_dtype = result.dtype
+
+        unique_adapters = set(adapter_names)
+        sub_batch_indices_list = []
+        for adapter in unique_adapters:
+            sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
+
+        for i, active_adapter in enumerate(unique_adapters):
+            if active_adapter == "__base__":
+                continue
+            if active_adapter not in self.dummy_lora_A.keys():
+                continue
+
+            a = self.dummy_lora_A[active_adapter]
+            b = self.dummy_lora_B[active_adapter]
+            scaling = self.scaling[active_adapter]
+            dropout = self.dummy_lora_dropout[active_adapter]
+
+            # getting the sub-batch, passing it to Dummy layers and updating the corresponding indices of the linear
+            # layer output
+            sub_batch = x[sub_batch_indices_list[i]].to(a.weight.dtype)
+            adapter_output = b(dropout(a(sub_batch))) * scaling
+            result[sub_batch_indices_list[i]] += adapter_output.to(orig_dtype)
+
+        return result
+
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         # Note that we don't use early returns by convention to keep the style similar between PEFT tuners.
+        self._check_forward_args(x, *args, **kwargs)
+        adapter_names = kwargs.pop("adapter_names", None)
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
             result = self.base_layer(x, *args, **kwargs)
+        elif adapter_names is not None:
+            result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
         elif self.merged:
             # We don't have to explicitly check if there are unmerged active adapters since this is explicitly
             # forbidden to do. Merging requires the merged adapter to be active and each affected layer must merge all
@@ -373,11 +428,49 @@ class _ConvNd(nn.Module, DummyLayer):
         output_tensor.mul_(self.scaling[adapter])
         return output_tensor
 
+    def _mixed_batch_forward(self, x: torch.Tensor, *args, adapter_names: list[str], **kwargs) -> torch.Tensor:
+        # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
+        # extra argument that allows mixing different adapters in the same batch at inference time while also having
+        # the ability to fall back to the base model's prediction. Naturally, this doesn't work when the tuner is
+        # merged, `_check_forward_args` makes sure of that.
+        result = self.base_layer(x, *args, **kwargs)
+        orig_dtype = result.dtype
+
+        unique_adapters = set(adapter_names)
+        sub_batch_indices_list = []
+        for adapter in unique_adapters:
+            sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
+
+        for i, active_adapter in enumerate(unique_adapters):
+            if active_adapter == "__base__":
+                continue
+            if active_adapter not in self.dummy_lora_A.keys():
+                continue
+
+            # this inner portion is basically 1:1 the forward call but computes the subset of inputs for the
+            # selected adapter instead of for all adapters.
+            a = self.dummy_lora_A[active_adapter]
+            b = self.dummy_lora_B[active_adapter]
+            scaling = self.scaling[active_adapter]
+            dropout = self.dummy_lora_dropout[active_adapter]
+
+            sub_batch = x[sub_batch_indices_list[i]].to(a.weight.dtype)
+            adapter_output = b(dropout(a(sub_batch))) * scaling
+            result[sub_batch_indices_list[i]] += adapter_output.to(orig_dtype)
+
+        return result
+
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        self._check_forward_args(x, *args, **kwargs)
+        adapter_names = kwargs.pop("adapter_names", None)
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
             result = self.base_layer(x, *args, **kwargs)
+        elif adapter_names is not None:
+            # Mixed batch forward is a feature - if you can implement it. If it complicates things you may
+            # leave it out.
+            result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
@@ -483,11 +576,46 @@ class Embedding(nn.Module, DummyLayer):
         output_tensor.mul_(self.scaling[adapter])
         return output_tensor
 
+    def _mixed_batch_forward(self, x: torch.Tensor, *args, adapter_names: list[str], **kwargs) -> torch.Tensor:
+        # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
+        # extra argument that allows mixing different adapters in the same batch at inference time.
+        result = self.base_layer(x, *args, **kwargs)
+        orig_dtype = result.dtype
+
+        unique_adapters = set(adapter_names)
+        sub_batch_indices_list = []
+        for adapter in unique_adapters:
+            sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
+
+        for i, active_adapter in enumerate(unique_adapters):
+            if active_adapter == "__base__":
+                continue
+            if active_adapter not in self.dummy_lora_A.keys():
+                continue
+
+            a = self.dummy_lora_A[active_adapter]
+            b = self.dummy_lora_B[active_adapter]
+            scaling = self.scaling[active_adapter]
+            dropout = self.dummy_lora_dropout[active_adapter]
+
+            # getting the sub-batch, passing it to Dummy layers and updating the corresponding indices of the
+            # embedding layer output. Note: no input dtype cast here, unlike in Linear: x contains token ids that must
+            # stay integers.
+            sub_batch = x[sub_batch_indices_list[i]]
+            adapter_output = b(dropout(a(sub_batch))) * scaling
+            result[sub_batch_indices_list[i]] += adapter_output.to(orig_dtype)
+
+        return result
+
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        self._check_forward_args(x, *args, **kwargs)
+        adapter_names = kwargs.pop("adapter_names", None)
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
             result = self.base_layer(x, *args, **kwargs)
+        elif adapter_names is not None:
+            result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
