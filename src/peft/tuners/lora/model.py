@@ -994,16 +994,23 @@ class LoraModel(BaseTuner):
 
         # based on https://github.com/kohya-ss/sd-scripts/blob/main/networks/svd_merge_lora.py#L114-L131
         U, S, Vh = torch.linalg.svd(delta_weight, full_matrices=full_matrices, driver=driver)
-        U = U[:, :new_rank]
-        S = S[:new_rank]
+        # A layer with min(out, in) < new_rank has fewer singular values than new_rank. Clamp to what the SVD actually
+        # provides and zero-pad the factors back to new_rank so their shapes stay consistent with config.r, while
+        # U @ diag(S) @ Vh (and thus the merged delta weight) is preserved.
+        actual_rank = min(new_rank, S.shape[0])
+        U = U[:, :actual_rank]
+        S = S[:actual_rank]
         U = U @ torch.diag(S)
-        Vh = Vh[:new_rank, :]
+        Vh = Vh[:actual_rank, :]
         if clamp is not None:
             dist = torch.cat([U.flatten(), Vh.flatten()])
             hi_val = torch.quantile(dist, clamp)
             low_val = -hi_val
             U = U.clamp(low_val, hi_val)
             Vh = Vh.clamp(low_val, hi_val)
+        if actual_rank < new_rank:
+            U = torch.nn.functional.pad(U, (0, new_rank - actual_rank))
+            Vh = torch.nn.functional.pad(Vh, (0, 0, 0, new_rank - actual_rank))
         if is_conv:
             U = U.reshape(target_lora_B.data.shape)
             Vh = Vh.reshape(target_lora_A.data.shape)
