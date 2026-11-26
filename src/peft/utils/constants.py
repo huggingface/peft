@@ -92,6 +92,44 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "rwkv7": ["r_proj", "k_proj", "v_proj", "o_proj", "key", "value"],
 }
 
+# Cortex adapts whole FFNs. For MoE models, the defaults target the shared experts, if there are any, otherwise the
+# packed experts. With `moe_target="routed"` or `"both"`, `CortexModel` targets the packed experts instead or as well.
+TRANSFORMERS_MODELS_TO_CORTEX_TARGET_MODULES_MAPPING = {
+    # dense FFNs; only text models, since `mlp` would also match the MLPs of the vision encoders of multimodal models
+    "llama": ["mlp"],
+    "mistral": ["mlp"],
+    "qwen2": ["mlp"],
+    "qwen3": ["mlp"],
+    "qwen3_5_text": ["mlp"],
+    "gemma3_text": ["mlp"],
+    # MoE models without shared experts: add channels common to all experts
+    "qwen3_moe": ["experts"],
+    "mixtral": ["experts"],
+    "olmoe": ["experts"],
+    "gpt_oss": ["experts"],
+    "minimax": ["experts"],
+    "minimax_m2": ["experts"],
+    # MoE models with shared experts: extend the shared experts
+    "deepseek_v2": ["shared_experts"],
+    "deepseek_v3": ["shared_experts"],
+    "deepseek_v32": ["shared_experts"],
+    "deepseek_v4": ["shared_experts"],
+    "glm4_moe": ["shared_experts"],
+    "glm4_moe_lite": ["shared_experts"],
+    "glm_moe_dsa": ["shared_experts"],
+    "glm5_next": ["shared_experts"],
+    "glm5_next_text": ["shared_experts"],
+    "kimi_linear": ["shared_experts"],
+    "minimax_m3_vl": ["shared_experts"],
+    "minimax_m3_vl_text": ["shared_experts"],
+    "nemotron_h": ["shared_experts"],
+    "qwen3_next": ["shared_expert"],
+    "qwen3_5_moe": ["shared_expert"],
+    "qwen3_5_moe_text": ["shared_expert"],
+    # the dense FFN of each Gemma4 layer is computed alongside its experts, like shared experts
+    "gemma4_text": ["mlp"],
+}
+
 # target module mappings that are identical to LORA
 TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
