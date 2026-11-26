@@ -70,7 +70,7 @@ class RandLoraModel(BaseTuner):
 
     Args:
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
-        config ([`RandLoraConfig`]): The configuration of the RandLora model.
+        peft_config ([`RandLoraConfig`]): The configuration of the RandLora model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             Create empty adapter weights on meta device. Useful to speed up the loading process.

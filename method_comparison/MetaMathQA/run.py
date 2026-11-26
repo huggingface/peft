@@ -196,21 +196,14 @@ def train(
     if init_kv_cache_prefix is not None:
         initialize_kv_prefix_from_text(model, tokenizer, text=init_kv_cache_prefix)
 
-    # print this after getting the optimizer, in case it modifies requires_gard; the healthcheck does not support
-    # prompt learning methods and adaption prompt
-    if hasattr(model, "healthcheck") and not (
-        model.active_peft_config.is_prompt_learning or model.active_peft_config.is_adaption_prompt
-    ):
+    # print this after getting the optimizer, in case it modifies requires_grad
+    if hasattr(model, "healthcheck"):
         healthcheck = model.healthcheck()
         print_verbose(format_healthcheck(healthcheck))
         num_trainable_params = healthcheck["summary"]["trainable_params"]
         num_params = healthcheck["summary"]["total_params"]
     else:
-        if hasattr(model, "get_nb_trainable_parameters"):
-            num_trainable_params, num_params = model.get_nb_trainable_parameters()
-        else:
-            num_params = model.num_parameters()
-            num_trainable_params = num_params
+        num_params = num_trainable_params = model.num_parameters()
         print_verbose(
             f"trainable params: {num_trainable_params:,d} || all params: {num_params:,d} || "
             f"trainable: {100 * num_trainable_params / num_params:.4f}%"
