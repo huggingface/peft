@@ -178,7 +178,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
                 self.olora_init(adapter_name)
         elif init_lora_weights == "loftq":
             with gather_params_ctx(self.get_base_layer().weight):
-                self.loftq_init(adapter_name)
+                self.loftq_init(adapter_name, config)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
 
@@ -297,7 +297,8 @@ class LoraParallelLinear(nn.Module, LoraLayer):
             weight_A = weight_A.float()
             weight_B = weight_B.float()
 
-        output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
+        output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out)
+        output_tensor.mul_(self.scaling[adapter])
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)

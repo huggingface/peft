@@ -133,8 +133,8 @@ class FrodLayer(BaseTunerLayer):
         object.__setattr__(self, "frod_s_size", frod_s_size)
 
     def _calculate_frod_u_and_lambda(self, V, W):
-        w = W.detach().to(torch.float64).cpu()
-        v = V.detach().to(torch.float64).cpu()
+        w = W.detach().cpu().to(torch.float64)
+        v = V.detach().cpu().to(torch.float64)
         try:
             bi = torch.linalg.solve(v, w.T).T
         except RuntimeError:
@@ -376,10 +376,14 @@ class Linear(nn.Linear, FrodLayer):
             param = adapter_layer[adapter_name]
             if param.is_meta:
                 continue
+
+            requires_grad_before = getattr(param, "requires_grad", None)
             if target_dtype is not None:
                 adapter_layer[adapter_name] = param.to(target_device, dtype=target_dtype)
             else:
                 adapter_layer[adapter_name] = param.to(target_device)
+            if requires_grad_before is not None:
+                adapter_layer[adapter_name].requires_grad = requires_grad_before
 
     def _get_existing_adapter_device_dtype(
         self, adapter_name: Optional[str] = None

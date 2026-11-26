@@ -5,7 +5,7 @@ import logging
 import math
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from random import randint
 from typing import Any, Union
@@ -639,7 +639,7 @@ def main():
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if args.with_tracking:
-        run_name = f"run-{datetime.now(timezone.utc).strftime('%Y-%m-%d_%H-%M-%S')}"
+        run_name = f"run-{datetime.now(UTC).strftime('%Y-%m-%d_%H-%M-%S')}"
         experiment_config = vars(args)
         # TensorBoard cannot log Enums, need the raw value
         experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"].value

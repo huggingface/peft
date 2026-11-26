@@ -64,7 +64,7 @@ from peft import ShadowConfig, get_peft_model
 model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B")
 config = ShadowConfig(r=8, shadow_num_hidden_layers=1, task_type="CAUSAL_LM")
 model = get_peft_model(model, config)
-model.print_trainable_parameters()
+model.print_healthcheck()
 
 out = model.generate(input_ids, max_new_tokens=32)
 ```
@@ -104,6 +104,15 @@ By default (`copy=False`) the returned model shares its modules with the PEFT mo
 shadow = model.base_model.unload_shadow(copy=True)
 shadow.save_pretrained("standalone-shadow")
 ```
+
+## Benchmark overview
+
+<iframe
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=SHADOW"
+	frameborder="0"
+	width="850"
+	height="1000"
+></iframe>
 
 # API
 

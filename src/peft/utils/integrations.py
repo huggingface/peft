@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import functools
+import inspect
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -24,6 +25,27 @@ import packaging.version
 import torch
 import transformers
 from torch import nn
+
+from ..import_utils import get_transformers_cache_name
+
+
+_TORCH_WRAPPER_NAMES = {"_fsdp_wrapped_module", "_checkpoint_wrapped_module"}
+
+
+class TpMeshDimRegistry:
+    """Recognized mesh dimension names for tensor parallelism without a Transformers TP plan."""
+
+    _names = frozenset({"tp"})
+
+    @classmethod
+    def register(cls, name: str) -> None:
+        """Register a custom TP mesh dimension name before creating adapters."""
+        cls._names = cls._names | {name}
+
+    @classmethod
+    def is_registered(cls, name: str) -> bool:
+        """Whether a mesh dimension name identifies tensor parallelism."""
+        return name in cls._names
 
 
 @dataclass
@@ -74,6 +96,29 @@ def gather_params_ctx(
     with deepspeed.zero.GatheredParameters(param, modifier_rank=modifier_rank, fwd_module=fwd_module):
         yield
     return
+
+
+def get_fsdp_modules(model: nn.Module) -> list[nn.Module]:
+    """Return the FSDP2 modules in `model`, including `model` itself."""
+    if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
+        return []
+
+    try:
+        from torch.distributed.fsdp import FSDPModule
+    except ImportError:
+        # FSDP2 is public from torch 2.6 on
+        return []
+
+    return [module for module in model.modules() if isinstance(module, FSDPModule)]
+
+
+def remove_torch_wrapper_names(name: str) -> str:
+    """Remove the names of torch's FSDP and activation checkpointing wrappers from a module or parameter name.
+
+    These wrappers add a level to the names in `named_modules()` and `named_parameters()`, at any depth of the model.
+    `state_dict` keys need no clean up because the wrappers take care of it.
+    """
+    return ".".join(part for part in name.split(".") if part not in _TORCH_WRAPPER_NAMES)
 
 
 def dequantize_module_weight(module: torch.nn.Module) -> torch.nn.Parameter:
@@ -207,6 +252,47 @@ def map_cache_to_layer_device_map(model: Any, cache: transformers.Cache) -> None
             # TODO: remove if we drop support for transformers <= 4.55
             cache.key_cache[idx] = cache.key_cache[idx].to(layer_device)
             cache.value_cache[idx] = cache.value_cache[idx].to(layer_device)
+
+
+def check_cache_in_signature(method) -> bool:
+    """Check whether a method explicitly accepts the Transformers cache argument.
+
+    Note that for the longest time, the argument was called `past_key_values` but it was deprecated in
+    https://github.com/huggingface/transformers/pull/50585 and is henceforth called `cache`. Therefore, the name is not
+    hard-coded.
+    """
+    return get_transformers_cache_name() in inspect.signature(method).parameters
+
+
+def is_activation_checkpointing(model: nn.Module, *, default: bool) -> bool:
+    """Check if a Transformers model has using activation checkpointing.
+
+    This used to be called `is_gradient_checkpointing` but Transformers deprecated it (will be removed in v6):
+
+    - https://github.com/huggingface/transformers/pull/49248
+    - https://github.com/huggingface/transformers/pull/50310
+    """
+    # TODO: remove once Transformers < v6 is no longer supported.
+    sentinel = object()
+    result = getattr(model, "is_activation_checkpointing", sentinel)
+    if result is sentinel:
+        result = getattr(model, "is_gradient_checkpointing", default)
+    return result
+
+
+def activation_checkpointing_enable(model, *args, **kwargs) -> None:
+    """Enable activation checkpointing on a Transformers model.
+
+    This used to be called `gradient_checkpointing_enable` but Transformers deprecated it (will be removed in v6):
+
+    - https://github.com/huggingface/transformers/pull/49248
+    - https://github.com/huggingface/transformers/pull/50310
+
+    The same renaming applies to `gradient_checkpointing_disable` but it's not used in PEFT.
+    """
+    # TODO: remove once Transformers < v6 is no longer supported.
+    meth = getattr(model, "activation_checkpointing_enable", model.gradient_checkpointing_enable)
+    meth(*args, **kwargs)
 
 
 ##################################

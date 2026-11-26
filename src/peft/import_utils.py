@@ -14,6 +14,7 @@
 import importlib
 import importlib.metadata as importlib_metadata
 import platform
+import warnings
 from functools import lru_cache
 
 import packaging.version
@@ -45,6 +46,36 @@ try:
     is_transformers_dtensor_tp = True
 except ImportError:
     is_transformers_dtensor_tp = False
+
+
+if not is_transformers_ge_v5_6_0:
+    warnings.warn(
+        f"Support for Transformers < 5.6 is deprecated in PEFT and will be removed in the next release, v1.0. "
+        f"You have Transformers {transformers.__version__}. Please upgrade to Transformers >= 5.6.",
+        FutureWarning,
+    )
+
+
+if packaging.version.parse(torch.__version__) < packaging.version.parse("2.6.0"):
+    warnings.warn(
+        f"Support for PyTorch < 2.6 is deprecated in PEFT and will be removed in the next release, v1.0. "
+        f"You have PyTorch {torch.__version__}. Please upgrade to PyTorch >= 2.6.",
+        FutureWarning,
+    )
+
+
+@lru_cache
+def get_transformers_cache_name() -> str:
+    """Return the cache argument and output field name used by Transformers.
+
+    Note that for the longest time, the argument was called `past_key_values` but it was deprecated in
+    https://github.com/huggingface/transformers/pull/50585 and is henceforth called `cache`. Therefore, the name is not
+    hard-coded.
+    """
+    # TODO: Remove the old name once support for Transformers < 5.24.0 is dropped.
+    if packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.24.0.dev0"):
+        return "cache"
+    return "past_key_values"
 
 
 @lru_cache
@@ -159,10 +190,14 @@ def is_torchao_available() -> bool:
         return False
 
     if torchao_version < TORCHAO_MINIMUM_VERSION:
-        raise ImportError(
+        # Warn instead of raising, since an old torchao is often installed without being used (e.g. on Google Colab).
+        # Raising would break PEFT for all models, not just torchao-quantized ones.
+        warnings.warn(
             f"Found an incompatible version of torchao. Found version {torchao_version}, "
-            f"but only versions above {TORCHAO_MINIMUM_VERSION} are supported"
+            f"but only versions above {TORCHAO_MINIMUM_VERSION} are supported. torchao support in PEFT is disabled; "
+            "if you want to use a torchao-quantized model with PEFT, please upgrade torchao."
         )
+        return False
     return True
 
 

@@ -38,6 +38,7 @@ from peft import (
     get_peft_model_state_dict,
     set_peft_model_state_dict,
 )
+from peft.import_utils import get_transformers_cache_name
 from peft.tuners.shadow import DetachedShadowModel, ShadowCache
 from peft.tuners.shadow.diffusion_models import DetachedFluxShadowModel
 from peft.tuners.shadow.layers import ShadowLayer
@@ -47,7 +48,7 @@ from .testing_utils import hub_online_once
 
 
 LLAMA_CAUSAL_MODEL_ID = "peft-internal-testing/tiny-random-LlamaForCausalLM"
-LLAMA_SEQCLS_MODEL_ID = "trl-internal-testing/tiny-LlamaForSequenceClassification-3.2"
+LLAMA_SEQCLS_MODEL_ID = "peft-internal-testing/tiny-LlamaForSequenceClassification-3.2"
 
 
 def make_llama_causal():
@@ -380,14 +381,15 @@ class TestShadowKVCache:
         ids = torch.randint(0, 128, (1, 4))
         with torch.no_grad():
             out = model(input_ids=ids, use_cache=True)
-        assert isinstance(out.past_key_values, ShadowCache)
-        assert isinstance(out.past_key_values, Cache)
-        assert not out.past_key_values.is_compileable
-        assert len(out.past_key_values) == len(out.past_key_values.base)
-        assert out.past_key_values.get_seq_length() == 4
-        assert out.past_key_values.base is not None
-        assert out.past_key_values.shadow is not None
-        assert out.past_key_values.shadow.get_seq_length() == 4
+        cache = getattr(out, get_transformers_cache_name())
+        assert isinstance(cache, ShadowCache)
+        assert isinstance(cache, Cache)
+        assert not cache.is_compileable
+        assert len(cache) == len(cache.base)
+        assert cache.get_seq_length() == 4
+        assert cache.base is not None
+        assert cache.shadow is not None
+        assert cache.shadow.get_seq_length() == 4
 
     def test_prefill_then_decode_logits_match_full_sequence(self):
         model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM", init_weights=False))
@@ -397,8 +399,9 @@ class TestShadowKVCache:
         full_ids = torch.cat([ids, next_token], dim=1)
         with torch.no_grad():
             out_prefill = model(input_ids=ids, use_cache=True)
-            assert isinstance(out_prefill.past_key_values, ShadowCache)
-            out_decode = model(input_ids=next_token, past_key_values=out_prefill.past_key_values, use_cache=True)
+            cache = getattr(out_prefill, get_transformers_cache_name())
+            assert isinstance(cache, ShadowCache)
+            out_decode = model(input_ids=next_token, use_cache=True, **{get_transformers_cache_name(): cache})
             out_full = model(input_ids=full_ids, use_cache=False)
         assert torch.allclose(out_decode.logits[:, -1, :], out_full.logits[:, -1, :], atol=1e-4)
 
@@ -412,7 +415,7 @@ class TestShadowKVCache:
 
         with torch.no_grad():
             out = model(input_ids=prefix, use_cache=True)
-            cache = out.past_key_values
+            cache = getattr(out, get_transformers_cache_name())
             assert isinstance(cache, ShadowCache)
             cached_logits = out.logits[:, -1, :]
             full_logits = model(input_ids=prefix, use_cache=False).logits[:, -1, :]
@@ -425,8 +428,8 @@ class TestShadowKVCache:
                 full_ids = torch.cat([prefix] + [torch.tensor([[t]]) for t in generated], dim=1)
                 full_logits = model(input_ids=full_ids, use_cache=False).logits[:, -1, :]
                 if step < max_new_tokens - 1:
-                    out = model(input_ids=next_tok, past_key_values=cache, use_cache=True)
-                    cache = out.past_key_values
+                    out = model(input_ids=next_tok, use_cache=True, **{get_transformers_cache_name(): cache})
+                    cache = getattr(out, get_transformers_cache_name())
                     cached_logits = out.logits[:, -1, :]
                     assert torch.allclose(cached_logits, full_logits, atol=1e-4), f"mismatch at step {step}"
 
@@ -444,11 +447,10 @@ class TestShadowKVCache:
         with torch.no_grad():
             out = model(input_ids=ids, use_cache=False)
         # With caching off we must not wrap a dual ShadowCache. Depending on transformers version the base model
-        # may return `past_key_values=None` or an empty Cache; either is fine as long as nothing is stored.
-        assert not isinstance(getattr(out, "past_key_values", None), ShadowCache)
-        assert out.past_key_values is None or (
-            hasattr(out.past_key_values, "get_seq_length") and out.past_key_values.get_seq_length() == 0
-        )
+        # may return no cache or an empty Cache; either is fine as long as nothing is stored.
+        cache = getattr(out, get_transformers_cache_name())
+        assert not isinstance(cache, ShadowCache)
+        assert cache is None or (hasattr(cache, "get_seq_length") and cache.get_seq_length() == 0)
 
     def test_disable_adapter_uses_plain_base_cache(self):
         model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
@@ -458,9 +460,10 @@ class TestShadowKVCache:
             with model.disable_adapter():
                 out = model(input_ids=ids, use_cache=True)
         # Shadow path inactive: past should be a plain base cache, not a ShadowCache.
-        assert not isinstance(out.past_key_values, ShadowCache)
-        assert out.past_key_values is not None
-        assert out.past_key_values.get_seq_length() == 4
+        cache = getattr(out, get_transformers_cache_name())
+        assert not isinstance(cache, ShadowCache)
+        assert cache is not None
+        assert cache.get_seq_length() == 4
 
     def test_explicit_shadow_model_cached_generate(self, tmp_path):
         # Unlike `test_generate_cached_matches_uncached_with_projection` (which uses the default `shadow_model="mirror"`
@@ -490,13 +493,47 @@ class TestShadowKVCache:
             uncached = model.generate(input_ids=ids, max_new_tokens=4, use_cache=False, do_sample=False)
         assert torch.equal(cached, uncached)
 
+    @pytest.mark.skipif(platform.system() != "Windows", reason="locale-encoding regression only manifests on Windows")
+    def test_explicit_shadow_model_utf8_config(self, tmp_path):
+        # ShadowPEFT-specific counterpart of test_from_json_file_utf8_non_ascii in
+        # tests/test_config.py: that test covers PeftConfig.from_json_file, but the shadow
+        # backbone config is loaded through a separate code path (`_load_shadow_backbone`),
+        # so it needs its own regression. A shadow checkpoint whose config.json contains
+        # literal non-ASCII (e.g. a CJK `_name_or_path`, hand-edited or written by another
+        # tool with ensure_ascii=False) must load on Windows, where the locale encoding
+        # (e.g. cp936) is not UTF-8.
+        base = make_llama_causal()
+        shadow_hidden = base.config.hidden_size // 2
+        shadow_cfg = LlamaConfig(
+            vocab_size=base.config.vocab_size,
+            hidden_size=shadow_hidden,
+            intermediate_size=2 * shadow_hidden,
+            num_hidden_layers=1,
+            num_attention_heads=base.config.num_attention_heads,
+            num_key_value_heads=getattr(base.config, "num_key_value_heads", base.config.num_attention_heads),
+            max_position_embeddings=base.config.max_position_embeddings,
+        )
+        LlamaModel(shadow_cfg).save_pretrained(tmp_path)
+        config_path = tmp_path / "config.json"
+        with open(config_path, encoding="utf-8") as f:
+            raw_config = json.load(f)
+        raw_config["_name_or_path"] = "汉 模型 🤗"
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(raw_config, f, ensure_ascii=False)
+
+        model = get_peft_model(
+            base,
+            ShadowConfig(task_type="CAUSAL_LM", shadow_model=str(tmp_path), init_weights=False),
+        )
+        assert isinstance(model, PeftModel)
+
     def test_shadow_cache_reorder_and_crop(self):
         model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
         model.eval()
         ids = torch.randint(0, 128, (2, 4))
         with torch.no_grad():
             out = model(input_ids=ids, use_cache=True)
-        cache = out.past_key_values
+        cache = getattr(out, get_transformers_cache_name())
         assert isinstance(cache, ShadowCache)
         cache.reorder_cache(torch.tensor([1, 0]))
         assert cache.get_seq_length() == 4

@@ -41,12 +41,14 @@ SHELL ["/bin/bash", "-c"]
 
 RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum
 
+# TODO check if still needed
 # Note: we are hard-coding CUDA_ARCH_LIST here since `gptqmodel` requires either nvidia-smi
 # or CUDA_ARCH_LIST for compute capability information. Since the docker build is unlikely
 # to have compute hardware available we use the information from the CI runner (which hosts
 # a NVIDIA L4). So we fix the compute capability to 8.9. In the future we might extend this
 # to a list of compute capabilities (separated by ;).
 # TODO pcre, which is used by gptqmodel, is resulting in a core dump, remove once it's resolved
+# When uncommenting this to include gptqmodel, ensure that it doesn't downgrade tokenizers, as this would break Transformers
 # RUN CUDA_ARCH_LIST=8.9 conda run -n peft pip install "gptqmodel>=7.0.0"
 
 # TODO: EETQ uses `-std=c++17` but starting with PyTorch 2.14, the min C++ version is 20. Therefore, don't install
@@ -57,12 +59,6 @@ RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum
     # script directly imports torch from the environment which would fail with isolation.
     # Ninja should speed up build time.
     # conda run -n peft pip install ninja && conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
-
-# TODO: Importing TE results in: undefined symbol: cublasLtGroupedMatrixLayoutInit_internal, version libcublasLt.so.13
-# Reinstate TE when the issue is resolved (probably this one: https://github.com/NVIDIA/TransformerEngine/issues/2504)
-# RUN NVTE_BUILD_USE_NVIDIA_WHEELS=1 \
-#     CPATH="/usr/local/cuda/include:${CPATH}" \
-#     conda run -n peft pip install --no-build-isolation "transformer_engine[pytorch]"
 
 # Activate the conda env and install transformers + accelerate from source
 RUN conda run -n peft pip install -U --no-cache-dir \
@@ -80,6 +76,11 @@ RUN conda run -n peft pip install -U --no-cache-dir \
         hqq \
         deepspeed \
         "kernels>=0.16"
+
+# Build Transformer Engine against the PyTorch version installed above.
+RUN NVTE_BUILD_USE_NVIDIA_WHEELS=1 \
+    CPATH="/usr/local/cuda/include${CPATH:+:$CPATH}" \
+    conda run -n peft python -m pip install --no-build-isolation --no-cache-dir "transformer_engine[pytorch]>=2.20.2"
 
 RUN conda run -n peft pip freeze | grep transformers
 

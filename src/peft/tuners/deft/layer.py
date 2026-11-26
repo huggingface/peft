@@ -102,7 +102,6 @@ class DeftLayer(BaseTunerLayer):
         self.deft_decomposition[adapter_name] = config.decomposition_method
         self.deft_init_scale[adapter_name] = config.init_scale
         self.deft_para[adapter_name] = config.para
-        self.fan_in_fan_out = config.fan_in_fan_out
         # injection scaling (analogous to LoRA's alpha/r); 1.0 = no scaling (backward compatible)
         self.deft_scaling[adapter_name] = (config.alpha / r) if getattr(config, "alpha", None) else 1.0
 
@@ -188,6 +187,8 @@ class DeftLinear(nn.Module, DeftLayer):
     ) -> None:
         super().__init__()
         DeftLayer.__init__(self, base_layer, **kwargs)
+        self.fan_in_fan_out = config.fan_in_fan_out
+
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, config=config, **kwargs)
 
@@ -248,6 +249,16 @@ class DeftLinear(nn.Module, DeftLayer):
         update directly on the activations instead.
         """
         return self._delta_from_factor(adapter_name, self._merge_factor(adapter_name))
+
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        return True
+
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        # `get_delta_weight` returns the delta in the base weight's dtype, but this method returns the delta in the
+        # dtype of the adapter weights, which is the dtype the converted LoRA adapter will use. `deft_P` is the
+        # trainable matrix that DEFT creates for every adapter, including in PaRa mode.
+        delta = self.get_delta_weight(adapter_name)
+        return delta.to(self.deft_P[adapter_name].dtype)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """

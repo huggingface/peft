@@ -145,7 +145,13 @@ class TinyLoraModel(BaseTuner):
             self._target_key_to_idx[adapter_name] = self._build_target_key_mapping(tinylora_config)
 
         # Look up the deterministic index for this module
-        layer_idx = self._target_key_to_idx[adapter_name][current_key]
+        layer_idx = self._target_key_to_idx[adapter_name].get(current_key)
+        if layer_idx is None:
+            # _build_target_key_mapping only indexes the supported layer types
+            raise TypeError(
+                f"Target module {target} is not supported. Currently, only the following modules are supported: "
+                "`torch.nn.Linear`, `torch.nn.Embedding`, `transformers.pytorch_utils.Conv1D`."
+            )
         num_target_layers = len(self._target_key_to_idx[adapter_name])
 
         # Determine the group for this layer based on weight_tying

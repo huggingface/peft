@@ -57,6 +57,7 @@ from utils import (
 from data import get_train_valid_test_datasets, get_wiki_small
 from peft import AdaLoraConfig, AdamssConfig, PeftConfig, initialize_kv_prefix_from_text
 from peft.utils import CONFIG_NAME, infer_device
+from peft.utils.healthcheck import format_healthcheck
 
 
 # number of batches per bucket, increasing this further has diminishing returns
@@ -195,16 +196,18 @@ def train(
     if init_kv_cache_prefix is not None:
         initialize_kv_prefix_from_text(model, tokenizer, text=init_kv_cache_prefix)
 
-    # print this after getting the optimizer, in case it modifies requires_gard
-    if hasattr(model, "get_nb_trainable_parameters"):
-        num_trainable_params, num_params = model.get_nb_trainable_parameters()
+    # print this after getting the optimizer, in case it modifies requires_grad
+    if hasattr(model, "healthcheck"):
+        healthcheck = model.healthcheck()
+        print_verbose(format_healthcheck(healthcheck))
+        num_trainable_params = healthcheck["summary"]["trainable_params"]
+        num_params = healthcheck["summary"]["total_params"]
     else:
-        num_params = model.num_parameters()
-        num_trainable_params = num_params
-    print_verbose(
-        f"trainable params: {num_trainable_params:,d} || all params: {num_params:,d} || "
-        f"trainable: {100 * num_trainable_params / num_params:.4f}%"
-    )
+        num_params = num_trainable_params = model.num_parameters()
+        print_verbose(
+            f"trainable params: {num_trainable_params:,d} || all params: {num_params:,d} || "
+            f"trainable: {100 * num_trainable_params / num_params:.4f}%"
+        )
 
     status = TrainStatus.FAILED
     tic_train = time.perf_counter()

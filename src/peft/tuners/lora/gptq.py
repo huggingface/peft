@@ -35,6 +35,7 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
     ):
         super().__init__()
         LoraLayer.__init__(self, base_layer)
+        self.fan_in_fan_out = False
 
         if config.use_dora:
             raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")

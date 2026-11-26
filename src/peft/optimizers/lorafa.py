@@ -21,6 +21,7 @@ from __future__ import annotations
 import math
 import warnings
 from collections.abc import Callable, Iterable
+from typing import Any, overload
 
 import torch
 from accelerate.utils.imports import is_bf16_available
@@ -91,7 +92,8 @@ class LoraFAOptimizer(Optimizer):
         """
         loss = None
         if closure is not None:
-            loss = closure()
+            with torch.enable_grad():
+                loss = closure()
 
         for group in self.param_groups:
             param_list = []
@@ -100,15 +102,6 @@ class LoraFAOptimizer(Optimizer):
             # TODO remove after 2026-11-01 and default to `group["scaling_factors"]
             if "scaling_factors" in group:
                 scaling_factors = group["scaling_factors"]
-            elif "scaling_factor" in group:
-                if not self._legacy_scaling_factor_warned:
-                    warnings.warn(
-                        "`scaling_factor` is deprecated and will be removed after 2026-11-01. "
-                        "Please use `scaling_factors` instead.",
-                        FutureWarning,
-                    )
-                    self._legacy_scaling_factor_warned = True
-                scaling_factors = [group["scaling_factor"]] * len(group["params"])
             else:
                 raise KeyError("Expected optimizer param group to define `scaling_factors`.")
 
@@ -122,6 +115,11 @@ class LoraFAOptimizer(Optimizer):
                     param_list.append(p)
                     name_list.append(n)
                     if len(param_list) == 2:
+                        # Skip the whole unused pair before touching its state or applying weight decay.
+                        if param_list[1].grad is None:
+                            param_list = []
+                            name_list = []
+                            continue
                         name = n[: n.find("lora")] + "lora"
                     elif len(param_list) == 1:
                         continue
@@ -228,14 +226,38 @@ class LoraFAOptimizer(Optimizer):
         return loss
 
 
+# TODO: remove overloads and legacy wrapper in PEFT v1.2
+# overload for the new signature
+@overload
+def create_lorafa_optimizer(model: PeftModel, lr: float, *, weight_decay: float = 0.0) -> Optimizer: ...
+
+
+# overload for the legacy signature
+@overload
 def create_lorafa_optimizer(
-    model: PeftModel,
-    r: int,
-    lora_alpha: int,
-    lr: float,
-    weight_decay: float = 0.0,
-    use_rslora: bool | None = None,
+    model: PeftModel, r: int, lora_alpha: int, lr: float, weight_decay: float = 0.0
+) -> Optimizer: ...
+
+
+def create_lorafa_optimizer(model: PeftModel, *args: Any, **kwargs: Any) -> Optimizer:
+    if (len(args) >= 2) or ("r" in kwargs) or ("lora_alpha" in kwargs):
+        return _create_lorafa_optimizer_legacy(model, *args, **kwargs)
+    return _create_lorafa_optimizer(model, *args, **kwargs)
+
+
+def _create_lorafa_optimizer_legacy(
+    model: PeftModel, r: int, lora_alpha: int, lr: float, weight_decay: float = 0.0
 ) -> Optimizer:
+    warnings.warn(
+        "`r` and `lora_alpha` are deprecated and ignored as they are token from `LoraConfig`."
+        "Don't pass those arguments, otherwise this will raise an error in PEFT v1.2.",
+        FutureWarning,
+        stacklevel=3,
+    )
+    return _create_lorafa_optimizer(model, lr, weight_decay=weight_decay)
+
+
+def _create_lorafa_optimizer(model: PeftModel, lr: float, *, weight_decay: float = 0.0) -> Optimizer:
     """
     Helper function to instantiate a lorafa optimizer specifically configured for a given model using the LoRA method.
 
@@ -251,45 +273,24 @@ def create_lorafa_optimizer(
 
     Args:
         model (PeftModel): The model containing LoRA-adapted parameters.
-        r (int): Rank of the LoRA decomposition.
-        lora_alpha (int): Scaling factor for LoRA parameterization.
         lr (float): Learning rate for optimizer updates.
         weight_decay (float): Weight decay for AdamW.
-        use_rslora (bool | None, optional):
-            Deprecated. Whether to use rsLoRA. If not `None`, it must match the `use_rslora` setting of all active
-            adapters in the model config. Configure rsLoRA via `LoraConfig` instead.
 
     Returns:
         Optimizer: Configured lorafa optimizer instance ready for training.
     """
+    # TODO remove in PEFT v1.2
+    if lr is None:
+        raise TypeError("`lr` must be a float")
+
     active_adapters = [adapter for adapter in model.active_adapters if adapter in model.peft_config]
     active_adapter_use_rslora = {
         adapter: bool(getattr(model.peft_config[adapter], "use_rslora", False)) for adapter in active_adapters
     }
-    # TODO remove after 2026-11-01
-    if use_rslora is not None:
-        mismatched_adapters = [
-            adapter for adapter, is_rslora in active_adapter_use_rslora.items() if is_rslora != use_rslora
-        ]
-        if mismatched_adapters:
-            raise ValueError(
-                f"`use_rslora={use_rslora}` was passed to create_lorafa_optimizer, but the following active adapters "
-                f"have `use_rslora` set differently in the model config: {mismatched_adapters}. Please configure "
-                "rsLoRA via LoraConfig and remove the `use_rslora` argument from create_lorafa_optimizer as the parameter is deprecated."
-            )
-        warnings.warn(
-            "`use_rslora` in create_lorafa_optimizer is deprecated and will be removed after 2026-11-01. "
-            "Please configure rsLoRA via LoraConfig instead.",
-            FutureWarning,
-        )
-        model_use_rslora = use_rslora
-    else:
-        model_use_rslora = all(active_adapter_use_rslora.values()) if active_adapter_use_rslora else False
 
     for name, param in model.named_parameters():
         if "lora_A" in name:
             param.requires_grad_(False)
-    lora_scaling = lora_alpha / math.sqrt(r) if model_use_rslora else lora_alpha / r
 
     # this func maps a flattened parameter name back to its LoRA module and adapter
     # Returns None for non-LoRA parameters and unresolved names
@@ -319,7 +320,6 @@ def create_lorafa_optimizer(
             "lr": lr,
             "names": [name for name, _ in named_parameters],
             "scaling_factors": [get_scaling_factor(name) for name, _ in named_parameters],
-            "scaling_factor": lora_scaling,  # TODO remove after 2026-11-01
             "betas": (0.9, 0.999),
             "weight_decay": weight_decay,
         }
