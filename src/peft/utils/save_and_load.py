@@ -45,6 +45,10 @@ from .peft_types import PeftType
 from .warning import PeftWarning
 
 
+# device types that `safetensors.torch.load_file` can load to, it raises for any other device type
+_SAFETENSORS_DEVICE_TYPES = {"cpu", "cuda", "mps", "npu", "xpu", "xla", "mlu", "musa", "hpu"}
+
+
 def _validate_lora_adapter_state_dict(
     state_dict: dict[str, torch.Tensor],
     adapter_name: str = "default",
@@ -830,7 +834,12 @@ def load_peft_weights(
                 )
 
     if use_safetensors:
-        if hasattr(torch.backends, "mps") and (device == torch.device("mps")):
+        # Load to CPU for devices that safetensors cannot load to, e.g. out-of-tree accelerators that `infer_device`
+        # finds through `torch.accelerator`, like "neuron". The weights are moved to the device of the adapter layers
+        # when they are loaded into the model.
+        if (hasattr(torch.backends, "mps") and (device == torch.device("mps"))) or (
+            str(device).split(":")[0] not in _SAFETENSORS_DEVICE_TYPES
+        ):
             adapters_weights = safe_load_file(filename, device="cpu")
         else:
             adapters_weights = safe_load_file(filename, device=device)

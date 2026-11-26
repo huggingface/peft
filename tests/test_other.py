@@ -1235,3 +1235,23 @@ class TestInferDevice:
 
         monkeypatch.setattr(_FakeAccelerator, "is_available", staticmethod(lambda: False))
         assert infer_device() == "cpu"
+
+    def test_load_adapter_when_torch_accelerator_is_a_device_safetensors_cannot_load_to(self, monkeypatch, tmp_path):
+        # Out-of-tree accelerators, such as torch_neuronx ("neuron") or torch_tpu ("tpu"), are found through
+        # `torch.accelerator`, but safetensors only loads to the device types it knows and raises for others. The
+        # adapter should still load, and the weights should end up on the device of the model. "privateuseone" stands
+        # in for such a backend: torch accepts it as a device type without the backend being installed.
+        torch.manual_seed(0)
+        config = LoraConfig(target_modules=["other_layer"], init_lora_weights=False)
+        model = get_peft_model(ModelWithModuleDict(), config)
+        model.save_pretrained(tmp_path)
+
+        monkeypatch.setattr("peft.peft_model.infer_device", lambda: "privateuseone")
+        loaded = PeftModel.from_pretrained(ModelWithModuleDict(), tmp_path)
+
+        expected = get_peft_model_state_dict(model)
+        actual = get_peft_model_state_dict(loaded)
+        assert expected.keys() == actual.keys()
+        for key, value in expected.items():
+            assert actual[key].device.type == "cpu"
+            assert torch.allclose(actual[key], value)
