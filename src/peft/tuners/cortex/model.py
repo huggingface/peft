@@ -12,742 +12,412 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
+import math
 import warnings
-from collections.abc import Callable, Collection, Iterable, Iterator
-from copy import copy
+from typing import Any, Optional
 
-from torch import Tensor, nn
+import torch
+from torch import nn
+from transformers import PreTrainedModel
 
-from peft.tuners.tuners_utils import (
-    BaseTuner,
-    BaseTunerLayer,
-    _ExcludedModule,
-    _get_tuner_state_dict_key_prefixes,
-    _is_key_under_prefixes,
-)
-from peft.utils.other import AuxiliaryTrainingWrapper, _is_valid_match
+from peft.tuners.tuners_utils import BaseTuner
+from peft.utils import TRANSFORMERS_MODELS_TO_CORTEX_TARGET_MODULES_MAPPING
 
 from .config import CortexConfig
-from .layer import CortexExperts, CortexLayer, CortexMLP
-from .merge import apply_export_plan, export_plan, validate_merge
-from .runtime import check_expert_forward, check_moe_forward, check_moe_forward_hook, check_no_offload
-from .structure import (
-    MlpStructure,
-    UnresolvedSharedExpertsError,
-    describe_mlp,
-    explicit_spec,
-    is_expert_candidate,
-    is_ffn_candidate,
-    is_moe,
-    is_registered_layout,
-    native_name,
-    public_merge_scale,
-    resolve_ffn_spec,
-    resolve_moe_spec,
-    resolve_target_branches,
-    shared_names,
-    text_backbone_prefixes,
-    unwrap,
+from .layer import (
+    CortexExperts,
+    CortexLayer,
+    CortexMLP,
+    get_ffn_width,
+    is_dense_ffn,
+    is_packed_experts,
+    pad_ffn,
+    unpad_ffn,
 )
-
-
-def _iter_target_candidates(
-    named_modules: Iterable[tuple[str, nn.Module]],
-    config: CortexConfig,
-    *,
-    text_roots: set[str] | None,
-    auxiliary_roots: Collection[str] = (),
-) -> Iterator[tuple[str, nn.Module]]:
-    """Discover outermost FFN/MoE boundaries without applying target exclusions.
-
-    Excluding a discovered parent must not make its descendants independent targets. Existing auxiliary wrappers
-    instead own their whole subtree and are skipped before discovery.
-    """
-    boundaries = set()
-    for path, module in named_modules:
-        if (
-            not path
-            or _is_key_under_prefixes(path, auxiliary_roots)
-            or any(path.startswith(parent + ".") for parent in boundaries)
-        ):
-            continue
-        if text_roots is not None and not _is_key_under_prefixes(path, text_roots):
-            continue
-        if (
-            isinstance(module, CortexLayer)
-            or is_moe(module, config.moe_specs)
-            or is_ffn_candidate(module, config.ffn_specs)
-        ):
-            boundaries.add(path)
-            yield path, module
 
 
 class CortexModel(BaseTuner):
-    """Adapt a frozen model with additional nonlinear FFN channels.
+    """
+    Creates a Cortex model from a pretrained transformers model.
+
+    Cortex adds trainable channels to the FFNs of a frozen model. The method is described in [Cortex: Consolidating
+    Context into Parametric Memory](https://arxiv.org/abs/2610.20399).
+
+    Unlike most other PEFT methods, merging changes the architecture of the model: `merge_and_unload()` returns the
+    base model with each adapted FFN widened by the added channels. It also updates the FFN widths in the config, so
+    that the merged model can be saved and loaded with `from_pretrained`. Other FFNs whose width is determined by the
+    same config field, e.g. FFNs of layers that were not adapted, are padded with zero channels, which don't change
+    their output. If Cortex cannot infer or verify a config for the merged model, it warns and leaves the config
+    unchanged instead.
 
     Args:
-        model (`torch.nn.Module`):
-            Model containing supported dense FFNs or MoE blocks.
-        peft_config ([`CortexConfig`] or `dict[str, CortexConfig]`):
-            Adapter configuration, or a mapping from adapter names to configurations.
-        adapter_name (`str`):
-            Name of the adapter to inject.
-        low_cpu_mem_usage (`bool`, *optional*, defaults to `False`):
-            Create adapter weights on the meta device for subsequent checkpoint loading. Leave this disabled when
-            creating a new adapter for training.
-        state_dict (`dict[str, torch.Tensor]`, *optional*):
-            Adapter checkpoint used by PEFT's loading and injection machinery.
+        model ([`torch.nn.Module`]): The model to be adapted.
+        config ([`CortexConfig`]): The configuration of the Cortex model.
+        adapter_name (`str`): The name of the adapter, defaults to `"default"`.
+        low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the loading process.
+
+    Returns:
+        `torch.nn.Module`: The Cortex model.
 
     Example:
 
-    ```py
-    >>> from transformers import AutoModelForCausalLM
-    >>> from peft import CortexConfig, get_peft_model
+        ```py
+        >>> from transformers import AutoModelForCausalLM
+        >>> from peft import CortexConfig, get_peft_model
 
-    >>> base_model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B")
-    >>> config = CortexConfig(k=16, init_weights="sample", task_type="CAUSAL_LM")
-    >>> model = get_peft_model(base_model, config)
-    ```
+        >>> base_model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B")
+        >>> config = CortexConfig(k=16, init_weights="sample", task_type="CAUSAL_LM")
+        >>> model = get_peft_model(base_model, config)
+        ```
+
+    **Attributes**:
+        - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
+        - **peft_config** ([`CortexConfig`]): The configuration of the Cortex model.
     """
 
-    prefix = "cortex_"
+    prefix: str = "cortex_"
     tuner_layer_cls = CortexLayer
+    target_module_mapping = TRANSFORMERS_MODELS_TO_CORTEX_TARGET_MODULES_MAPPING
 
-    def _structure_overrides(self):
-        """Use consistent class descriptions across adapters, including during native export."""
-        mappings = []
-        for field in ("ffn_specs", "moe_specs"):
-            combined = {}
-            for config in self.peft_config.values():
-                for name, spec in getattr(config, field).items():
-                    if name in combined and combined[name] != spec:
-                        raise ValueError(f"Conflicting Cortex {field} for {name} across adapters.")
-                    combined[name] = spec
-            # Every checkpoint needs the full catalog, including unadapted siblings that
-            # share an export width. Short and qualified keys may name the same class.
-            seen_classes = set()
-            for module in self.model.modules():
-                cls = type(unwrap(module))
-                if cls in seen_classes:
-                    continue
-                seen_classes.add(cls)
-                descriptions = {explicit_spec(module, getattr(config, field)) for config in self.peft_config.values()}
-                if len(descriptions) > 1:
-                    raise ValueError(
-                        f"Conflicting Cortex {field} for {cls.__name__} across adapters. "
-                        "Provide the same model structure descriptions in every adapter configuration."
-                    )
-            mappings.append(combined)
-        for path, module in self.model.named_modules():
-            if isinstance(module, CortexLayer):
-                spec = resolve_ffn_spec(module, mappings[0])
-                if spec != module.structure.ffn_spec:
-                    raise ValueError("Cortex FFN specs must remain consistent with existing adapter layers.")
-                parent = self.model.get_submodule(path.rpartition(".")[0])
-                if resolve_moe_spec(parent, mappings[1]) != module.moe_spec:
-                    raise ValueError("Cortex MoE specs must preserve the branch ownership of existing adapter layers.")
-        return tuple(mappings)
-
-    @classmethod
-    def _remap_adapter_state_dict_for_load(cls, model, config, adapter_name, state_dict):
-        weights = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
-        # Normal loading copies into the prepared dtype. assign=True replaces meta parameters outright,
-        # so cast to their prepared dtype before assignment instead (including PEFT's FP32 promotion).
-        meta_dtypes = {name: p.dtype for name, p in model.named_parameters() if p.is_meta and name in weights}
-        if meta_dtypes:
-            prefixes = _get_tuner_state_dict_key_prefixes(model, adapter_name)
-            for name, dtype in meta_dtypes.items():
-                if _is_key_under_prefixes(name, prefixes):
-                    weights[name] = weights[name].to(dtype=dtype)
-        return weights
-
-    def inject_adapter(
-        self,
-        model: nn.Module,
-        adapter_name: str,
-        autocast_adapter_dtype: bool = True,
-        low_cpu_mem_usage: bool = False,
-        state_dict: dict[str, Tensor] | None = None,
-    ) -> None:
-        config = self.peft_config[adapter_name]
-        self._structure_overrides()
-        original_targets = copy(config.target_modules)
-        unresolved = not config.target_roles
-        check_no_offload(model)
-
-        self._resolved_structures = {}
-        # Match BaseTuner's checkpoint-key priority and compiled-key normalization.
-        self._checkpoint_targets = (
-            {key.rsplit("." + self.prefix, 1)[0].removeprefix("_orig_mod.") for key in state_dict}
-            if state_dict is not None
-            else None
-        )
-        try:
-            if state_dict is None and config.target_roles and hasattr(config, "_cortex_user_targets"):
-                # Check the original selection without changing the configuration
-                # owned by the previous model. Checkpoints retain explicit roles.
-                probe = copy(config)
-                probe.target_modules = config._cortex_user_targets
-                probe.target_roles = {}
-                resolved = self._resolve_targets(probe, model)
-                if {path: role for path, (role, _) in resolved.items()} != config.target_roles:
-                    raise ValueError(
-                        "Reusing this CortexConfig would change the resolved target layers or roles. "
-                        "Create a new CortexConfig for the new model instead of reusing a resolved configuration."
-                    )
-
-            super().inject_adapter(
-                model, adapter_name, autocast_adapter_dtype, low_cpu_mem_usage, state_dict=state_dict
-            )
-
-            if state_dict is not None:
-                # The checkpoint, rather than the original logical selection, now owns these targets.
-                config.__dict__.pop("_cortex_user_targets", None)
-            elif unresolved:
-                # Runtime-only provenance is absent from dataclass serialization.
-                config._cortex_user_targets = original_targets
-
-            for path in config.target_roles:
-                parent = model.get_submodule(path.rpartition(".")[0])
-                if (
-                    is_moe(parent, config.moe_specs)
-                    and check_moe_forward_hook not in parent._forward_pre_hooks.values()
-                ):
-                    parent.register_forward_pre_hook(check_moe_forward_hook)
-        finally:
-            # Structures describe this injection only, not future model mutations.
-            del self._resolved_structures, self._checkpoint_targets
-
-    def _prepare_adapter_config(self, peft_config: CortexConfig, model_config: dict[str, object]) -> CortexConfig:
-        resolved = self._resolve_targets(peft_config, self.model, checkpoint_targets=self._checkpoint_targets)
-        self._warn_about_inferred_layouts(resolved, peft_config)
-        peft_config.target_roles = {path: role for path, (role, _) in resolved.items()}
-        peft_config.target_modules = set(resolved)
-        self._resolved_structures = {path: structure for path, (_, structure) in resolved.items()}
+    def _prepare_adapter_config(self, peft_config: CortexConfig, model_config: dict) -> CortexConfig:
+        # The default targets are the dense FFNs of dense models and the shared experts of MoE models, or their packed
+        # experts if they have no shared experts. Routed channels are added to the packed experts, which are called
+        # `experts` in Transformers MoE models.
+        if peft_config.target_modules is None and peft_config.moe_target == "routed":
+            peft_config.target_modules = {"experts"}
+        elif peft_config.target_modules is None and peft_config.moe_target == "both":
+            peft_config = super()._prepare_adapter_config(peft_config, model_config)
+            peft_config.target_modules = set(peft_config.target_modules) | {"experts"}
+        else:
+            peft_config = super()._prepare_adapter_config(peft_config, model_config)
         return peft_config
-
-    def _warn_about_inferred_layouts(
-        self, resolved: dict[str, tuple[str, MlpStructure]], config: CortexConfig
-    ) -> None:
-        # One representative path per class keeps this useful on models with many identical layers.
-        inferred = {}
-        for path in resolved:
-            parent_path = path.rpartition(".")[0]
-            for candidate in (path, parent_path):
-                module = self.model.get_submodule(candidate)
-                name = native_name(module)
-                if (
-                    name
-                    and not is_registered_layout(module)
-                    and explicit_spec(module, config.ffn_specs) is None
-                    and explicit_spec(module, config.moe_specs) is None
-                    and (candidate == path or is_moe(module, config.moe_specs))
-                ):
-                    inferred.setdefault(name, candidate)
-        if not inferred:
-            return
-
-        layouts = ", ".join(f"{name} ({path})" for name, path in sorted(inferred.items()))
-        warnings.warn(
-            f"Cortex inferred unregistered Transformers layouts: {layouts}. For numerical validation, see "
-            "https://huggingface.co/docs/peft/main/package_reference/cortex#supported-architectures.",
-            UserWarning,
-            stacklevel=2,
-        )
-
-    def _resolve_targets(
-        self, peft_config: CortexConfig, model: nn.Module, checkpoint_targets: set[str] | None = None
-    ) -> dict[str, tuple[str, MlpStructure]]:
-        """Resolve and validate physical FFNs without changing the user configuration."""
-        if isinstance(model, AuxiliaryTrainingWrapper):
-            raise TypeError("Cortex cannot adapt an auxiliary training wrapper as the root model.")
-
-        peft_config = copy(peft_config)
-        automatic = checkpoint_targets is None and peft_config.target_modules is None and not peft_config.target_roles
-        named_modules = list(model.named_modules())
-        for path, module in named_modules:
-            if (
-                explicit_spec(module, peft_config.ffn_specs) is not None
-                and explicit_spec(module, peft_config.moe_specs) is not None
-            ):
-                raise ValueError(f"{path} cannot have both an FFN spec and a parent MoE spec.")
-        auxiliary_roots = {name for name, module in named_modules if isinstance(module, AuxiliaryTrainingWrapper)}
-        text_roots = text_backbone_prefixes(model)
-        if peft_config.modules_to_save:
-            for name, module in named_modules:
-                # Match PEFT's auxiliary wrapping step, before any adapter injection.
-                if isinstance(module, AuxiliaryTrainingWrapper) or not any(
-                    _is_valid_match(name, target) for target in peft_config.modules_to_save
-                ):
-                    continue
-                if any(isinstance(child, CortexLayer) for child in module.modules()):
-                    raise ValueError(
-                        f"modules_to_save target {name} contains an existing Cortex layer. "
-                        "Choose a module without Cortex layers; wrapping them would change their checkpoint ownership."
-                    )
-
-        def within_text_backbone(path):
-            return text_roots is None or _is_key_under_prefixes(path, text_roots)
-
-        def available(path):
-            if checkpoint_targets is None and isinstance(
-                self._check_target_module_exists(peft_config, path), _ExcludedModule
-            ):
-                return False
-            if _is_key_under_prefixes(path, auxiliary_roots):
-                if automatic:
-                    return False
-                raise ValueError(
-                    f"Cortex target {path} is owned by an existing auxiliary training wrapper "
-                    "(such as ModulesToSaveWrapper). Target an unwrapped FFN or exclude this target; "
-                    "adapters inside auxiliary wrappers cannot be saved independently."
-                )
-            if not within_text_backbone(path):
-                module = model.get_submodule(path)
-                if automatic:
-                    return False
-                # An explicit target or saved checkpoint may name an audited FFN in another tower.
-                if (
-                    native_name(module)
-                    and not is_registered_layout(module)
-                    and explicit_spec(module, peft_config.ffn_specs) is None
-                    and explicit_spec(module, peft_config.moe_specs) is None
-                ):
-                    raise ValueError(f"Cannot infer a Cortex layout for {path} outside the model's text backbone.")
-            return True
-
-        selected = self._select_target_paths(
-            peft_config,
-            named_modules,
-            checkpoint_targets=checkpoint_targets,
-            text_roots=text_roots,
-            auxiliary_roots=auxiliary_roots,
-            available=available,
-        )
-        if automatic and peft_config.moe_target in ("routed", ["routed"]):
-            selected = self._routed_only_targets(model, selected, peft_config)
-
-        checked_parents = set()
-        if checkpoint_targets is not None:
-            target_roles = self._checkpoint_target_roles(
-                peft_config, model, selected, auxiliary_roots, checked_parents
-            )
-        elif peft_config.target_roles:
-            if set(selected) != set(peft_config.target_roles):
-                raise ValueError("Resolved adapter targets do not match the current model.")
-            target_roles = peft_config.target_roles
-        else:
-            target_roles = self._expand_target_roles(peft_config, model, selected, auxiliary_roots, checked_parents)
-
-        # Parent selections may expand to excluded or separately owned FFNs.
-        target_roles = {path: role for path, role in target_roles.items() if available(path)}
-        resolved = self._validate_target_roles(model, target_roles, checked_parents, peft_config)
-        if automatic and auxiliary_roots and not resolved:
-            raise ValueError("No eligible native FFNs remain outside auxiliary training wrappers and exclusions.")
-        return resolved
-
-    def _select_target_paths(
-        self,
-        peft_config: CortexConfig,
-        named_modules: list[tuple[str, nn.Module]],
-        *,
-        checkpoint_targets: set[str] | None,
-        text_roots: set[str] | None,
-        auxiliary_roots: set[str],
-        available: Callable[[str], bool],
-    ) -> list[str]:
-        """Select logical targets, or physical checkpoint paths, on the resolver's config copy.
-
-        Use the resolver's availability check during matching and again after role expansion, preserving exclusion and
-        ownership error ordering in both stages.
-        """
-        if checkpoint_targets is None and peft_config.target_modules is None:
-            targets = {
-                path
-                for path, _ in _iter_target_candidates(
-                    named_modules, peft_config, text_roots=text_roots, auxiliary_roots=auxiliary_roots
-                )
-            }
-            if not targets:
-                if auxiliary_roots:
-                    raise ValueError("No eligible native FFNs remain outside auxiliary training wrappers.")
-                raise ValueError("No supported native FFNs found; specify target_modules for an audited structure.")
-            peft_config.target_modules = targets
-
-        if checkpoint_targets is None:
-            selected = [
-                name
-                for name, _ in named_modules
-                if name and self._check_target_module_exists(peft_config, name) and available(name)
-            ]
-        else:
-            # Checkpoints identify physical FFNs, even when the original selection named their MoE parent.
-            adapter_prefixes = tuple(
-                name + "." for name, module in named_modules if isinstance(module, BaseTunerLayer)
-            )
-            selected = [
-                name.removeprefix("_orig_mod.")
-                for name, _ in named_modules
-                if name
-                and not name.startswith(adapter_prefixes)
-                and name.removeprefix("_orig_mod.") in checkpoint_targets
-                and available(name)
-            ]
-
-        if any(name.startswith(parent + ".") for name in selected for parent in selected if name != parent):
-            raise ValueError("Select complete MLP blocks without also targeting their descendants.")
-        return selected
-
-    @staticmethod
-    def _routed_only_targets(model: nn.Module, selected: list[str], config: CortexConfig) -> list[str]:
-        """Keep a shared sibling outside an inferred MoE out of routed-only discovery."""
-        uncertain_owners = set()
-        for path in selected:
-            block = model.get_submodule(path)
-            if is_registered_layout(block):
-                continue
-            spec = resolve_moe_spec(block, config.moe_specs)
-            if spec is not None and spec.shared_modules is None:
-                uncertain_owners.add(path.rpartition(".")[0])
-        if not uncertain_owners:
-            return selected
-
-        targets = []
-        for path in selected:
-            owner, _, child = path.rpartition(".")
-            if owner in uncertain_owners and not is_moe(model.get_submodule(path), config.moe_specs):
-                if child.startswith("shared_"):
-                    continue
-                raise UnresolvedSharedExpertsError(
-                    f"Cannot infer whether {path} is a shared FFN next to a routed block. "
-                    "Select the MoE block explicitly or exclude the sibling."
-                )
-            targets.append(path)
-        return targets
-
-    def _checkpoint_target_roles(
-        self,
-        peft_config: CortexConfig,
-        model: nn.Module,
-        selected: list[str],
-        auxiliary_roots: set[str],
-        checked_parents: set[nn.Module],
-    ) -> dict[str, str]:
-        """Recover roles for the physical paths present in the checkpoint."""
-        roles = {}
-        for path in selected:
-            saved_role = peft_config.target_roles.get(path)
-            if saved_role is not None:
-                roles[path] = saved_role
-                continue
-
-            parent_path, _, child = path.rpartition(".")
-            parent = model.get_submodule(parent_path)
-            if not describe_mlp(model.get_submodule(path), peft_config.ffn_specs).packed:
-                roles[path] = (
-                    "shared"
-                    if is_moe(parent, peft_config.moe_specs) and child in shared_names(parent, peft_config.moe_specs)
-                    else "dense"
-                )
-                continue
-
-            # Packed parameters alone cannot tell a routed branch from a public one.
-            # Without saved roles, use the original selection: an explicit expert leaf
-            # selects routed experts, whereas a selected MoE parent uses moe_target.
-            logical_target = None
-            if not peft_config.target_roles:
-                if peft_config.target_modules is not None and self._check_target_module_exists(peft_config, path):
-                    logical_target = path
-                elif is_moe(parent, peft_config.moe_specs) and (
-                    peft_config.target_modules is None or self._check_target_module_exists(peft_config, parent_path)
-                ):
-                    logical_target = parent_path
-
-            if logical_target is not None:
-                expanded = self._expand_target_roles(
-                    peft_config, model, [logical_target], auxiliary_roots, checked_parents
-                )
-                if path in expanded:
-                    roles[path] = expanded[path]
-                    continue
-
-            raise ValueError(
-                f"Cortex checkpoint injection requires target_roles for packed MoE target {path}. "
-                "Load the checkpoint's CortexConfig; this target's routed/public role cannot be "
-                "determined from the current configuration."
-            )
-        return roles
-
-    @staticmethod
-    def _expand_target_roles(
-        peft_config: CortexConfig,
-        model: nn.Module,
-        selected: list[str],
-        auxiliary_roots: set[str],
-        checked_parents: set[nn.Module],
-    ) -> dict[str, str]:
-        """Expand logical selections using the native structure, independently of existing adapter roles."""
-        target_roles = {}
-        targets = peft_config.moe_target
-        targets = [targets] if isinstance(targets, str) else targets
-        for path in selected:
-            module = model.get_submodule(path)
-            kind, experts_path, shared_paths = resolve_target_branches(
-                model, path, peft_config.ffn_specs, peft_config.moe_specs
-            )
-            if kind == "moe":
-                if module not in checked_parents:
-                    check_moe_forward(module)
-                    checked_parents.add(module)
-                experts = getattr(module, experts_path.rpartition(".")[2], None)
-                if not _is_key_under_prefixes(experts_path, auxiliary_roots) and (
-                    experts is None or not is_expert_candidate(experts, peft_config.ffn_specs)
-                ):
-                    raise ValueError(
-                        f"{path} ({native_name(module)}) requires a supported packed expert layout at {experts_path}; "
-                        "older ModuleList experts and other incompatible layouts are unsupported."
-                    )
-                if shared_paths is None and "shared" in targets:
-                    raise UnresolvedSharedExpertsError(
-                        f"Cannot infer the shared FFN for {path} ({native_name(module)}). It may live outside "
-                        "this MoE block. Use moe_target='routed' or explicitly target a supported shared FFN."
-                    )
-                if shared_paths:
-                    if "routed" in targets:
-                        target_roles[experts_path] = "routed"
-                    if "shared" in targets:
-                        for shared_path in shared_paths:
-                            target_roles[shared_path] = "shared"
-                else:
-                    if len(targets) == 2:
-                        role = "routed_public"
-                    elif targets[0] == "shared":
-                        role = "public"
-                    else:
-                        role = "routed"
-                    target_roles[experts_path] = role
-            else:
-                target_roles[path] = kind
-        return target_roles
-
-    @staticmethod
-    def _validate_target_roles(
-        model: nn.Module, target_roles: dict[str, str], checked_parents: set[nn.Module], peft_config: CortexConfig
-    ) -> dict[str, tuple[str, MlpStructure]]:
-        """Validate all physical targets before injection and retain their structure for this operation."""
-        resolved = {}
-        for path, role in target_roles.items():
-            module = model.get_submodule(path)
-            parent_path, _, child = path.rpartition(".")
-            parent = model.get_submodule(parent_path)
-            parent_spec = resolve_moe_spec(parent, peft_config.moe_specs)
-            if isinstance(module, CortexLayer) and module.moe_spec != parent_spec:
-                raise ValueError(f"Target {path} already has a different parent MoE spec.")
-            if parent_spec is not None and parent not in checked_parents:
-                check_moe_forward(parent)
-                checked_parents.add(parent)
-            if isinstance(module, BaseTunerLayer) and not isinstance(module, CortexLayer):
-                raise TypeError("Mixing tuner types on the same target is not supported.")
-            if isinstance(module, CortexLayer) and module.merged:
-                raise ValueError(f"Unmerge before adding an adapter. Target {path} is merged.")
-            try:
-                structure = describe_mlp(module, peft_config.ffn_specs)
-            except ValueError as exc:
-                raise ValueError(f"Cannot adapt {path}: {exc}") from exc
-            if structure.packed != (role in {"routed", "public", "routed_public"}):
-                raise ValueError(f"Target {path} does not have the saved adapter role {role}.")
-            inferred_parent = parent_spec is not None and (
-                not is_registered_layout(parent) or explicit_spec(parent, peft_config.moe_specs) is not None
-            )
-            if inferred_parent and role == "shared" and child not in (parent_spec.shared_modules or ()):
-                raise ValueError(f"{path} is not a shared FFN in the inferred MoE layout.")
-            if structure.packed:
-                routing_args = check_expert_forward(unwrap(module), path, parent_spec)
-                if isinstance(module, CortexLayer) and module.routing_args != routing_args:
-                    raise ValueError(f"Target {path} already has a different expert routing argument mapping.")
-            elif role == "shared" and inferred_parent:
-                # A matching shared MLP alone doesn't establish the enclosing MoE layout.
-                # Check the expert boundary even if this adapter only trains the shared branch.
-                experts = getattr(parent, parent_spec.experts, None)
-                if experts is None or not is_expert_candidate(experts, peft_config.ffn_specs):
-                    raise ValueError(
-                        f"Cannot infer the packed expert layout of {parent_path} ({native_name(parent)})."
-                    )
-                check_expert_forward(unwrap(experts), f"{parent_path}.{parent_spec.experts}", parent_spec)
-                describe_mlp(experts, peft_config.ffn_specs)
-            if isinstance(module, CortexLayer) and module.role != role:
-                raise ValueError(
-                    f"Target {path} already has a different adapter role: "
-                    f"existing={module.role!r}, requested={role!r}."
-                )
-            if isinstance(module, CortexLayer) and module.structure.ffn_spec != structure.ffn_spec:
-                raise ValueError(f"Target {path} already has a different FFN spec.")
-            if role in {"public", "routed_public"}:
-                # An existing checkpoint may explicitly declare a public branch even
-                # when an inferred parent cannot tell us where its native shared FFN is.
-                if parent_spec is None or parent_spec.shared_modules:
-                    raise ValueError("Public branches require a supported MoE without native shared experts.")
-            resolved[path] = (role, structure)
-        return resolved
 
     def _create_and_replace(
         self,
-        config: CortexConfig,
+        cortex_config: CortexConfig,
         adapter_name: str,
         target: nn.Module,
         target_name: str,
         parent: nn.Module,
         current_key: str,
-        **kwargs,
+        **optional_kwargs,
     ) -> None:
+        ffn = target.get_base_layer() if isinstance(target, CortexLayer) else target
+        if is_packed_experts(ffn):
+            branches = self._choose_expert_branches(cortex_config, current_key)
+            layer_cls = CortexExperts
+        elif is_dense_ffn(ffn):
+            self._check_dense_ffn_target(cortex_config, current_key)
+            # Dense FFNs have no branches.
+            branches = {}
+            layer_cls = CortexMLP
+        else:
+            # The name and the class are more helpful than the representation of a whole FFN or MoE block.
+            raise TypeError(
+                f"Target module {current_key} ({type(ffn).__name__}) is not supported. Cortex adapts whole FFNs: "
+                "either dense FFNs with `gate_proj`, `up_proj` and `down_proj` (`nn.Linear`) and `act_fn`, or packed "
+                "MoE experts following the Transformers experts interface. Target e.g. the `mlp` or `experts` "
+                "modules, not their projections. FFNs with additional operations, submodules, or parameters, like the "
+                "activation sparsity of Gemma3n, a normalization layer, or an output scale, are not supported."
+            )
+
         if isinstance(target, CortexLayer):
-            target.update_layer(adapter_name, config)
-            return
-        structure = self._resolved_structures[current_key]
-        role = config.target_roles[current_key]
-        moe_spec = resolve_moe_spec(parent, config.moe_specs)
-        scale = public_merge_scale(parent, config.moe_specs) if role in {"public", "routed_public"} else None
-        cls = CortexExperts if structure.packed else CortexMLP
-        routing_args = None
-        if structure.packed:
-            routing_args = check_expert_forward(unwrap(target), current_key, moe_spec)
-        replacement = cls(
-            target,
-            adapter_name,
-            config,
-            structure,
-            role=role,
-            public_scale=scale,
-            routing_args=routing_args,
-            moe_spec=moe_spec,
+            target.update_layer(adapter_name, cortex_config, **branches)
+        else:
+            new_module = layer_cls(target, adapter_name, cortex_config, **branches)
+            if adapter_name not in self.active_adapters:
+                # adding an additional adapter: it is not automatically trainable
+                new_module.requires_grad_(False)
+            self._replace_module(parent, target_name, new_module, target)
+
+    def _choose_expert_branches(self, cortex_config: CortexConfig, experts_key: str) -> dict[str, bool]:
+        """Choose the channels to add to packed experts, depending on `moe_target` and their native shared experts."""
+        shared_experts = _find_shared_experts(self.model, experts_key)
+        # Native shared experts are extended instead of adding channels common to all experts.
+        branches = {
+            "add_public": cortex_config.moe_target in ("shared", "both") and not shared_experts,
+            "add_routed": cortex_config.moe_target in ("routed", "both"),
+        }
+        if not any(branches.values()):
+            raise ValueError(
+                f"Cortex adds no channels to {experts_key} with `moe_target={cortex_config.moe_target!r}`, since its "
+                "MoE block has native shared experts, which are extended instead. Target the shared experts, or use "
+                "`moe_target='routed'` or `moe_target='both'` to add channels to every expert."
+            )
+
+        # With explicit target modules, `moe_target="both"` may only be applied in part, which is likely unintended.
+        # The warning does not name the experts, so that it is only shown once instead of for every layer.
+        are_shared_experts_targeted = any(
+            self._check_target_module_exists(cortex_config, key) for key in shared_experts
         )
-        if adapter_name not in self.active_adapters:
-            replacement.requires_grad_(False)
-        self._replace_module(parent, target_name, replacement, target)
+        if cortex_config.moe_target == "both" and shared_experts and not are_shared_experts_targeted:
+            warnings.warn(
+                "With `moe_target='both'`, packed experts are targeted without their native shared experts, so only "
+                "routed channels are added to them. Target the shared experts as well, or use `moe_target='routed'` "
+                "if this is intended."
+            )
+        return branches
+
+    def _check_dense_ffn_target(self, cortex_config: CortexConfig, ffn_key: str) -> None:
+        """Check a dense FFN target against `moe_target` if the FFN is the native shared experts of a MoE block."""
+        routed_experts = _find_routed_experts(self.model, ffn_key)
+        if routed_experts and cortex_config.moe_target == "routed":
+            raise ValueError(
+                f"Cortex adds no channels to {ffn_key} with `moe_target='routed'`, since it is the native shared "
+                "experts of a MoE block, which are not routed. Target the packed experts, or use "
+                "`moe_target='shared'` or `moe_target='both'` to extend the shared experts."
+            )
+
+        # As for packed experts, warn if `moe_target="both"` is only applied in part.
+        are_routed_experts_targeted = any(
+            self._check_target_module_exists(cortex_config, key) for key in routed_experts
+        )
+        if cortex_config.moe_target == "both" and routed_experts and not are_routed_experts_targeted:
+            warnings.warn(
+                "With `moe_target='both'`, native shared experts are targeted without their packed experts, so only "
+                "the shared experts are extended. Target the packed experts as well, or use `moe_target='shared'` if "
+                "this is intended."
+            )
 
     def _replace_module(self, parent: nn.Module, child_name: str, new_module: nn.Module, child: nn.Module) -> None:
-        # Whole FFNs do not expose the single weight assumed by BaseTuner.
+        # Cortex layers wrap whole FFNs, which have no single `weight` as expected by `BaseTuner._replace_module`. The
+        # adapter weights are already moved to the device of the base FFN when they are created.
         setattr(parent, child_name, new_module)
-
-    def _preflight_merge(self, adapter_names: list[str] | None, safe_merge: bool) -> None:
-        check_no_offload(self.model)
-        if isinstance(adapter_names, str):
-            raise TypeError("adapter_names must be a list of names.")
-        if adapter_names is not None and set(adapter_names) - self.peft_config.keys():
-            raise ValueError("Unknown adapter name requested for merging.")
-        _, moe_specs = self._structure_overrides()
-        checked_parents = set()
-        for path, module in self.model.named_modules():
-            if isinstance(module, CortexLayer):
-                parent = self.model.get_submodule(path.rpartition(".")[0])
-                if is_moe(parent, moe_specs) and parent not in checked_parents:
-                    check_moe_forward(parent)
-                    checked_parents.add(parent)
-                names = module.merge_names(adapter_names)
-                if names:
-                    if module.role in {"public", "routed_public"} and any(
-                        module.public_weighting[name] == "unweighted" for name in names
-                    ):
-                        if public_merge_scale(parent, moe_specs) != module.public_scale:
-                            raise ValueError(
-                                "Routing normalization changed after adapter injection; reload the adapter."
-                            )
-                    validate_merge(module, names, safe_merge)
-
-    def merge_adapter(self, adapter_names: list[str] | None = None, safe_merge: bool = False) -> None:
-        """Merge adapter channels after checking common incompatibilities across the model.
-
-        Execution is not atomic across layers, including with `safe_merge=True`. If execution fails, discard this model
-        instance and reload the saved base model and adapter checkpoints.
-        """
-        self._preflight_merge(adapter_names, safe_merge)
-        return super().merge_adapter(adapter_names=adapter_names, safe_merge=safe_merge)
-
-    def unmerge_adapter(self) -> None:
-        """Restore original FFN channels layer by layer.
-
-        If execution fails, discard this model instance and reload the saved base model and adapter checkpoints.
-        """
-        check_no_offload(self.model)
-        return super().unmerge_adapter()
-
-    def delete_adapter(self, adapter_name: str) -> None:
-        super().delete_adapter(adapter_name)
-        for module in self.model.modules():
-            if check_moe_forward_hook not in module._forward_pre_hooks.values():
-                continue
-            # Empty wrappers can remain after deletion; only live adapters need the check.
-            if any(
-                isinstance(child, CortexLayer) and child._all_available_adapter_names() for child in module.modules()
-            ):
-                continue
-            for key, hook in list(module._forward_pre_hooks.items()):
-                if hook is check_moe_forward_hook:
-                    del module._forward_pre_hooks[key]
 
     def _unload_and_optionally_merge(
         self,
         merge: bool = True,
         progressbar: bool = False,
         safe_merge: bool = False,
-        adapter_names: list[str] | None = None,
+        adapter_names: Optional[list[str]] = None,
     ) -> nn.Module:
-        plan = None
-        if merge:
-            self._preflight_merge(adapter_names, safe_merge)
-            ffn_specs, moe_specs = self._structure_overrides()
-            plan = export_plan(self.model, adapter_names, ffn_specs=ffn_specs, moe_specs=moe_specs)
+        # Adapters that were merged with `merge_adapter` before also remain merged when unloading without merging.
+        is_merged = merge or any(isinstance(module, CortexLayer) and module.merged for module in self.model.modules())
+        model = super()._unload_and_optionally_merge(
+            merge=merge, progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
+        )
+        if is_merged:
+            _update_config_for_merged_ffns(model)
+        return model
+
+
+def _get_named_children(model: nn.Module, key: str) -> dict[str, nn.Module]:
+    """Return the children of the submodule with the given name by their full names.
+
+    Children that are already wrapped by Cortex layers, e.g. by a previous adapter, are replaced by their base FFNs.
+    """
+    prefix = f"{key}." if key else ""
+    return {
+        prefix + name: child.get_base_layer() if isinstance(child, CortexLayer) else child
+        for name, child in model.get_submodule(key).named_children()
+    }
+
+
+def _find_shared_experts(model: nn.Module, experts_key: str) -> list[str]:
+    """Return the names of the native shared experts of the MoE block that holds the given packed experts.
+
+    In Transformers MoE models, the shared experts are a dense FFN next to the packed experts, like the
+    `shared_experts` of DeepSeek-V3 or the dense FFN of each layer of Gemma4, or next to the module that holds the
+    packed experts, like the `shared_mlp` of GraniteMoeShared. Modules whose name contains `shared` are counted as
+    well, so that shared experts that Cortex does not support are not mistaken for missing ones.
+    """
+    block_key = experts_key.rpartition(".")[0]
+    candidates = _get_named_children(model, block_key)
+    if block_key:
+        candidates |= _get_named_children(model, block_key.rpartition(".")[0])
+    return [
+        key
+        for key, module in candidates.items()
+        if key not in (experts_key, block_key) and (is_dense_ffn(module) or "shared" in key.rpartition(".")[-1])
+    ]
+
+
+def _find_routed_experts(model: nn.Module, ffn_key: str) -> list[str]:
+    """Return the names of the packed experts whose native shared experts are the given dense FFN, if any.
+
+    This is the inverse of `_find_shared_experts`: the packed experts are next to the FFN, or held by a module next to
+    it.
+    """
+    routed_experts = []
+    for key, module in _get_named_children(model, ffn_key.rpartition(".")[0]).items():
+        if key == ffn_key:
+            continue
+        if is_packed_experts(module):
+            routed_experts.append(key)
         else:
-            check_no_offload(self.model)
-        result = super()._unload_and_optionally_merge(merge, progressbar, safe_merge, adapter_names)
-        if plan is not None:
-            apply_export_plan(plan)
-        for module in result.modules():
-            for key, hook in list(module._forward_pre_hooks.items()):
-                if hook is check_moe_forward_hook:
-                    del module._forward_pre_hooks[key]
-        return result
+            routed_experts.extend(
+                child_key for child_key, child in _get_named_children(model, key).items() if is_packed_experts(child)
+            )
+    return routed_experts
 
-    def merge_and_unload(
-        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: list[str] | None = None
-    ) -> nn.Module:
-        """Merge selected channels into the base model and remove the adapter wrappers.
 
-        Args:
-            progressbar (`bool`, *optional*, defaults to `False`):
-                Show progress while unloading adapter wrappers.
-            safe_merge (`bool`, *optional*, defaults to `False`):
-                Check merged tensors for non-finite values before modifying the model.
-            adapter_names (`list[str]`, *optional*):
-                Names of the adapters to merge. Defaults to the active adapters. Previously merged adapter channels
-                remain in the base weights, even if their adapters are not selected here. To export only the selected
-                adapters relative to the current wrapper's original base, call `unmerge_adapter()` first. All adapter
-                wrappers are removed on export; save their checkpoints first if they are needed later. Each
-                `modules_to_save` wrapper retains the selected adapter's copy, or the original module if no selected
-                adapter has a copy. Selecting multiple copies of the same module raises an error.
+def _get_ffn_widths(model: nn.Module) -> dict[str, int]:
+    """Return the widths of the FFNs that Cortex supports, by module name."""
+    widths = {}
+    for name, module in model.named_modules():
+        width = get_ffn_width(module)
+        if width is not None:
+            widths[name] = width
+    return widths
 
-        Returns:
-            `torch.nn.Module`: The native model with wider FFNs. For registered Transformers layouts or inferred
-            layouts with an unambiguous export field, configuration widths are updated and other FFNs sharing those
-            widths are zero-padded for native reload. Custom model constructors must handle their enlarged dimensions.
 
-        Raises:
-            ValueError:
-                If an adapter name is unknown, a public branch cannot be merged under the native routing rules, adapter
-                biases cannot be represented by the base FFN, or `safe_merge=True` detects non-finite values.
-            TypeError:
-                If `adapter_names` is a string instead of a list.
+def _find_width_fields(config_dict: dict, prefix: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+    """Find the fields of a config dict, including nested configs, that could determine the widths of FFNs.
 
-        Structural merging increases model parameters and computation. An unweighted public branch requires a proven
-        constant nonzero routing mass; a routing-weighted public branch also supports unnormalized top-k weights.
-        Public channels are copied into every routed expert. Reload exported MoE models with
-        `experts_implementation="eager"` because expanded widths may not satisfy optimized kernel constraints.
+    Following the naming convention of Transformers, these are the integer fields whose names contain `intermediate`,
+    like `intermediate_size` or `moe_intermediate_size`.
+    """
+    fields = []
+    for key, value in config_dict.items():
+        if isinstance(value, dict):
+            fields.extend(_find_width_fields(value, prefix + (key,)))
+        # Some dicts in a config, like `id2label`, have integer keys. Booleans are excluded, although they are ints.
+        elif isinstance(key, str) and "intermediate" in key and type(value) is int:
+            fields.append(prefix + (key,))
+    return fields
 
-        Save adapter checkpoints before merging. Merge a fully materialized, unpartitioned model, outside its training
-        engine. The returned model no longer supports adapter switching or unmerging.
 
-        Preflight checks reject common incompatibilities before modifying layers. Execution is not atomic across the
-        model, including with `safe_merge=True`. If execution fails, discard this model instance and reload the saved
-        base model and adapter checkpoints.
-        """
-        return self._unload_and_optionally_merge(True, progressbar, safe_merge, adapter_names)
+def _get_field(config_dict: dict, field: tuple[str, ...]) -> int:
+    """Return a field of a config dict. The field may be nested in other dicts."""
+    for key in field[:-1]:
+        config_dict = config_dict[key]
+    return config_dict[field[-1]]
+
+
+def _set_field(config: Any, field: tuple[str, ...], value: int) -> None:
+    """Set a field of a config or a config dict. The field may be nested in configs or plain dicts."""
+    for key in field[:-1]:
+        config = config[key] if isinstance(config, dict) else getattr(config, key)
+    if isinstance(config, dict):
+        config[field[-1]] = value
+    else:
+        setattr(config, field[-1], value)
+
+
+def _build_meta_model(model: PreTrainedModel, changes: dict[tuple[str, ...], int]) -> Optional[PreTrainedModel]:
+    """Instantiate the model on the meta device with the given changes to its config, or return `None` on failure.
+
+    Like `from_pretrained`, the config is created from a dict, so the result matches the model that would be loaded
+    from a saved checkpoint.
+    """
+    config_dict = model.config.to_dict()
+    for field, value in changes.items():
+        _set_field(config_dict, field, value)
+
+    try:
+        config = type(model.config).from_dict(config_dict)
+        with torch.device("meta"):
+            return type(model)(config)
+    except Exception:
+        # Not every model can be instantiated from its config alone, and a config may reject some values of a field.
+        return None
+
+
+def _warn_config_not_updated(reason: str) -> None:
+    """Warn that the config of the merged model is left unchanged, and why."""
+    warnings.warn(
+        f"Cortex could not infer or verify a config for the merged model, because {reason}. The config is left "
+        "unchanged, so the merged model cannot be loaded with `from_pretrained` after saving it. Instead, save the "
+        "adapter before merging it, and load it with `PeftModel.from_pretrained` and merge it each time."
+    )
+
+
+def _update_config_for_merged_ffns(model: nn.Module) -> None:
+    """Update the FFN widths in the config of a merged model, so that it can be loaded with `from_pretrained`.
+
+    The widths of the FFNs are determined by config fields like `intermediate_size`. A field can determine the widths
+    of several FFNs, e.g. of all layers, or of both the routed and the shared experts of DeepSeek-V4, and some FFNs are
+    a multiple of a field wide, e.g. the shared experts of DeepSeek-V3. Instead of inferring this from the names of the
+    fields, the model is instantiated on the meta device with each field incremented, which shows which FFNs the field
+    determines. Then each field is increased to fit the widest merged FFN that it determines, and its other FFNs are
+    padded with zero channels, which don't change their output.
+    """
+    if not isinstance(model, PreTrainedModel):
+        return
+
+    # Compare the widths of the merged FFNs with those of the model instantiated from the unchanged config.
+    merged_widths = _get_ffn_widths(model)
+    original_model = _build_meta_model(model, {})
+    if original_model is None:
+        _warn_config_not_updated("the model cannot be instantiated from its config")
+        return
+    original_widths = _get_ffn_widths(original_model)
+    if merged_widths == original_widths:
+        # Merging didn't widen any FFN, e.g. because no adapter was merged, so the config is still correct.
+        return
+    if merged_widths.keys() != original_widths.keys():
+        _warn_config_not_updated(
+            "the FFNs of the model differ from those of the model instantiated from its config, e.g. because the "
+            "model was modified after its creation"
+        )
+        return
+
+    # Find out by how much incrementing a field increases the width of each FFN.
+    config_dict = model.config.to_dict()
+    width_increases = {}
+    for field in _find_width_fields(config_dict):
+        perturbed_model = _build_meta_model(model, {field: _get_field(config_dict, field) + 1})
+        if perturbed_model is None:
+            continue
+        perturbed_widths = _get_ffn_widths(perturbed_model)
+        width_increases[field] = {
+            name: perturbed_widths[name] - width
+            for name, width in original_widths.items()
+            if perturbed_widths.get(name, width) > width
+        }
+
+    # Increase each field to fit the widest merged FFN that it determines.
+    field_increments = {}
+    for name, merged_width in merged_widths.items():
+        added_width = merged_width - original_widths[name]
+        if added_width <= 0:
+            continue
+        fields = [field for field, increases in width_increases.items() if name in increases]
+        if len(fields) != 1:
+            _warn_config_not_updated(
+                f"the width of `{name}` is not determined by a single integer config field whose name contains "
+                "`intermediate`"
+            )
+            return
+        field = fields[0]
+        increment = math.ceil(added_width / width_increases[field][name])
+        field_increments[field] = max(field_increments.get(field, 0), increment)
+
+    target_widths = dict(original_widths)
+    for field, increment in field_increments.items():
+        for name, increase in width_increases[field].items():
+            target_widths[name] += increase * increment
+
+    changes = {field: _get_field(config_dict, field) + increment for field, increment in field_increments.items()}
+    target_model = _build_meta_model(model, changes)
+    if target_model is None or _get_ffn_widths(target_model) != target_widths:
+        _warn_config_not_updated(
+            "the config does not accept the increased fields, or the FFN widths do not increase linearly with them"
+        )
+        return
+
+    padded_widths = {name: width for name, width in target_widths.items() if width > merged_widths[name]}
+
+    # The changed fields may also determine the shapes of other parameters and buffers, e.g. of FFNs that Cortex does
+    # not support, or the input features of FFNs. After padding, all shapes must match those of the target model, as
+    # `from_pretrained` requires. To check this without modifying the model, remove the channels that padding would
+    # add from the FFNs of the target model instead, which is on the meta device, and compare the shapes.
+    for name in padded_widths:
+        unpad_ffn(target_model.get_submodule(name), merged_widths[name])
+    shapes = {key: value.shape for key, value in model.state_dict().items()}
+    target_shapes = {key: value.shape for key, value in target_model.state_dict().items()}
+    if shapes != target_shapes:
+        _warn_config_not_updated(
+            "the padded model would not have the parameter and buffer shapes of the model instantiated from the new "
+            "config, e.g. because the increased fields also determine the shapes of other parameters"
+        )
+        return
+
+    for name, width in padded_widths.items():
+        pad_ffn(model.get_submodule(name), width)
+
+    for field, value in changes.items():
+        _set_field(model.config, field, value)

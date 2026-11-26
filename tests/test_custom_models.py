@@ -27,14 +27,12 @@ import packaging.version
 import pytest
 import torch
 import torch.distributed as dist
-import torch.nn.functional as F
 from safetensors.torch import load_file as safe_load_file
 from torch import nn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.tensor import DTensor
 from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
-from transformers.activations import ACT2FN
 from transformers.pytorch_utils import Conv1D
 
 from peft import (
@@ -87,7 +85,6 @@ from peft import (
     set_peft_model_state_dict,
 )
 from peft.tuners import lora
-from peft.tuners.cortex.layer import CortexLayer
 from peft.tuners.lora.config import BdLoraConfig
 from peft.tuners.lora.monteclora import MontecloraSampler
 from peft.tuners.tuners_utils import BaseTunerLayer
@@ -98,15 +95,7 @@ from .testing_common import (
     PeftCommonTester,
     _skip_if_merging_not_supported,
 )
-from .testing_utils import (
-    BlockModel,
-    activate_branches,
-    get_state_dict,
-    hub_online_once,
-    require_non_cpu,
-    set_init_weights_false,
-)
-from .testing_utils import create_tiny_causal_lm as tiny_model
+from .testing_utils import get_state_dict, hub_online_once, require_non_cpu, set_init_weights_false
 
 
 # Note about `save_pretrained` and `get_peft_model_state_dict`
@@ -137,13 +126,6 @@ def _reset_unilora_theta_d(model, config, adapter_name="default"):
 # EmbConv1D has an embedding and a Conv1D layer
 # Conv2D has a Conv2D layer
 TEST_CASES = [
-    ("Cortex random", "CortexMLP", CortexConfig, {"target_modules": ["lin0"], "k": 4}),
-    (
-        "Cortex sample",
-        "CortexMLP",
-        CortexConfig,
-        {"target_modules": ["lin0", "lin1"], "k": 4, "init_weights": "sample", "init_noise_std": 0},
-    ),
     # ShadowPEFT is not tested here: it needs a real decoder stack (not MLP/Conv custom
     # models), and wiring a dedicated TinyDecoder into this suite clashes with the shared
     # custom-model assumptions. Coverage lives in test_shadow.py, test_decoder_models.py,
@@ -1425,6 +1407,20 @@ TEST_CASES = [
         AdaLoraConfig,
         {"target_modules": ["conv2d", "lin0"], "init_lora_weights": False, "total_step": 1},
     ),
+    ##########
+    # Cortex #
+    ##########
+    # Cortex adapts whole FFNs, therefore it uses a model whose layers are SwiGLU FFNs
+    ("SwiGLU MLP 1 Cortex", "MLP_SwiGLU", CortexConfig, {"target_modules": ["lin0"], "k": 4}),
+    ("SwiGLU MLP 2 Cortex", "MLP_SwiGLU", CortexConfig, {"target_modules": ["lin0", "lin1"], "k": 4}),
+    (
+        "SwiGLU MLP 3 Cortex",
+        "MLP_SwiGLU",
+        CortexConfig,
+        {"target_modules": ["lin0", "lin1"], "k": 4, "init_weights": "sample", "init_noise_std": 0.0},
+    ),
+    # the FFNs have biases, but the adapter doesn't
+    ("SwiGLU MLP 4 Cortex", "MLP_SwiGLU", CortexConfig, {"target_modules": ["lin0"], "k": 4, "cortex_bias": "none"}),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 ALL_PEFT_CONFIG_CASES = [
@@ -1446,20 +1442,6 @@ for config_cls in ALL_PEFT_CONFIG_CLASSES:
 # - 2nd config kwargs
 # The model used for this test is `MLP`, which uses linear layers `lin0` and `lin1`
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
-    (
-        "Cortex same target",
-        "cortex",
-        CortexConfig,
-        {"target_modules": ["lin0"], "k": 4, "init_weights": False},
-        {"target_modules": ["lin0"], "k": 3, "init_weights": False},
-    ),
-    (
-        "Cortex different targets",
-        "cortex",
-        CortexConfig,
-        {"target_modules": ["lin0"], "k": 4, "init_weights": False},
-        {"target_modules": ["lin1"], "k": 3, "init_weights": False},
-    ),
     (
         "LoRA Same",
         "lora",
@@ -1991,6 +1973,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "r": 8, "num_subspaces": 2, "init_weights": False},
         {"target_modules": ["lin1"], "r": 2, "num_subspaces": 2, "init_weights": False},
     ),
+    (
+        "Cortex Same",
+        "cortex",
+        CortexConfig,
+        {"target_modules": ["lin0"], "k": 4, "init_weights": False},
+        {"target_modules": ["lin0"], "k": 3, "init_weights": False},
+    ),
+    (
+        "Cortex Different",
+        "cortex",
+        CortexConfig,
+        {"target_modules": ["lin0"], "k": 4, "init_weights": False},
+        {"target_modules": ["lin1"], "k": 3, "init_weights": False},
+    ),
 ]
 
 
@@ -1999,32 +1995,6 @@ def _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config
         pytest.skip("LoRA with multiple adapters with target_parameters is not supported")
     if config_cls is AdaLoraConfig:
         pytest.skip("AdaLoRA only supports a single trainable adapter")
-
-
-class CortexFFN(nn.Module):
-    """Custom FFN opting into Cortex's standard gated contract."""
-
-    def __init__(self, input_dim, output_dim, width=24):
-        super().__init__()
-        self.gate_proj = nn.Linear(input_dim, width, bias=False)
-        self.up_proj = nn.Linear(input_dim, width, bias=False)
-        self.down_proj = nn.Linear(width, output_dim, bias=False)
-        self.act_fn = nn.SiLU()
-
-    def forward(self, x):
-        return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
-
-
-class CortexMLP(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.lin0 = CortexFFN(10, 20)
-        self.lin1 = CortexFFN(20, 2)
-        self.sm = nn.LogSoftmax(dim=-1)
-        self.dtype = torch.float32
-
-    def forward(self, X):
-        return self.sm(self.lin1(self.lin0(X.to(self.dtype) / 10)))
 
 
 class MLP(nn.Module):
@@ -2067,6 +2037,39 @@ class MLPWithGRU(nn.Module):
         X, _ = self.gru(X)
         X = X.squeeze(1)
         X = self.fc(X)
+        X = self.sm(X)
+        return X
+
+
+class SwiGLU(nn.Module):
+    """A gated FFN with SiLU activation, as used by Llama and many other decoder models."""
+
+    def __init__(self, input_dim, output_dim, intermediate_dim=24):
+        super().__init__()
+        self.gate_proj = nn.Linear(input_dim, intermediate_dim)
+        self.up_proj = nn.Linear(input_dim, intermediate_dim)
+        self.down_proj = nn.Linear(intermediate_dim, output_dim)
+        self.act_fn = nn.SiLU()
+
+    def forward(self, X):
+        return self.down_proj(self.act_fn(self.gate_proj(X)) * self.up_proj(X))
+
+
+class MLP_SwiGLU(nn.Module):
+    # Same interface as MLP, but `lin0` and `lin1` are SwiGLU FFNs instead of linear layers
+    def __init__(self):
+        super().__init__()
+        self.lin0 = SwiGLU(10, 20)
+        self.lin1 = SwiGLU(20, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
+
+    def forward(self, X):
+        # The test inputs go up to 89, and SwiGLU multiplies its gate and up projections, so scale the inputs down to
+        # keep the outputs in a reasonable range.
+        X = X.to(self.dtype) / 10
+        X = self.lin0(X)
+        X = self.lin1(X)
         X = self.sm(X)
         return X
 
@@ -2149,10 +2152,11 @@ class DeepMLP(nn.Module):
 
 
 def _deep_mlp_for_config(config_cls):
+    # Cortex adapts whole FFNs instead of linear layers, so replace the `lin0` layers by SwiGLU FFNs
     model = DeepMLP(size=256)
     if config_cls is CortexConfig:
         for layer in model.layers:
-            layer.lin0 = CortexFFN(256, 256)
+            layer.lin0 = SwiGLU(256, 256)
     return model
 
 
@@ -2535,9 +2539,6 @@ class MockTransformerWrapper:
         if dtype is None:
             dtype = torch.float32
 
-        if model_id == "CortexMLP":
-            return CortexMLP().to(dtype)
-
         if model_id == "MLP":
             return MLP().to(dtype)
 
@@ -2576,6 +2577,9 @@ class MockTransformerWrapper:
 
         if model_id == "MLP_LayerNorm":
             return MLP_LayerNorm().to(dtype)
+
+        if model_id == "MLP_SwiGLU":
+            return MLP_SwiGLU().to(dtype)
 
         if model_id == "MLP2":
             return MLP2().to(dtype)
@@ -2664,7 +2668,7 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_targeting_unknown_layer_type_raises(self, test_name, model_id, config_cls, config_kwargs):
         # See #3986
-        if model_id.lower() not in ("mlp", "cortexmlp") or "target_modules" not in config_kwargs:
+        if (model_id.lower() not in ("mlp", "mlp_swiglu")) or ("target_modules" not in config_kwargs):
             pytest.skip("This test is only for PEFT methods targeting MLP.")
 
         class UnknownModule(nn.Module):
@@ -2682,8 +2686,6 @@ class TestPeftCustomModel(PeftCommonTester):
         # Some methods check all target modules before they create the first layer, so they report that no target
         # module is compatible.
         msg = r"Target module .* not supported|No layers? types compatible with"
-        if config_cls is CortexConfig:
-            msg = r"Unsupported Cortex target: UnknownModule\."
         with pytest.raises((TypeError, ValueError), match=msg):
             get_peft_model(MLPWithUnknownModules(), config)
 
@@ -3087,7 +3089,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # (batch, height, width, channels) inputs of ConvNeXt, see https://github.com/huggingface/peft/issues/3968.
         # These models process each row of the input independently, so adding leading dimensions to the input must
         # not change the output.
-        if model_id not in ("MLP", "MLP2", "MLP_LayerNorm", "MlpUsingParameters", "CortexMLP"):
+        if model_id not in ("MLP", "MLP2", "MLP_LayerNorm", "MlpUsingParameters", "MLP_SwiGLU"):
             pytest.skip("Only the MLP models process each row of the input independently")
 
         X = self.prepare_inputs_for_testing()["X"]
@@ -3474,7 +3476,7 @@ class TestPeftCustomModel(PeftCommonTester):
             lr = 0.1  # otherwise we get nan
         elif "mha" in model_id.lower():
             lr = 1e-3  # we get exploding gradients with MHA when learning rate is too high
-        elif issubclass(config_cls, (VBLoRAConfig, RandLoraConfig, UniLoraConfig, OSFConfig)):
+        elif issubclass(config_cls, (VBLoRAConfig, RandLoraConfig, UniLoraConfig, OSFConfig, CortexConfig)):
             lr = 0.01  # otherwise we get nan
         elif issubclass(config_cls, AdaLoraConfig):
             lr = 1e-4  # AdaLoRA + init_lora_weights=False can blow up with multi-target SGD
@@ -5703,13 +5705,13 @@ class TestMultipleActiveAdapters:
                 module.set_adapter(adapter_names)
 
     def resolve_model_cls(self, tuner_method):
-        if tuner_method == "cortex":
-            return CortexMLP()
         if tuner_method == "lora+trainable_tokens":
             # for this method we need an Embedding layer to target
             return ModelEmbConv1D()
         if tuner_method == "ia3":
             return MLP(bias=False)
+        if tuner_method == "cortex":
+            return MLP_SwiGLU()
         return MLP(bias=True)
 
     @pytest.mark.parametrize("adapter_name", [["test-adapter"], ("test-adapter",), None])
@@ -9212,148 +9214,3 @@ class TestFsdp2UnshardedParams:
         for name, base_weight in base_weights.items():
             weight = state_dict[f"base_model.model.{name}.base_layer.weight"].full_tensor()
             assert torch.allclose(weight, base_weight, atol=1e-6)
-
-
-class _CortexCustomFFN(nn.Module):
-    def __init__(self, activation, gated=True):
-        super().__init__()
-        self.up_proj = nn.Linear(4, 12, bias=False)
-        self.down_proj = nn.Linear(12, 4, bias=False)
-        if gated:
-            self.gate_proj = nn.Linear(4, 12, bias=False)
-        self.act_fn = activation
-
-    def forward(self, x):
-        up = self.up_proj(x)
-        hidden = self.act_fn(self.gate_proj(x)) * up if hasattr(self, "gate_proj") else self.act_fn(up)
-        return self.down_proj(hidden)
-
-
-class _CortexCustomModel(nn.Module):
-    def __init__(self, activation, gated=True):
-        super().__init__()
-        self.layers = nn.Sequential(_CortexCustomFFN(nn.SiLU(), gated), _CortexCustomFFN(activation, gated))
-
-    def forward(self, x):
-        return self.layers(x)
-
-
-class _CortexCoupledSiLU(nn.SiLU):
-    """A familiar activation base class does not establish elementwise behavior."""
-
-    def forward(self, x):
-        return F.softmax(x, dim=-1)
-
-
-class TestCortexCustomActivations:
-    @pytest.fixture(autouse=True)
-    def deterministic_cpu(self):
-        previous_threads = torch.get_num_threads()
-        torch.manual_seed(123)
-        torch.set_num_threads(1)
-        yield
-        torch.set_num_threads(previous_threads)
-
-    @pytest.mark.parametrize(
-        "kind,mode",
-        [
-            ("qwen3", "routed"),
-            ("gemma3_text", "routed"),
-            ("gpt_oss", "shared"),
-            ("gpt_oss", "routed"),
-            ("gpt_oss", ["shared", "routed"]),
-            ("qwen3_next", ["shared", "routed"]),
-        ],
-    )
-    def test_partial_merge_keeps_unmerged_active_adapter_output_and_gradients(self, kind, mode):
-        base = BlockModel(kind).eval() if kind == "qwen3_next" else tiny_model(kind).eval()
-        model = get_peft_model(base, CortexConfig(k=3, moe_target=mode)).eval()
-        model.add_adapter("second", CortexConfig(k=5, moe_target=mode))
-        activate_branches(model)
-        model.base_model.set_adapter(["default", "second"])
-        inputs = torch.randn(2, 5, 16) if kind == "qwen3_next" else torch.randint(3, 32, (2, 5))
-
-        def output():
-            result = model(inputs) if kind == "qwen3_next" else model(inputs, use_cache=False)
-            return result if kind == "qwen3_next" else result.logits
-
-        second_parameters = [
-            parameter for name, parameter in model.named_parameters() if "cortex_" in name and ".second." in name
-        ]
-        expected = output()
-        expected_grads = torch.autograd.grad(expected.square().mean(), second_parameters)
-        model.merge_adapter(adapter_names=["default"], safe_merge=True)
-        actual = output()
-        torch.testing.assert_close(actual, expected, rtol=2e-4, atol=3e-5)
-        actual_grads = torch.autograd.grad(actual.square().mean(), second_parameters)
-        assert any(gradient.abs().sum() > 0 for gradient in actual_grads)
-        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
-            torch.testing.assert_close(actual_grad, expected_grad, rtol=5e-4, atol=5e-5)
-        for layer in model.modules():
-            if isinstance(layer, CortexLayer):
-                assert layer.active_adapters == ["default", "second"]
-                assert layer.merged_adapters == ["default"]
-        model.merge_adapter(adapter_names=["second"], safe_merge=True)
-        torch.testing.assert_close(output(), expected, rtol=2e-4, atol=3e-5)
-        model.unmerge_adapter()
-        torch.testing.assert_close(output(), expected, rtol=0, atol=0)
-
-    @pytest.mark.parametrize(
-        "activation",
-        [
-            nn.Softmax(dim=-1),
-            nn.LayerNorm(12, elementwise_affine=False),
-            nn.Dropout(0.1),
-            partial(F.softmax, dim=-1),
-            _CortexCoupledSiLU(),
-        ],
-        ids=["softmax", "layernorm", "dropout", "softmax-function", "overridden-silu"],
-    )
-    def test_unaudited_activations_fail_before_any_target_is_replaced(self, activation):
-        base = _CortexCustomModel(activation).eval()
-        original_parameters = list(base.parameters())
-        inputs = torch.randn(2, 4)
-        expected = base(inputs).detach()
-        with pytest.raises(ValueError, match="audited deterministic elementwise activation"):
-            get_peft_model(base, CortexConfig(k=3, target_modules=["layers.0", "layers.1"]))
-        assert not any(isinstance(layer, CortexLayer) for layer in base.modules())
-        assert all(parameter is original for parameter, original in zip(base.parameters(), original_parameters))
-        torch.testing.assert_close(base(inputs), expected, rtol=0, atol=0)
-
-    @pytest.mark.parametrize("gated", [True, False], ids=["gated", "non-gated"])
-    @pytest.mark.parametrize(
-        "activation",
-        [
-            nn.SiLU(),
-            F.silu,
-            nn.GELU(approximate="tanh"),
-            F.gelu,
-            nn.ReLU(),
-            nn.Identity(),
-            ACT2FN["gelu_new"],
-            ACT2FN["silu"],
-        ],
-        ids=[
-            "silu",
-            "silu-function",
-            "gelu-tanh",
-            "gelu-function",
-            "relu",
-            "identity",
-            "transformers-gelu",
-            "transformers-silu",
-        ],
-    )
-    def test_elementwise_custom_ffn_merge_preserves_output_and_input_gradient(self, activation, gated):
-        model = get_peft_model(
-            _CortexCustomModel(activation, gated).eval(),
-            CortexConfig(k=3, target_modules=["layers.1"], init_weights=False),
-        ).eval()
-        inputs = torch.randn(2, 4, requires_grad=True)
-        expected = model(inputs)
-        expected_grad = torch.autograd.grad(expected.square().sum(), inputs)[0]
-        native = model.merge_and_unload(safe_merge=True)
-        actual = native(inputs)
-        actual_grad = torch.autograd.grad(actual.square().sum(), inputs)[0]
-        torch.testing.assert_close(actual, expected)
-        torch.testing.assert_close(actual_grad, expected_grad)

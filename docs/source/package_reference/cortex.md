@@ -8,285 +8,147 @@ http://www.apache.org/licenses/LICENSE-2.0
 Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
 an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
 specific language governing permissions and limitations under the License.
+
+⚠️ Note that this file is in Markdown but contain specific syntax for our doc-builder (similar to MDX) that may not be
+rendered properly in your Markdown viewer.
+
 -->
 
 # Cortex
 
-Cortex adds trainable nonlinear channels to the frozen feed-forward network (FFN) blocks of a pretrained model. This is the Cortex-Structural parameterization from [Cortex: Consolidating Context into Parametric Memory](https://arxiv.org/abs/2610.20399).
+Cortex adds trainable channels to the frozen feed-forward networks (FFNs) of a pretrained model. Each added channel works like a native FFN channel: it has its own gate, up, and down weights and uses the activation function of the FFN it extends. This is the Cortex-Structural parameterization from [Cortex: Consolidating Context into Parametric Memory](https://arxiv.org/abs/2610.20399).
 
-[LoRA](lora) learns low-rank updates to existing projections, including attention and FFN projections. Both methods support merging: standard LoRA keeps the original weight shapes and parameter count, while Cortex widens the native FFN and retains the added parameters and computation.
+The abstract from the paper is:
 
-Choose Cortex when you want to add nonlinear FFN capacity; choose LoRA when preserving the merged model's original size or adapting attention projections is a priority. Cortex width `k` and LoRA rank `r` imply different parameter budgets, so compare methods using matched trainable parameter counts and the same training and evaluation settings.
+> Context can improve large language model performance, but these gains may be lost after context removal. Inspired by biological systems consolidation, we formulate Memory Consolidation (MC) as internalizing these gains while preserving non-target capabilities, connecting context-specified editing, skill learning, and behavioral steering under a common objective. We introduce a five-task-family testbed measuring consolidation and retention under single, batch, and sequential updates. We propose Cortex, which generates prospective queries to anticipate uses of context and distills context-conditioned outputs into mergeable low-rank or structural feed-forward network updates. Across 4B–120B dense and mixture-of-experts backbones, including both text-only and multimodal models, Cortex lies on the empirical consolidation–retention Pareto frontier in most evaluated settings. After 50 sequential factual edits on a 14B model, Cortex-Structural recovers 88.9% of the context-induced gain while retaining 99.8% of original non-target performance.
 
-The width `k` controls the added FFN capacity. For each standard bias-free gated FFN with input/output dimension `d`, an adapter adds `3*d*k` parameters; a non-gated FFN adds `2*d*k`.
+[LoRA](lora) learns low-rank updates of existing projections. Cortex instead adds nonlinear FFN capacity. Both methods support merging, but while merging LoRA keeps the shapes of the weights, merging Cortex makes the FFNs wider, so the merged model keeps the added parameters and computation.
 
-For example, Llama-3.2-3B has 28 bias-free gated FFNs with `d=3072`. With `k=16`, Cortex adds 147,456 parameters per FFN. Adapting all 28 adds 4,128,768 parameters (about 4.1M), matching the configuration in the MetaMathQA benchmark below. This is about **0.129% of the original model's 3,212,749,824 parameters**, calculated as `adapter parameters / original model parameters * 100`.
-
-Train the adapter with a supervised task loss or teacher distillation. The [consolidation example](https://github.com/huggingface/peft/tree/main/examples/cortex/consolidate) demonstrates distilling documentation into an adapter; the [MetaMathQA benchmark](https://github.com/huggingface/peft/tree/main/method_comparison/MetaMathQA/experiments/cortex) provides supervised training configurations and benchmark commands.
+The width `k` is the number of channels added to each FFN. For an FFN with hidden size `d`, an adapter adds `3 * d * k` parameters, or `2 * d * k` if the FFN has no gate, plus biases if the FFN has biases (see [Biases](#biases)). For example, Llama-3.2-3B has 28 FFNs with `d=3072`. With `k=16`, Cortex adds 147,456 parameters per FFN, or 4,128,768 parameters in total, which is about 0.129% of the parameters of the base model. Since `k` and the LoRA rank `r` result in different numbers of parameters, compare the two methods at the same number of trainable parameters.
 
 ## Quickstart
 
 ```python
-import torch
 from transformers import AutoModelForCausalLM
-
 from peft import CortexConfig, get_peft_model
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-base_model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B").to(device)
+base_model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B")
 config = CortexConfig(k=16, init_weights="sample", task_type="CAUSAL_LM")
 model = get_peft_model(base_model, config)
 model.print_trainable_parameters()
 ```
 
-The [fine-tuning example](https://github.com/huggingface/peft/tree/main/examples/cortex/finetune) trains from a local JSONL dataset and saves the adapter and tokenizer. Its README shows how to reload them.
+The adapter can be trained with any loss, e.g. the usual cross-entropy loss or a distillation loss. See the [fine-tuning example](https://github.com/huggingface/peft/tree/main/examples/cortex) for training with the Transformers `Trainer`.
 
-## Supported architectures
+## Supported FFNs
 
-Automatic discovery recognizes native Llama, Qwen2, Qwen3, Qwen3.5, Gemma3, and Gemma4 dense FFNs, together with the dense/shared FFNs registered for the MoE families below. The following table lists the registered native MoE layouts by Transformers model type.
+Cortex adapts whole FFNs, so `target_modules` should select FFN modules like `mlp` or `experts`, not their projections. Two kinds of FFNs are supported:
 
-| Family | Registered MoE model types |
+- **Dense FFNs** computing `down_proj(act_fn(gate_proj(x)) * up_proj(x))`, where the projections are `nn.Linear` layers. This is the MLP of Llama, Mistral, Qwen, Gemma, and many other Transformers models, and also the shared experts of most MoE models. Without `gate_proj`, the FFN must compute `down_proj(act_fn(up_proj(x)))`. The gate and up projections may also be fused into a single `gate_up_proj`, whose output consists of the gate half followed by the up half. Variants of the clamped SwiGLU of GPT-OSS, like those of DeepSeek-V4, GLM5 Next, and MiniMax-M3-VL, are supported as well. Custom FFNs following these conventions work, too.
+- **Packed MoE experts** that follow the Transformers experts interface (classes decorated with `use_experts_implementation`), e.g. the `experts` modules of Qwen3-MoE, Mixtral, GPT-OSS, DeepSeek, GLM, MiniMax, and Kimi models. The added channels use the gating of the experts, e.g. the clamped SwiGLU of GPT-OSS. This requires Transformers v5.
+
+Cortex relies on these formulas when merging, so it raises an error for FFNs that compute something else: FFNs with submodules other than the projections and `act_fn`, e.g. a normalization layer between the projections, FFNs with parameters or buffers of their own, e.g. an output scale, and FFNs with an `activation_sparsity`, like some layers of Gemma3n, whose activations depend on statistics over all channels.
+
+If `target_modules` is not set, the following modules are targeted with the default `moe_target="shared"`, see [MoE models](#moe-models) for the other values:
+
+- the FFNs of Llama, Mistral, Qwen2, Qwen3, Qwen3.5, and Gemma3 text models, and the dense FFNs of the layers of Gemma4 text models;
+- the experts of MoE models without shared experts: Qwen3-MoE, Mixtral, OLMoE, GPT-OSS, MiniMax, and MiniMax-M2;
+- the shared experts of MoE models with shared experts: DeepSeek-V2, V3, V3.2, and V4, GLM4-MoE, GLM4-MoE-Lite, GLM-MoE-DSA, GLM5 Next, Kimi Linear, MiniMax-M3-VL, NemotronH, Qwen3-Next, and Qwen3.5-MoE.
+
+For other models, set `target_modules` explicitly. In models whose first layers are dense, like the DeepSeek models, the dense FFNs and the MoE blocks are both called `mlp`, so `target_modules=["mlp"]` would select the MoE blocks as well. To also adapt the dense FFNs, select them by their layer index, e.g. with `target_modules=r".*\.layers\.[0-2]\.mlp|.*\.shared_experts"` for the first three layers of DeepSeek-V3.
+
+## MoE models
+
+For MoE models, `moe_target` determines where channels are added:
+
+| `moe_target` | Added channels |
 | --- | --- |
-| GPT-OSS | `gpt_oss` |
-| Qwen | `qwen3_moe`, `qwen3_next`, `qwen3_5_moe` |
-| Mixtral | `mixtral` |
-| OLMoE | `olmoe` |
-| DeepSeek | `deepseek_v2`, `deepseek_v3`, `deepseek_v32`, `deepseek_v4` |
-| GLM | `glm4_moe`, `glm4_moe_lite`, `glm_moe_dsa`, `glm5_next_text` |
-| MiniMax | `minimax`, `minimax_m2`, `minimax_m3_vl_text` |
-| Kimi | `kimi_linear` |
-| Nemotron | `nemotron_h` |
-| Gemma | `gemma4_text` with MoE enabled |
+| `"shared"` (default) | `k` channels in the native shared experts, like the `shared_experts` of DeepSeek-V3. In MoE blocks without native shared experts, `k` channels common to all experts instead, which are applied to every token and weighted by the sum of its routing weights |
+| `"routed"` | `k_routed` channels per expert, applied when the router selects that expert and weighted by its routing weight, just like the native channels of the expert |
+| `"both"` | both |
 
-On multimodal models, automatic discovery targets the text backbone. To adapt a registered FFN in a speech decoder, include its path in `target_modules`.
+With `target_modules`, only the targeted modules are adapted, and `moe_target` determines which channels they get. Cortex raises an error if a targeted module would get no channels, e.g. packed experts next to native shared experts with `moe_target="shared"`, and warns if `moe_target="both"` is only applied to the packed experts or only to the native shared experts of a MoE block.
 
-Packed MoE layouts are validated with **Transformers 5.17.0**. Compatible dense FFNs can also run on older Transformers releases. Older `ModuleList`-based expert implementations are rejected. Packed expert parameters must be floating-point tensors.
+Native shared experts are recognized as a dense FFN, or a module whose name contains `shared`, next to the packed experts or next to the module that holds them. So the dense FFN of each layer of Gemma4 counts as shared experts as well. Other dense FFNs are extended regardless of `moe_target`.
 
-The supported MoE blocks call their experts with flattened hidden states, integer expert indices, and floating-point routing weights, in that order. The first argument must be named `hidden_states`, and all three must accept positional arguments. The indices and weights both have shape `[num_tokens, top_k]`. A `CortexMoeSpec` can rename the indices and weights arguments while retaining these requirements.
+Unlike the output of native shared experts, the output of the experts is weighted by the routing weights. Since the channels common to all experts are added to every expert when merging, their output is multiplied by the sum of the selected routing weights of each token, so that merging is exact for every router. For routers whose routing weights sum to one, like those of Mixtral, GPT-OSS, or Qwen3-MoE with `norm_topk_prob=True`, this is the same as adding the output as is.
 
-For other native Transformers models, Cortex can infer a standard dense FFN or a packed expert layout. For example, Mistral's MLP uses the same gated FFN formula as Llama. Cortex checks the projection layout and activation; for an unfamiliar dense MLP, it also checks the operations in its forward. Inference requires inspectable, unmodified FFN forwards and may reject Accelerate device-placement hooks even when offloading is disabled. For MoE, Cortex first identifies the parent block so that a request for routed experts cannot select its shared FFN instead. An incompatible target raises an error before adapters are installed.
+`k_routed` defaults to `k`. Since routed channels are added to every expert, their number of parameters is multiplied by the number of experts. Before merging, they are computed with a loop over the experts, like the eager experts implementation, which is slower than the other channels, especially for models with many experts.
 
-An inferred MoE can have shared experts outside the router's immediate parent. If Cortex cannot locate the shared FFN or establish that the architecture has none, it rejects automatic `shared` selection. You can still select a supported routed expert. Saved adapter configurations retain the roles of their physical modules.
+## Initialization
 
-`get_peft_model()` automatically performs structure and interface checks, but does not run numerical equivalence checks. When integrating a new model, run `validate_layout.py` separately to compare outputs with nonzero adapter parameters before merge, after merge, and after native reload.
+With `init_weights="random"` (default), the gate and up weights use the default initialization of `nn.Linear`. With `init_weights="sample"`, they are copies of randomly sampled channels of the base FFN, with Gaussian noise with standard deviation `init_noise_std` added. Routed channels are sampled from their own expert, and channels common to all experts from all experts. In both cases, the down weights and biases are initialized to zero, so the adapter initially does not change the output of the model.
 
-When Cortex infers a layout, the warning lists representative module paths and links to this section. The [layout check](https://github.com/huggingface/peft/tree/main/examples/cortex#check-a-transformers-layout) explores dense FFNs or the shared, routed, and combined MoE selections at different widths. The script is not installed by pip; obtain it from a PEFT source checkout matching your installed release or commit, and run it from the repository root.
+## Biases
 
-Use `--cortex-config` to validate a new configuration with custom specifications before injecting or training an adapter. To check **one saved adapter configuration**, use `--adapter-config`; this preserves its paths, roles, and widths and rejects probe overrides. The check uses a small random model and validates the selected layout on the reduced configuration, not the training quality of a saved checkpoint.
+With `cortex_bias="auto"` (default), each projection of the added channels has a bias if the corresponding projection of the base FFN has one, e.g. for GPT-OSS, so that merging does not change the architecture of the model. With `cortex_bias="none"`, they have no biases. Biases can't be added to FFNs without biases, since they couldn't be merged.
 
-## Target selection
+The gate and up biases belong to the added channels, and with `init_weights="sample"`, they are copied from the sampled channels. The down bias, on the other hand, is added to the output of the FFN like the down bias of the base FFN, so it is shared by all added channels. Merging adds it to the down bias of the base FFN, and unmerging subtracts it again, which restores the base FFN up to floating point errors.
 
-`target_modules` selects complete FFNs or MoE blocks. Lists match exact module names or dot-delimited suffixes; strings use full regular expression matching. For example, `target_modules=["mlp"]` matches `mlp` and `model.layers.0.mlp`, but not `some_mlp`. Leave it unset for automatic discovery, or use `exclude_modules` to exclude blocks or resolved FFNs. Select whole FFNs rather than their individual linear projections.
+## Merging and saving
 
-For MoE, select the parent block, such as `model.layers.0.mlp`, to control branches with `moe_target`. Explicitly selecting a packed experts leaf, such as `model.layers.0.mlp.experts`, selects routed branches. Dense FFNs ignore `moe_target`.
-
-Use `modules_to_save` to train and save a full module, such as a classification head. Cortex adapts the FFNs outside those modules and existing auxiliary wrappers. Choose saved modules that do not contain Cortex layers.
-
-For a custom FFN using the conventional names below, set `target_modules` explicitly:
-
-- **Computation:** **`down(act(gate(x)) * up(x))`**, or `down(act(up(x)))` without a gate. Use ordinary `nn.Linear` projections named `up_proj`, `down_proj`, and optionally `gate_proj`, with a supported deterministic elementwise activation exposed as `act_fn`, such as SiLU or GELU.
-- **Other structures:** FFNs with extra normalization, residuals, stochastic operations, or custom activation implementations need dedicated structure support.
-
-The [custom FFN classification example](https://github.com/huggingface/peft/tree/main/examples/cortex/finetune#custom-ffn-classification) shows a PyTorch training loop with `task_type` unset.
-
-## Custom structure specifications
-
-Use [`CortexFfnSpec`] and [`CortexMoeSpec`] when a model uses supported FFN computations but different field names. The built-in registry and user configuration use these same classes to describe existing FFN and router structures.
-
-### Configure field mappings
-
-`ffn_specs` and `moe_specs` map a class name to its specification. A fully qualified name, such as `my_package.modeling.MyFfn`, takes precedence over the short class name. Each specification includes its own defaults and replaces the class's complete built-in entry.
-
-Providing a specification enables automatic discovery for that class. Use `target_modules` to restrict which instances are adapted.
-
-For an FFN computing `w2(activation(w1(x)) * w3(x))`, with its constructor width stored in `config.ffn_channels`:
+`merge_adapter()` appends the adapter channels to the FFNs, and `unmerge_adapter()` removes them again. `merge_and_unload()` returns the base model with the wider FFNs and updates their widths in the model config, e.g. `intermediate_size`, so that the merged model can be saved and loaded like any other Transformers model. Since it removes the adapter layers from the PEFT model, save the adapter first:
 
 ```python
-from peft import CortexConfig, CortexFfnSpec, CortexMoeSpec
+model.save_pretrained("cortex-adapter")
 
-config = CortexConfig(
-    k=16,
-    ffn_specs={
-        "MyFfn": CortexFfnSpec(
-            gate_proj="w1",
-            up_proj="w3",
-            down_proj="w2",
-            act_fn="activation",
-            width_field="ffn_channels",
-        ),
-    },
-)
+merged_model = model.merge_and_unload()
+merged_model.save_pretrained("merged-model")
+
+merged_model = AutoModelForCausalLM.from_pretrained("merged-model")
 ```
 
-Names refer to direct attributes of the FFN, not dotted paths. Set `has_gate=False` for `down(act(up(x)))`. Use `gate_up_proj` to name a fused gate/up projection, and `packed=True` for packed expert parameters. Packed experts still need the supported layout metadata.
+Following the naming convention of Transformers, Cortex updates the integer config fields whose names contain `intermediate`, including those of nested configs. If a field determines the widths of several FFNs, it is increased to fit the widest merged FFN, and the other FFNs are padded with zero channels, which don't change their output. This increases the size of the merged model: for example, `moe_intermediate_size` determines the widths of both the routed and the shared experts of DeepSeek-V3, so extending only the shared experts, as with the default `moe_target="shared"`, pads all routed experts, which adds about 5.1B zero parameters with `k=16`, or about 0.8% of the model. To use a merged model in memory without saving it, `merge_adapter()` suffices, which does not update the config and so does not pad any FFN.
 
-If the FFN stores its current width under a nonstandard attribute, set `width_attributes`, for example `width_attributes=("channels",)`, so merge and unmerge update it.
-
-For an MoE whose routed experts are stored in `bank` and shared FFN in `common`, add:
-
-```python
-config.moe_specs = {
-    "MyMoe": CortexMoeSpec(
-        experts="bank",
-        shared_modules=("common",),
-        routing_indices="selected_ids",
-        routing_weights="selected_weights",
-    ),
-}
-```
-
-The routing names describe the packed experts' `forward` arguments. The example requires `forward(hidden_states, selected_ids, selected_weights)`: the first argument must be named `hidden_states`, and the first three arguments must accept positional calls. Omit both routing names to use the supported native signatures. Also provide an `ffn_specs` entry for the experts class if its projection names differ.
-
-Set `shared_modules=()` only when the MoE has no native shared FFN. `None` discovers conventional shared-FFN names; if none are found, it leaves their absence unresolved.
-
-### Validate and reuse specifications
-
-Cortex validates the referenced projections, shapes, activation and expert signature before injection. Providing a specification declares that the module follows the corresponding supported computation; checking names and shapes does not prove equivalence for an arbitrary custom `forward`. Extra normalization, residual operations or other unsupported arithmetic still require dedicated implementation support. Public-branch merging follows the routing requirements in [MoE branches](#moe-branches).
-
-Specifications are saved in the adapter configuration and restored on load. The width field must describe the constructor's actual FFN width. Export uses the same width binding for untargeted FFNs of that class, padding them when needed to keep native reload consistent.
-
-Structure specifications describe the base model, independently of an adapter's selected targets. Include descriptions of untargeted custom FFNs that share its export width fields, and reuse the complete `ffn_specs` and `moe_specs` mappings for every adapter on that model. Keep these mappings unchanged after injection so each saved adapter remains self-contained.
-
-Cortex rejects different or missing descriptions across adapters. Short and fully qualified keys are equivalent when they resolve to the same class and specification.
-
-To run the [numerical layout check](#supported-architectures) on a new configuration, put its fields in a JSON file without resolved `target_roles`, then run:
-
-```sh
-python examples/cortex/validate_layout.py --model-name path/to/config-directory --cortex-config cortex.json --k 2 4
-```
-
-Command-line probe options override the JSON fields. An explicit `k` or `moe_target` in the JSON selects those widths or MoE branches; when omitted, the probe uses widths 2 and 4 and explores the applicable dense or MoE modes, including parent blocks described by `moe_specs`. As in training, JSON `moe_target` has no effect on a dense-only selection.
-
-A complete JSON saved by `CortexConfig.save_pretrained` includes its defaults, so those values also constrain the probe. The [example README](https://github.com/huggingface/peft/tree/main/examples/cortex#check-a-transformers-layout) shows a minimal configuration for exploration. The script constructs a native Transformers model; specifications do not import custom model code or enable `trust_remote_code`.
-
-Mode sweeps apply to selected MoE parent blocks. Explicit shared-FFN targets always exercise shared branches, and explicit expert-module targets always exercise routed branches, regardless of a JSON or CLI `moe_target` value. Selecting both leaves checks their combination once per width and preserves any selected dense FFNs. When parents and fixed leaves from different blocks are selected together, `moe_target` changes only the parent selections.
-
-## Initialization and biases
-
-| Option | Behavior |
-| --- | --- |
-| `init_weights="random"` (default) | Initialize gate/up weights with Kaiming-uniform initialization. |
-| `init_weights="sample"` | Copy paired gate/up channels and available biases from the base FFN. Routed branches sample their own expert; public branches sample from the expert pool. |
-| `init_noise_std=0.01` | Add Gaussian noise to sampled weights. Use `0` for exact copying. |
-| `adapter_bias=None` (default) | Follow bias presence in each corresponding base projection. Use `True` to create all adapter biases, or `False` to create none. |
-| `adapter_bias_init="uniform"` (default) | Initialize gate/up biases uniformly during random initialization. Use `"zeros"` for zero initialization. Sample initialization copies available native biases and zeros missing ones. |
-
-Both initialization strategies zero the down weights and bias, so the adapter starts with the base model's output. Loading a trained adapter restores its saved weights. See [`CortexConfig`] for the boolean aliases and testing options.
-
-Initialize new adapters on a model with weights loaded in memory (not meta tensors). Use `low_cpu_mem_usage=True` when loading trained adapters, rather than when initializing a new one.
-
-For BF16 training, load the base with `dtype=torch.bfloat16`. PEFT promotes BF16 and FP16 adapter weights to FP32 by default. Set `autocast_adapter_dtype=False` in `get_peft_model` to keep each adapter projection in the dtype of its corresponding base projection. If the base fuses gate and up, both adapter projections inherit the fused weight's dtype.
-
-## MoE branches
-
-| `moe_target` | Native shared FFN present | Architecture known to have no native shared FFN |
-| --- | --- | --- |
-| `"shared"` (default) | Extend the native shared FFN | Add a public branch evaluated for every token |
-| `"routed"` | Extend each routed expert | Extend each routed expert |
-| `["shared", "routed"]` | Extend both | Add public and routed branches |
-
-`k_routed` sets the added width **per routed expert**. `k_shared` sets the width per physical shared FFN or public branch. Both default to `k`; dense FFNs always use `k`. Native shared branches retain their original gates and normalization. Routed branches reuse the native router's expert selections and weights.
-
-For a registered layout known to lack native shared experts, `moe_target="shared"` creates the shared-only extension. Its default `public_weighting="unweighted"` adds the public output independently of routing weights. Set `public_weighting="routing"` to multiply that output by the sum of the selected router weights. This enables public-branch merging even when the selected weights are not normalized to sum to one.
-
-```python
-# Replace this path with a supported native MoE checkpoint.
-# Use eager experts for this example; keep the native MoE parent forward.
-base_moe_model = AutoModelForCausalLM.from_pretrained(
-    "path/to/moe-base", experts_implementation="eager"
-)
-config = CortexConfig(
-    k=16,
-    moe_target="shared",
-    public_weighting="routing",
-    init_weights="sample",
-    task_type="CAUSAL_LM",
-)
-moe_model = get_peft_model(base_moe_model, config)
-```
-
-`public_weighting` is part of the public branch's trained behavior, so choose it before training. To merge an unweighted public branch, the selected router weights must have a constant, nonzero sum. Use `public_weighting="routing"` for merging public branches with unnormalized Qwen3-MoE or OLMoE routing. Routed-only branches can merge normally.
-
-For one MoE block with gated FFNs of input/output dimension `d`, routed branches add `3*d*E*k_routed` matrix parameters across `E` experts; a public branch adds `3*d*k_shared`. Account for both total parameters and active branches when comparing budgets.
-
-## Task adapters
-
-Create named adapters with `get_peft_model(..., adapter_name="task1")` and `add_adapter("task2", config)`. `model.set_adapter("task2")` selects one task. Adapters on the same physical FFN must use the same branch role, while widths and initialization may differ. Native shared and routed FFNs are separate targets; public and routed branches in a model without native shared FFNs share a physical target.
-
-For cumulative training, activate both adapters through the tuner, then freeze the earlier one:
-
-```python
-model.base_model.set_adapter(["task1", "task2"])
-model.set_requires_grad("task1", requires_grad=False)
-model.set_requires_grad("task2", requires_grad=True)
-model.zero_grad(set_to_none=True)
-optimizer = torch.optim.AdamW(
-    [parameter for parameter in model.parameters() if parameter.requires_grad],
-    lr=1e-3,
-)
-```
-
-- After adding or switching adapters, reapply the freeze settings and rebuild the optimizer for the trainable parameters.
-- Save all required adapters with `selected_adapters`, including earlier adapters whose `modules_to_save` copies are part of the model.
-- To resume training, save the optimizer state and activation policy alongside the adapter checkpoints.
-- Freezing an earlier adapter keeps its parameters fixed; an active new adapter still contributes to the model's outputs.
-
-## Saving and structural merging
-
-Use the standard PEFT checkpoint APIs and reload the same base model:
+If Cortex cannot infer or verify a config for the merged model, `merge_and_unload()` warns with the reason and leaves the config unchanged, so the merged model cannot be loaded with `from_pretrained`. This happens e.g. if the width of an FFN is not determined by a single integer config field whose name contains `intermediate`, or if such a field also determines the shapes of other parameters. Then, load the saved adapter and merge it whenever a merged model is needed:
 
 ```python
 from peft import PeftModel
 
-model.save_pretrained("structural-adapter")
-base_model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B")
-restored = PeftModel.from_pretrained(base_model, "structural-adapter").eval()
-
-merged = restored.merge_and_unload(safe_merge=True)
-merged.save_pretrained("structural-native")
-native = AutoModelForCausalLM.from_pretrained("structural-native")
+base_model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B")
+merged_model = PeftModel.from_pretrained(base_model, "cortex-adapter").merge_and_unload()
 ```
 
-Saved configurations retain resolved target paths and roles. Create a fresh `CortexConfig` for a different model, and retain the saved configuration when loading an adapter; `key_mapping` alone does not remap its target roles.
-
-`merge_adapter` expands the native FFN with the selected adapter channels; `unmerge_adapter` restores the original FFN. `merge_and_unload` returns the expanded native model and removes all adapter wrappers, including unselected adapters. Already-merged channels remain in the exported model. To export only a selected adapter after earlier merges:
-
-```python
-model.unmerge_adapter()
-exported = model.merge_and_unload(adapter_names=["task2"], safe_merge=True)
-```
-
-For each `modules_to_save` module, export retains the copy belonging to the selected adapter, even if another adapter is currently active. If none of the selected adapters has a copy, export retains the original module. Selecting multiple copies of the same module raises an error before merging; different saved modules can belong to different selected adapters.
-
-Keep adapter checkpoints if you need task switching. Unmerge before adding another adapter to an existing merged wrapper. For sequential training on an exported model, inject a fresh adapter into the returned native model. Small floating-point differences between merged and unmerged outputs are expected.
-
-Native export updates the configuration widths needed for reloading the model. For inferred layouts, Cortex uses conventional width fields such as `intermediate_size`, `moe_intermediate_size`, and `shared_expert_intermediate_size`. If the field cannot account for the original FFN width, keep the adapter checkpoint or add a dedicated export rule. A custom model must handle any additional modules that read the same width: for example, a classifier sized from `intermediate_size` also needs to match the updated config on reload. Exporting a public branch copies its added channels into every routed expert, increasing storage for those channels by the expert count.
+Merged MoE models have wider experts. If the default `grouped_mm` experts implementation fails with these widths, e.g. because the kernel requires aligned widths, load the merged model with `experts_implementation="eager"`.
 
 ## Limitations
 
-- **Weights and layouts:** use floating-point weights. Quantized projections, tensor/expert-parallel shards, unsupported FFN computations, and expert-internal output normalization (`has_post_expert_norm=True`) are unsupported.
-- **MoE kernels:** keep the native MoE parent forward; kernels limited to attention or normalization can still be used. Reload exported MoE models with `experts_implementation="eager"` to accommodate expanded widths. Cortex does not include a fused routed-adapter kernel.
-- **Offload:** CPU placement and `low_cpu_mem_usage=True` adapter loading are supported. Active Accelerate CPU/disk offload hooks are unsupported.
-- **Merging:** merge with full weights available on an unpartitioned model, outside the distributed training engine. Adapter biases require corresponding biases in the native FFN.
-- **Failure recovery:** merge, unmerge, and export update layers sequentially and are not atomic. `safe_merge=True` checks for non-finite values. If an operation fails partway through, reload the base model and saved adapter checkpoint.
-- **Distributed and compiled execution:** DDP and DeepSpeed ZeRO training have been tested with dense and MoE models, including GPT-OSS-20B. Multi-rank FSDP and compiled execution have not been validated.
+- Quantized base weights and tensor or expert parallelism are not supported.
+- For MoE models, the MoE blocks must call their `experts` module. Kernels that replace the forward of the whole MoE block, like the hub kernel used by GPT-OSS with `use_kernels=True`, bypass the adapter.
+- Merging requires the full weights in memory, e.g. it does not work with DeepSpeed ZeRO-3 or with weights that are offloaded to the CPU or disk with Accelerate.
+- `init_weights="sample"` copies weights of the base model, so they must be loaded, i.e. not offloaded to the CPU or disk with Accelerate.
+
+## Benchmark overview
+
+<iframe
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=CORTEX"
+	frameborder="0"
+	width="850"
+	height="1000"
+></iframe>
+
+## Citation
+
+If you use Cortex in your research, please cite [Cortex: Consolidating Context into Parametric Memory](https://arxiv.org/abs/2610.20399).
+
+```bibtex
+@misc{zhang2026cortex,
+  title = {Cortex: Consolidating Context into Parametric Memory},
+  author = {Jintian Zhang and Feng He and Xinnian Liang and Ziwen Xu and Haoming Xu and Haojing Huang and Shuangzhi Wu and Ningyu Zhang},
+  year = {2026},
+  eprint = {2610.20399},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.CL},
+  url = {https://arxiv.org/abs/2610.20399}
+}
+```
+
+# API
 
 ## CortexConfig
 
 [[autodoc]] tuners.cortex.config.CortexConfig
 
-## CortexFfnSpec
-
-[[autodoc]] tuners.cortex.config.CortexFfnSpec
-
-## CortexMoeSpec
-
-[[autodoc]] tuners.cortex.config.CortexMoeSpec
-
 ## CortexModel
 
 [[autodoc]] tuners.cortex.model.CortexModel
-    - merge_adapter
-    - unmerge_adapter
-    - merge_and_unload
-    - unload

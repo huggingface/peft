@@ -14,16 +14,11 @@
 
 from peft.utils import register_peft_method
 
-from .config import CortexConfig, CortexFfnSpec, CortexMoeSpec
-from .layer import CortexLayer
+from .config import CortexConfig
+from .layer import CortexExperts, CortexLayer, CortexMLP
 from .model import CortexModel
 
 
-__all__ = ["CortexConfig", "CortexFfnSpec", "CortexLayer", "CortexModel", "CortexMoeSpec"]
+__all__ = ["CortexConfig", "CortexExperts", "CortexLayer", "CortexMLP", "CortexModel"]
 
-register_peft_method(
-    name="cortex",
-    config_cls=CortexConfig,
-    model_cls=CortexModel,
-    prefix="cortex_",
-)
+register_peft_method(name="cortex", config_cls=CortexConfig, model_cls=CortexModel)
