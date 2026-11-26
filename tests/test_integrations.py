@@ -199,13 +199,9 @@ class TestTransformersV5:
 
     @pytest.fixture
     def model_dtype(self):
-        # PyTorch has no fast CPU kernels for float16: the op lists that can autocast to float16 are defined for
-        # CUDA and XPU only, whereas the CPU lists contain bfloat16 and float32, see
-        # https://pytorch.org/docs/stable/amp.html#cpu-op-specific-behavior. A float16 forward pass on CPU is thus
-        # much slower than a float32 one, which is very noticeable when LoRA targets fused MoE expert parameters,
-        # as a low-rank product is folded into the full expert weights on every forward pass. These tests only
-        # check the logits produced by the converted weights, so the dtype of the forward pass is irrelevant and
-        # float32 is used on CPU. On hardware accelerators, the dtype of the checkpoint is kept.
+        # float16 is much slower than float32 on CPU for some ops, e.g. the baddbmm that folds the LoRA factors into
+        # the expert weights here. These tests only check the logits of the converted weights, so the dtype of the
+        # forward pass is irrelevant; on accelerators, keep the dtype of the checkpoint.
         if self.torch_device == "cpu":
             return torch.float32
         return torch.float16

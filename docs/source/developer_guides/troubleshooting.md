@@ -91,9 +91,9 @@ Disadvantages of half precision adapter:
 
 Note that for most use cases, overall runtime and memory cost will be determined by the size of the base model and by the dataset, while the dtype of the PEFT adapter will only have a small impact.
 
-### Running a model in float16 on CPU is much slower
+### Running a model in float16 on CPU can be much slower
 
-If you run a model that was loaded in float16 (fp16) on the CPU, the forward pass can be much slower than the same model loaded in float32 (fp32) -- often by an order of magnitude. This is not specific to PEFT but to PyTorch, which does not offer fast CPU kernels for fp16. In the PyTorch autocast op listings, for instance, "ops that can autocast to float16" are defined for CUDA and XPU only, while the listing for CPU contains just bfloat16 and float32, see [CPU Op-Specific Behavior](https://pytorch.org/docs/stable/amp.html#cpu-op-specific-behavior).
+If you run a model that was loaded in float16 (fp16) on the CPU, the forward pass can be much slower than for the same model loaded in float32 (fp32). How large the difference is depends on the ops the model uses, as PyTorch's CPU kernels are not equally well optimized for all dtypes. For a Mixtral model with LoRA on the fused expert parameters, for instance, a forward pass took 18 s in fp16 but 0.8 s in fp32 on the same CPU. The time there is spent in `baddbmm`, which folds the low-rank product into the full expert weights on every forward pass and is about 20x slower in fp16 than in fp32 or bfloat16 (bf16); ops like `linear` or elementwise additions are barely affected.
 
 This can also happen implicitly: if the checkpoint on the Hub stores `torch_dtype: float16`, then loading it without passing a dtype gives you an fp16 model, even on CPU. Pass the dtype explicitly to avoid this:
 
