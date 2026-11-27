@@ -1235,3 +1235,16 @@ class TestInferDevice:
 
         monkeypatch.setattr(_FakeAccelerator, "is_available", staticmethod(lambda: False))
         assert infer_device() == "cpu"
+
+    @pytest.mark.parametrize("device", ["neuron", "tpu", "privateuseone", "mps"])
+    def test_load_peft_weights_out_of_tree_backend_device(self, tmp_path, device):
+        import safetensors.torch
+
+        from peft.utils.save_and_load import load_peft_weights
+
+        state_dict = {"lora_A.weight": torch.randn(2, 2)}
+        safetensors.torch.save_file(state_dict, tmp_path / "adapter_model.safetensors")
+
+        loaded = load_peft_weights(str(tmp_path), device=device)
+        assert "lora_A.weight" in loaded
+        assert loaded["lora_A.weight"].device == torch.device("cpu")

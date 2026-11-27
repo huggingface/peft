@@ -830,12 +830,24 @@ def load_peft_weights(
                 )
 
     if use_safetensors:
-        if hasattr(torch.backends, "mps") and (device == torch.device("mps")):
+        device_type = device.type if isinstance(device, torch.device) else str(device).split(":")[0].lower()
+        # safetensors only supports loading directly to specific in-tree device types:
+        # cpu, cuda, npu, xpu, xla, mlu, musa, hpu. For mps and out-of-tree backends
+        # (e.g. neuron, tpu, privateuseone), load to cpu and let set_peft_model_state_dict
+        # transfer weights to the target device.
+        supported_devices = {"cpu", "cuda", "npu", "xpu", "xla", "mlu", "musa", "hpu"}
+        if device_type not in supported_devices:
             adapters_weights = safe_load_file(filename, device="cpu")
         else:
-            adapters_weights = safe_load_file(filename, device=device)
+            try:
+                adapters_weights = safe_load_file(filename, device=device)
+            except Exception:
+                adapters_weights = safe_load_file(filename, device="cpu")
     else:
-        adapters_weights = torch.load(filename, map_location=torch.device(device), weights_only=True)
+        try:
+            adapters_weights = torch.load(filename, map_location=torch.device(device), weights_only=True)
+        except Exception:
+            adapters_weights = torch.load(filename, map_location=torch.device("cpu"), weights_only=True)
 
     if not key_mapping:
         remapped_adapters_weights = adapters_weights
