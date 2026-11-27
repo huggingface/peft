@@ -176,8 +176,10 @@ def _filter_state_dict_for_adapter_name(
     return filtered_state_dict
 
 
-def _gather_state_dict_for_save(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-    """Gather DTensors into full CPU tensors. All participating ranks must call this function."""
+def _gather_state_dict_for_save(
+    state_dict: dict[str, torch.Tensor], *, to_cpu: bool = True
+) -> dict[str, torch.Tensor]:
+    """Gather DTensors into full tensors on all participating ranks; optionally normalize to CPU for export."""
     # Adapted from transformers.distributed.tensor_parallel.gather_state_dict_for_save, without unused TP arguments.
     # Vendored so FSDP2 saving also works with Transformers versions that predate DTensor TP.
     # https://github.com/huggingface/transformers/blob/144ecf007b8b4f2910da104c84a79801db6985a6/src/transformers/distributed/tensor_parallel.py#L749-L767
@@ -192,7 +194,7 @@ def _gather_state_dict_for_save(state_dict: dict[str, torch.Tensor]) -> dict[str
         if isinstance(tensor, torch.Tensor):
             if isinstance(tensor, DTensor):
                 tensor = tensor.full_tensor()
-            gathered[key] = tensor.detach().cpu().contiguous()
+            gathered[key] = tensor.detach().cpu().contiguous() if to_cpu else tensor
         else:
             gathered[key] = tensor
     return gathered
@@ -458,6 +460,26 @@ def _reshard_dtensor_values_for_load(
             # Neither the global nor the local shape matches: leave it as-is for the normal mismatch handling.
             continue
         state_dict[key] = dtensor_from_local_like(tensor, ref)
+    return state_dict
+
+
+def _distribute_state_dict_like_parameters(
+    model: torch.nn.Module, state_dict: dict[str, torch.Tensor]
+) -> dict[str, torch.Tensor]:
+    """Distribute full checkpoint tensors using their destination parameters' mesh and placements."""
+    from torch.distributed.tensor import DTensor, distribute_tensor
+
+    parameters = dict(model.named_parameters())
+    for key, value in state_dict.items():
+        reference = parameters.get(key)
+        if not isinstance(reference, DTensor) or isinstance(value, DTensor):
+            continue
+
+        mesh = reference.device_mesh
+        # During meta loading, the mesh is the only source of the destination device type.
+        device = mesh.device_type if reference.is_meta else reference.device
+        state_dict[key] = distribute_tensor(value.to(device), mesh, reference.placements)
+
     return state_dict
 
 
