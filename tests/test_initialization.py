@@ -33,6 +33,7 @@ from scipy import stats
 from torch import nn
 from transformers import (
     AutoModelForCausalLM,
+    AutoModelForSeq2SeqLM,
     DistilBertConfig,
     DistilBertForSequenceClassification,
     LlamaConfig,
@@ -41,6 +42,7 @@ from transformers import (
 from transformers.pytorch_utils import Conv1D
 
 from peft import (
+    ActivationSteeringConfig,
     AdaLoraConfig,
     AdamssConfig,
     BeftConfig,
@@ -8092,3 +8094,74 @@ class TestAdapterNameCollisionFiltering:
             module_name = key.rpartition(".")[0]
             weight = model.get_submodule(module_name)["lora_A"].weight
             assert torch.equal(lora_a_state_dict[key], weight)
+
+
+class TestActivationSteeringInitialization:
+    @pytest.fixture
+    def model(self):
+        block = nn.Sequential()
+        block.add_module("down_proj", nn.Linear(3, 2, bias=False))
+        model = nn.Sequential()
+        model.add_module("block", block)
+        return model
+
+    def get_config(self, **kwargs):
+        spec = {"indices": [0], "init_val": -1.0}
+        spec.update(kwargs)
+        return ActivationSteeringConfig(steering_pattern={"block.down_proj": spec})
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"indices": []},
+            {"indices": [0, 0]},
+            {"indices": [-1]},
+            {"init_val": float("nan")},
+            {"indices": [0, 1], "init_val": [1.0]},
+            {"dose": 1.0},
+        ],
+    )
+    def test_invalid_steering_configuration_raises(self, kwargs):
+        with pytest.raises(ValueError):
+            self.get_config(**kwargs)
+
+    def test_missing_targets_raise(self):
+        with pytest.raises(ValueError, match="Specify `target_modules`"):
+            ActivationSteeringConfig()
+
+    def test_invalid_dose_unit_raises(self):
+        with pytest.raises(ValueError, match="dose_unit"):
+            ActivationSteeringConfig(target_modules=["down_proj"], dose_unit="residual")
+
+    def test_steering_pattern_is_the_only_target(self, model):
+        config = self.get_config()
+        assert config.target_modules is None
+        model = get_peft_model(model, config)
+        assert model.base_model.targeted_module_names == ["block.down_proj"]
+        # target_modules stays unset, so the saved config has the steering pattern as its only targets.
+        assert model.peft_config["default"].target_modules is None
+
+    @pytest.mark.parametrize(
+        "kwargs", [{"target_modules": ["down_proj"]}, {"layers_to_transform": [0]}, {"exclude_modules": ["up_proj"]}]
+    )
+    def test_target_filters_with_steering_pattern_raise(self, kwargs):
+        pattern = {"block.down_proj": {"indices": [0], "init_val": 1.0}}
+        with pytest.raises(ValueError, match="cannot be combined with `steering_pattern`"):
+            ActivationSteeringConfig(steering_pattern=pattern, **kwargs)
+
+    @pytest.mark.parametrize(
+        "target,indices",
+        [("missing.down_proj", [0]), ("block.missing", [0]), ("block.down_proj", [3])],
+    )
+    def test_unknown_target_or_neuron_raises(self, model, target, indices):
+        config = ActivationSteeringConfig(steering_pattern={target: {"indices": indices, "init_val": 1.0}})
+        with pytest.raises(ValueError):
+            get_peft_model(model, config)
+
+    def test_encoder_decoder_model_raises(self):
+        model_id = "peft-internal-testing/tiny-random-BartForConditionalGeneration"
+        with hub_online_once(model_id):
+            model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+        config = ActivationSteeringConfig(target_modules=["fc2"])
+        with pytest.raises(ValueError, match="encoder-decoder"):
+            get_peft_model(model, config)
