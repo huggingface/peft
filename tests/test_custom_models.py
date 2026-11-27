@@ -9167,6 +9167,27 @@ class TestPeftFsdpStateDict:
             output_after = model(**X)
         assert torch.allclose(output_after, output_before)
 
+    def test_load_adapter_into_fsdp_wrapped_model(self):
+        # Regression test for loading an adapter directly into an FSDP-wrapped model, see #4223.
+        source = get_peft_model(
+            nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 2)),
+            LoraConfig(r=2, target_modules=["0", "1"], init_lora_weights=False),
+        )
+        target = get_peft_model(
+            nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 2)), LoraConfig(r=2, target_modules=["0", "1"])
+        )
+        target = FSDP(target, use_orig_params=True, device_id=self.torch_device)
+
+        state_dict = get_peft_model_state_dict(source)
+        result = set_peft_model_state_dict(target, state_dict)
+
+        assert not result.unexpected_keys
+        source_params = get_peft_model_state_dict(source)
+        target_params = get_peft_model_state_dict(target.module)
+        assert source_params.keys() == target_params.keys()
+        for name in source_params:
+            assert torch.allclose(source_params[name].detach().cpu(), target_params[name].detach().cpu())
+
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     @pytest.mark.parametrize("bias_arg", ["bias_all", "bias_peft_method_only"])
     def test_save_load_roundtrip_fsdp_wrapped_learnable_bias(

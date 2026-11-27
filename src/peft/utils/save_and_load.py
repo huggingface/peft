@@ -682,7 +682,7 @@ def set_peft_model_state_dict(
     # can introduce the base model prefix, but when loading the state_dict directly into the model (i.e. no PeftModel,
     # e.g. when using set_peft_model_state_dict), there is no prefix.
     prefix = "base_model.model."
-    requires_prefix = any(n.startswith(prefix) for n, _ in model.named_parameters())
+    requires_prefix = any(remove_torch_wrapper_names(n).startswith(prefix) for n, _ in model.named_parameters())
     if not requires_prefix:
         peft_model_state_dict = {k.removeprefix(prefix): v for k, v in peft_model_state_dict.items()}
 
