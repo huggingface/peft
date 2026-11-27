@@ -469,6 +469,7 @@ class TestTorchCompileCausalLM:
         with torch.inference_mode():
             output_other = model(sample)
 
+        model.base_model.set_adapter(["default", "other"])
         model.base_model.merge_adapter(["default", "other"])
         with torch.inference_mode():
             output_merged = model(sample)

@@ -25,6 +25,7 @@ from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
     _check_adapters_not_merged,
+    _check_unique_adapter_names,
     _delete_auxiliary_adapter,
     onload_layer,
 )
@@ -214,6 +215,7 @@ class MixedModel(BaseTuner):
         return new_module
 
     def set_adapter(self, adapter_name: Union[str, list[str]], inference_mode: bool = False) -> None:
+        _check_unique_adapter_names(adapter_name)
         _set_adapter(self, adapter_name, inference_mode=inference_mode)  # handle auxiliary modules
         for module in self.model.modules():
             if isinstance(module, Layers):
@@ -241,7 +243,13 @@ class MixedModel(BaseTuner):
         Nested tuner layers are merged innermost first, like in the forward pass. The inherited `unmerge_adapter`
         unmerges outermost first, which is the inverse.
         """
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+        if isinstance(adapter_names, str):
+            raise TypeError(f"adapter_names should be a list of strings, got {adapter_names!r}.")
         self._check_merge_allowed()
+        _check_unique_adapter_names(adapter_names)
+
         for name, module in self.model.named_modules():
             # nested tuner layers (the base_layer of another tuner layer) are merged as part of the outermost layer's chain
             if not isinstance(module, BaseTunerLayer) or name.endswith(".base_layer"):
@@ -260,6 +268,12 @@ class MixedModel(BaseTuner):
         if merge:
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge layers when the model is gptq quantized")
+
+            # Unloading selects its own adapters to merge. Remove previous merges so excluded adapters and their order
+            # do not affect the exported weights.
+            for module in self.model.modules():
+                if isinstance(module, Layers) and module.merged:
+                    module.unmerge()
 
         key_list = [key for key, _ in self.model.named_modules() if not any(prefix in key for prefix in PREFIXES)]
         desc = "Unloading " + ("and merging " if merge else "") + "model"

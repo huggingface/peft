@@ -785,12 +785,65 @@ class TestMixedAdapterTypes(unittest.TestCase):
         output_deleted_01 = peft_model(input)
         assert torch.allclose(output_deleted_01, output_base, atol=atol, rtol=rtol)
 
+    @parameterized.expand(["set_adapter", "merge_adapter", "merge_and_unload"])
+    def test_duplicate_adapter_names_rejected(self, operation):
+        model = self._get_model(
+            SimpleNet, LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False), "adapter0"
+        )
+        model.add_adapter("adapter1", LoHaConfig(target_modules=["lin0"], init_weights=False))
+        model.set_adapter(["adapter0", "adapter1"])
+        model.base_model.merge_adapter()
+        weights = {name: tensor.detach().clone() for name, tensor in model.state_dict().items()}
+        layers = [layer for layer in model.modules() if isinstance(layer, BaseTunerLayer)]
+        merged = [list(layer.merged_adapters) for layer in layers]
+        requires_grad = {name: parameter.requires_grad for name, parameter in model.named_parameters()}
+
+        msg = "Adapter names must be unique. Duplicate adapter names: ['adapter0']."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            if operation == "set_adapter":
+                model.set_adapter(["adapter0", "adapter1", "adapter0"])
+            else:
+                getattr(model, operation)(adapter_names=["adapter0", "adapter1", "adapter0"])
+
+        # initial state of the model is preserved
+        assert model.active_adapters == ["adapter0", "adapter1"]
+        assert [layer.active_adapters for layer in layers] == [["adapter0", "adapter1"]] * len(layers)
+        assert [layer.merged_adapters for layer in layers] == merged
+        assert model.state_dict().keys() == weights.keys()
+        for name, tensor in model.state_dict().items():
+            assert torch.equal(tensor, weights[name]), name
+        assert {name: parameter.requires_grad for name, parameter in model.named_parameters()} == requires_grad
+
+    def test_export_replaces_previously_merged_adapter(self):
+        # When calling mere_and_unload with adapter1, we should get back a model with exactly adapter1 merged, even if
+        # adapter0 was merged at the time of the call.
+        torch.manual_seed(0)
+        model = get_peft_model(
+            SimpleNet().eval().to(self.torch_device),
+            LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False),
+            adapter_name="adapter0",
+            mixed=True,
+        )
+        model.add_adapter("adapter1", LoHaConfig(target_modules=["lin0"], init_weights=False))
+        inputs = torch.randn(2, 10, device=self.torch_device)
+        model.eval()
+        model.set_adapter(["adapter1"])
+        with torch.inference_mode():
+            expected = model(inputs)
+
+        model.set_adapter(["adapter0"])
+        model.base_model.merge_adapter()
+        exported = model.merge_and_unload(adapter_names=["adapter1"])
+        assert torch.allclose(exported(inputs), expected, atol=1e-5, rtol=1e-5)
+        assert not any(isinstance(layer, BaseTunerLayer) for layer in exported.modules())
+
     def test_delete_merged_adapter_is_atomic(self):
         model = SimpleNet().eval().to(self.torch_device)
         config0 = LoraConfig(target_modules=["lin0"])
         peft_model = get_peft_model(model, config0, "adapter0", mixed=True)
         config1 = LoHaConfig(target_modules=["lin1"])
         peft_model.add_adapter("adapter1", config1)
+        peft_model.set_adapter(["adapter1"])
         peft_model.base_model.merge_adapter(adapter_names=["adapter1"])
 
         msg = "Cannot delete adapter(s) ['adapter1'] while they are merged. Please unmerge them first."

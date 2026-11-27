@@ -5187,11 +5187,18 @@ class TestPeftTorchao:
         config_kwargs = {"target_modules": ["q_proj", "v_proj"], "init_lora_weights": False}
         model_one_call = get_peft_model(model, LoraConfig(**config_kwargs))
         model_one_call.add_adapter("other", LoraConfig(**config_kwargs))
+        model_one_call.base_model.set_adapter(["default", "other"])
         model_one_by_one = deepcopy(model_one_call)
 
         model_one_call.merge_adapter(adapter_names=["default", "other"])
-        model_one_by_one.merge_adapter(adapter_names=["default"])
-        model_one_by_one.merge_adapter(adapter_names=["other"])
+        # Since PEFT v1.0, we cannot call `merge_adapter(["default"]); merge_adapter(["other"])` because merging a
+        # subset of active adapters is not allowed. Merging on a per layer basis side-steps this restriction. Therefore,
+        # triggering the original error is not possible through 'public' API anymore. It's still good to test this
+        # though, so we keep the test.
+        for layer in model_one_by_one.modules():
+            if isinstance(layer, BaseTunerLayer):
+                layer.merge(adapter_names=["default"])
+                layer.merge(adapter_names=["other"])
 
         layers_one_call = dict(model_one_call.named_modules())
         lora_layers = [

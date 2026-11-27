@@ -20,6 +20,7 @@ import re
 import textwrap
 import warnings
 from abc import ABC, abstractmethod
+from collections import Counter
 from collections.abc import Sequence
 from contextlib import contextmanager, nullcontext
 from typing import Any, Optional, Union, overload
@@ -363,6 +364,12 @@ class BaseTuner(nn.Module, ABC):
             return [self.active_adapter]
         # is already a list of str
         return self.active_adapter
+
+    @property
+    def merged_adapters(self) -> list[str]:
+        """Adapter names merged into at least one tuner layer, sorted alphabetically."""
+        tuner_layers = (layer for layer in self.modules() if isinstance(layer, BaseTunerLayer))
+        return sorted({adapter for layer in tuner_layers for adapter in layer.merged_adapters})
 
     def forward(self, *args: Any, **kwargs: Any):
         return self.model(*args, **kwargs)
@@ -728,6 +735,13 @@ class BaseTuner(nn.Module, ABC):
                     if isinstance(module, ModulesToSaveWrapper):
                         module.check_set_adapter(adapter_names)
 
+            # Export selects its own composition. Remove previous merges so excluded adapters and their order do not
+            # carry over into the exported weights.
+            for module in self.model.modules():
+                if isinstance(module, BaseTunerLayer) and module.merged:
+                    with onload_layer(module):
+                        module.unmerge()
+
         # visit all modules except those inside tuner layers (e.g. lora_A), note that the tuner layers themselves must
         # be part of the list, as they are the ones being unloaded; a module lies inside a tuner layer if its parent
         # module or any ancestor thereof is a tuner layer
@@ -799,8 +813,10 @@ class BaseTuner(nn.Module, ABC):
                 whether to activate the safe merging check to check if there is any potential Nan in the adapter
                 weights.
             adapter_names (`List[str]`, *optional*):
-                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
-                to `None`.
+                The adapters to include in the exported model, in composition order. These may be inactive. If `None`,
+                use the active adapters; an empty list exports the base model without adapter contributions. Names must
+                be unique; duplicates raise `ValueError` before weights or modules change. Previously merged adapters
+                are unmerged before applying the export selection.
 
         Example:
 
@@ -815,6 +831,7 @@ class BaseTuner(nn.Module, ABC):
         >>> merged_model = model.merge_and_unload()
         ```
         """
+        _check_unique_adapter_names(self.active_adapters if adapter_names is None else adapter_names)
         return self._unload_and_optionally_merge(
             progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
         )
@@ -1388,32 +1405,79 @@ class BaseTuner(nn.Module, ABC):
         memory, which is required to unmerge the adapters. In order to merge the adapter weights without keeping them
         in memory, please call `merge_and_unload`.
 
-        Once a layer has merged adapter weights, its forward pass uses only those weights. Therefore, if
-        `adapter_names` does not cover all active adapters, the remaining active adapters are silently not applied,
-        even though they are still reported as active. Either merge all active adapters or call `unmerge_adapter`
-        first. Note that this behavior is planned to change in the v1.0 release.
+        Merging preserves the active selection. Each affected layer must merge all of its applicable active adapters in
+        their active order. Inactive adapters, partial per-layer selections, and order mismatches are rejected before
+        any layer is merged. Adapters targeting disjoint layers may be merged separately. Duplicate adapter names raise
+        `ValueError` before any layer is merged.
 
         Args:
             adapter_names (`list[str]`, *optional*):
-                The list of adapter names that should be merged. If `None`, all active adapters will be merged.
-                Defaults to `None`.
+                The list of adapter names that should be merged. If `None`, all active adapters will be merged. An
+                empty list does nothing. Defaults to `None`.
             safe_merge (`bool`, *optional*):
                 If `True`, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
         """
-        # TODO: update docstring about the interaction of active/merged adapters for PEFT v1.0
         # Note: The order of arguments here is:
         #   adapter_names, safe_merge
         # For layer.merge, the order is:
         #   safe_merge, adapter_names
         # This is not so nice but this method here started with only adapter_names, thus putting safe_merge first would
         # be a backwards incompatible change.
+        layers_to_merge = self._get_layers_to_merge(adapter_names)
+        for module, requested in layers_to_merge:
+            with onload_layer(module):
+                module.merge(adapter_names=requested, safe_merge=safe_merge)
+
+    def _get_layers_to_merge(
+        self, adapter_names: Optional[list[str]] = None
+    ) -> list[tuple[BaseTunerLayer, list[str]]]:
+        """Validates adapters to be merged and returns each selected layer with its applicable adapters."""
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+        if isinstance(adapter_names, str):
+            raise TypeError(f"adapter_names should be a list of strings, got {adapter_names!r}.")
+        _check_unique_adapter_names(adapter_names)
+        if not adapter_names:
+            return []
+
         self._check_merge_allowed()
-        for module in self.model.modules():
-            if isinstance(module, BaseTunerLayer):
-                with onload_layer(module):
-                    module.merge(adapter_names=adapter_names, safe_merge=safe_merge)
+
+        inactive = [name for name in adapter_names if name not in self.active_adapters]
+        if inactive:
+            raise ValueError(
+                f"Cannot merge inactive adapter(s) {inactive}. Active adapters are {self.active_adapters}. "
+                "Activate the adapters with set_adapter() before merging."
+            )
+
+        # Validate every layer before merging any weights, including when the requested adapters are already merged.
+        layers_to_merge = []
+        for name, module in self.model.named_modules():
+            if not isinstance(module, BaseTunerLayer):
+                continue
+
+            available = module._all_available_adapter_names()
+            requested = [adapter for adapter in adapter_names if adapter in available]
+            if not requested:
+                continue
+            active = [adapter for adapter in module.active_adapters if adapter in available]
+
+            if set(requested) != set(active):
+                raise ValueError(
+                    f"Cannot partially merge active adapters in layer '{name}': requested {requested}, but active "
+                    f"adapters are {active}. Merge all active adapters in that layer or change the active selection "
+                    "with `model.set_adapter`."
+                )
+            if requested != active:
+                raise ValueError(
+                    f"Cannot merge adapters in a different order from the active adapters in layer '{name}': requested "
+                    f"{requested}, but active adapters are {active}. Pass adapter_names={active} or change the active "
+                    "adapter order with `model.set_adapter`."
+                )
+            layers_to_merge.append((module, requested))
+
+        return layers_to_merge
 
     def unmerge_adapter(self):
         """
@@ -1429,7 +1493,7 @@ class BaseTuner(nn.Module, ABC):
 
         Args:
             adapter_name (str, list[str]):
-                The name(s) of the adapter(s) to set as active
+                The name(s) of the adapter(s) to set as active. Names must be unique; duplicates raise `ValueError`.
             inference_mode (bool, optional):
                  Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
@@ -2750,6 +2814,16 @@ def find_parameter_name_by_module(model: nn.Module, reference_module: nn.Module)
 ###############################
 
 
+def _check_unique_adapter_names(adapter_names: str | list[str]) -> None:
+    if isinstance(adapter_names, str):
+        return
+
+    counts = Counter(adapter_names)
+    duplicates = sorted(name for name, count in counts.items() if count > 1)
+    if duplicates:
+        raise ValueError(f"Adapter names must be unique. Duplicate adapter names: {duplicates}.")
+
+
 def set_adapter(
     model,
     adapter_name: str | list[str],
@@ -2765,12 +2839,13 @@ def set_adapter(
         model (`nn.Module`):
             The model on which the adapter(s) should be set.
         adapter_name (str, list[str]):
-            The name(s) of the adapter(s) to set as active
+            The name(s) of the adapter(s) to set as active. Names must be unique; duplicates raise `ValueError`.
         inference_mode (bool, optional):
              Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         layer_cls (type, optional):
             The class of the adapter layer. Defaults to `BaseTunerLayer`.
     """
+    _check_unique_adapter_names(adapter_name)
     _set_adapter(model, adapter_name, inference_mode=inference_mode)  # auxiliary modules
     for module in model.modules():
         if isinstance(module, layer_cls):

@@ -564,34 +564,42 @@ trainer.train()
 > [!TIP]
 > This section deals with using multiple adapters _of the same type_ on the same model, for example, using multiple LoRA adapters at the same time. It does not apply to using _different types_ of adapters on the same model, for example one LoRA adapter and one LoHa adapter. For this, please check [`PeftMixedModel`](https://huggingface.co/docs/peft/developer_guides/mixed_models).
 
-### Merging only some of the active adapters
+### Relationship between active adapters and merged adapters
 
-When adapter weights are merged into the base weights, the affected layers no longer apply any adapter during the forward pass, they only use the merged base weights. Therefore, if several adapters are active but only some of them are merged, the adapters that are still active but not merged are silently not applied:
+For many PEFT methods such as LoRA, it's possible to load multiple adapters at the same time. These adapters can be activated or deactivate via `model.set_adapter` and their weights can be merged into the base weights -- if the PEFT method supports it -- with `model.merge_adapter`. But how does PEFT decide which adapters are actually used if active and merged adapters disagree?
+
+The convention in PEFT is the following: Active adapters determine the computation; merging incorporates their updates into the base weights without changing the selection. [`~PeftModel.active_adapters`] continues to include merged adapters, while [`~PeftModel.merged_adapters`] lists the names merged into at least one layer, sorted alphabetically. The latter is an aggregate, not a composition order; use [`~PeftModel.get_layer_status`] to see the merge status on a per-layer level.
+
+PEFT does not allow to merge adapters that are not active, or only a subset of active adapters. Each affected layer must merge all of its applicable active adapters in their active order. Requests containing inactive adapters, only part of a layer's active selection, or a different order raise `ValueError` before any layer is merged. For example, if both adapters target the same layers:
 
 ```python
 model = get_peft_model(base_model, lora_config_0, adapter_name="default")
 model.add_adapter("other", lora_config_1)
+# activate "default" and "other"
 model.base_model.set_adapter(["default", "other"])
 output_both = model(**inputs)
 
-model.merge_adapter(adapter_names=["default"])
-output_merged = model(**inputs)  # this is *not* the same as output_both
+model.merge_adapter(["default", "other"])
+output_merged = model(**inputs)  # matches output_both up to numerical differences
+assert model.active_adapters == ["default", "other"]
+assert model.merged_adapters == ["default", "other"]
+
+# the following merge attempts would raise:
+model.merge_adapter(["default"])
+model.merge_adapter(["other"])
+model.merge_adapter(["other", "default"])
 ```
 
-Here, `output_merged` is the output of the `"default"` adapter alone, even though `"other"` is still listed as active:
+For [`~PeftModel.merge_adapter`], omitting `adapter_names` or passing `None` selects the active adapters, an empty list is a no-op. Repeating a complete merge does not apply the adapters twice. These rules apply across methods that support merging, including methods whose adapter composition is not commutative.
 
-```python
->>> model.get_layer_status()[0].active_adapters
-['default', 'other']
->>> model.get_layer_status()[0].merged_adapters
-['default']
-```
+Only adapters actually present in a layer count. If the adapters target completely disjoint layers, either adapter can be merged separately and their requested order does not matter.
 
-The same applies when an adapter that is *not* active is merged: from then on, the model returns the output of the merged adapter and the active one is ignored. No error or warning is raised in either case. The adapter weights themselves are unaffected, so calling [`~LoraModel.unmerge_adapter`] restores the combined output.
+Adapter names must be unique in selection, merge, and export requests. Duplicate names raise `ValueError` before selection, trainability, weights, or modules change.
 
-To avoid this, either merge all active adapters, i.e. call `model.merge_adapter()` without `adapter_names`, or unmerge before changing which adapters are active.
+Calling [`~PeftModel.set_adapter`] unmerges before changing selection. The sequence `set_adapter("default")`, `merge_adapter(["default"])`, `set_adapter("other")`, `merge_adapter(["other"])` is therefore valid. Disabling adapters temporarily restores the base computation and may unmerge weights. Exiting the disable context restores the selected computation, without guaranteeing that adapters are merged again.
 
-This behavior is consistent across PEFT methods that support merging (LoRA, LoHa, LoKr, IA³, OFT, etc.), since they all share the same logic in the forward pass.
+#### Export selection
 
-> [!WARNING]
-> This behavior is confusing and is planned to change in the PEFT v1.0 release.
+[`~LoraModel.merge_and_unload`] creates a standalone model with its own explicit selection. It may export inactive adapters, a subset of the active adapters, or a different composition order. Previous merges are removed before applying that selection. Omitting `adapter_names` exports the active adapters; passing `[]` exports the base model without adapter contributions. Other method-specific merging restrictions still apply.
+
+For changes required when upgrading existing code, see the [PEFT v1.0 migration guide](migration_1_0#active-and-merged-adapters).

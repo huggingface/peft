@@ -504,9 +504,13 @@ class TestTrainableTokens:
         model = get_peft_model(model, peft_config_1, adapter_name="adapter_1")
         model.add_adapter("adapter_2", peft_config_2)
 
-        model.merge_adapter(adapter_names=["adapter_1"])
+        # Note: It is no longer possible since PEFT v1.0 to merge a subset of active adapters. Therefore, a test that
+        # merges 'adapter_1', then tries to merge 'adapter_2' would be rejected a priori. To still be able to check
+        # this, we thus merge on the layer level, which does not perform the dhecks.
+        layer = next(module for module in model.modules() if isinstance(module, TrainableTokensLayer))
+        layer.merge(adapter_names=["adapter_1"])
         with pytest.raises(ValueError) as e:
-            model.merge_adapter(adapter_names=["adapter_2"])
+            layer.merge(adapter_names=["adapter_2"])
         assert "adapter_2" in str(e.value)
         assert "are already defined and would result in undefined merging behavior" in str(e.value)
 
@@ -527,8 +531,12 @@ class TestTrainableTokens:
         model = get_peft_model(model, peft_config_1, adapter_name="adapter_1")
         model.add_adapter("adapter_2", peft_config_2)
 
-        model.merge_adapter(adapter_names=["adapter_1"])
-        model.merge_adapter(adapter_names=["adapter_2"])
+        # Note: It is no longer possible since PEFT v1.0 to merge a subset of active adapters. Therefore, a test that
+        # merges 'adapter_1', then tries to merge 'adapter_2' would be rejected a priori. To still be able to check
+        # this, we thus merge on the layer level, which does not perform the dhecks.
+        layer = next(module for module in model.modules() if isinstance(module, TrainableTokensLayer))
+        layer.merge(adapter_names=["adapter_1"])
+        layer.merge(adapter_names=["adapter_2"])
 
         for module in model.modules():
             if isinstance(module, TrainableTokensLayer):

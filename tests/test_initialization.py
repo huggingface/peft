@@ -6276,6 +6276,7 @@ class TestHotSwapping:
 
         # add a second adapter and merge IT, then hotswap the unrelated "default" adapter
         model0.add_adapter("other", config)
+        model0.set_adapter("other")
         model0.merge_adapter(adapter_names=["other"])
 
         # must not raise: the adapter being swapped out ("default") is not merged
