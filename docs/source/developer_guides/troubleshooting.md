@@ -91,6 +91,25 @@ Disadvantages of half precision adapter:
 
 Note that for most use cases, overall runtime and memory cost will be determined by the size of the base model and by the dataset, while the dtype of the PEFT adapter will only have a small impact.
 
+### Running a model in float16 on CPU can be much slower
+
+If you run a model that was loaded in float16 (fp16) on the CPU, the forward pass can be much slower than for the same model loaded in float32 (fp32). How large the difference is depends on the ops the model uses, as PyTorch's CPU kernels are not equally well optimized for all dtypes. For a Mixtral model with LoRA on the fused expert parameters, for instance, a forward pass took 18 s in fp16 but 0.8 s in fp32 on the same CPU. The time there is spent in `baddbmm`, which folds the low-rank product into the full expert weights on every forward pass and is about 20x slower in fp16 than in fp32 or bfloat16 (bf16); ops like `linear` or elementwise additions are barely affected.
+
+This can also happen implicitly: if the checkpoint on the Hub stores `torch_dtype: float16`, then loading it without passing a dtype gives you an fp16 model, even on CPU. Pass the dtype explicitly to avoid this:
+
+```python
+import torch
+from transformers import AutoModelForCausalLM
+
+# implicitly fp16 on CPU if the checkpoint is stored in fp16 -> slow
+model = AutoModelForCausalLM.from_pretrained(model_id)
+
+# explicitly fp32 -> much faster on CPU
+model = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.float32)
+```
+
+If you want to save memory and bfloat16 (bf16) is precise enough for your use case, use that instead -- bf16 is the reduced precision dtype for which PyTorch has optimized CPU kernels.
+
 ## Training runs but the model does not improve
 
 If training appears healthy (the loss goes down, checkpoints are saved without errors) but the resulting model performs no better than the base model, check whether the trainable parameters actually changed during training:
