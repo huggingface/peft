@@ -128,6 +128,18 @@ class RandLoraLayer(BaseTunerLayer):
         self.scaling[adapter_name] = randlora_alpha / r
 
         # non trainable references to randlora_A/B buffers
+        # Preserve the shared projections of adapters that were injected earlier (e.g. via a previous
+        # `inject_adapter_in_model` call): the incoming BufferDicts only contain the new adapter, so
+        # replacing the layer's references would drop the earlier adapters' projections and make them
+        # unusable (see #4235). Entries already present in the incoming dicts win.
+        if self.randlora_A is not None:
+            for name, tensor in self.randlora_A.items():
+                if name not in randlora_A:
+                    randlora_A[name] = tensor
+        if self.randlora_B is not None:
+            for name, tensor in self.randlora_B.items():
+                if name not in randlora_B:
+                    randlora_B[name] = tensor
         self.randlora_A = randlora_A
         self.randlora_B = randlora_B
         if adapter_name not in randlora_A:

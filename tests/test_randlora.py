@@ -25,7 +25,14 @@ from safetensors import safe_open
 from safetensors.torch import save_file
 from torch import nn
 
-from peft import PeftModel, RandLoraConfig, get_peft_model, get_peft_model_state_dict, set_peft_model_state_dict
+from peft import (
+    PeftModel,
+    RandLoraConfig,
+    get_peft_model,
+    get_peft_model_state_dict,
+    inject_adapter_in_model,
+    set_peft_model_state_dict,
+)
 
 
 class MLP(nn.Module):
@@ -95,6 +102,28 @@ class TestRandLora:
         mlp_same_prng.set_adapter("other")
         output_other = mlp_same_prng(input)
         assert not torch.allclose(output_default, output_other, atol=1e-3, rtol=1e-3)
+
+    def test_second_direct_injection_keeps_first_adapter(self, mlp):
+        # https://github.com/huggingface/peft/issues/4235: a second direct injection
+        # must not drop the first adapter's shared projections.
+        torch.manual_seed(0)
+        inject_adapter_in_model(
+            RandLoraConfig(r=4, target_modules=["lin1", "lin2"], init_weights=False), mlp, adapter_name="one"
+        )
+        inject_adapter_in_model(
+            RandLoraConfig(r=4, target_modules=["lin1", "lin2"], init_weights=False), mlp, adapter_name="two"
+        )
+        assert sorted(mlp.lin1.randlora_A) == ["one", "two"]
+        assert sorted(mlp.lin1.randlora_B) == ["one", "two"]
+
+        inputs = torch.randn(5, 10)
+        mlp.lin1.set_adapter("one")
+        mlp.lin2.set_adapter("one")
+        output_one = mlp(inputs)
+        mlp.lin1.set_adapter("two")
+        mlp.lin2.set_adapter("two")
+        output_two = mlp(inputs)
+        assert output_one.shape == output_two.shape == (5, 2)
 
     def test_multiple_adapters_different_prng_raises(self):
         # we cannot have multiple adapters with different prng keys
