@@ -294,6 +294,16 @@ class GloraLayer(BaseTunerLayer):
             self.merged_adapters.clear()
             self.merge(adapter_names=remaining)
 
+    def get_merge_targets(self, adapter_names: list[str]) -> list[str]:
+        # the A and B paths change the weight, the C, D and E paths change the bias (they are only used if the base
+        # layer has a bias)
+        paths_per_target = {"weight": [self.glora_A, self.glora_B], "bias": [self.glora_C, self.glora_D, self.glora_E]}
+        return [
+            target
+            for target, paths in paths_per_target.items()
+            if any(not isinstance(path[name], GloraEmptyPath) for path in paths for name in adapter_names)
+        ]
+
 
 class GloraLinear(nn.Module, GloraLayer):
     """GLoRA adapter wrapping a dense [`~torch.nn.Linear`] `base_layer`."""

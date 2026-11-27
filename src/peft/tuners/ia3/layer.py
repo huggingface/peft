@@ -74,6 +74,12 @@ class IA3Layer(BaseTunerLayer):
             # initialize learned vector with torch.ones
             nn.init.constant_(self.ia3_l[adapter_name], 1.0)
 
+    def get_merge_targets(self, adapter_names: list[str]) -> list[str]:
+        # for layers that are not feedforward, the output is scaled, which includes the bias
+        if not self.is_feedforward and getattr(self.get_base_layer(), "bias", None) is not None:
+            return ["weight", "bias"]
+        return ["weight"]
+
 
 class Linear(nn.Module, IA3Layer):
     # (IA)^3 implemented in a dense layer

@@ -308,6 +308,12 @@ class AdamssLayer(BaseTunerLayer):
         # Set requires_grad via parent class set_adapter (works with ParameterList)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
+    def get_merge_targets(self, adapter_names: list[str]) -> list[str]:
+        # the bias is updated as well
+        if getattr(self.get_base_layer(), "bias", None) is not None:
+            return ["weight", "bias"]
+        return ["weight"]
+
 
 class Linear(nn.Module, AdamssLayer):
     """

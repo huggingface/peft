@@ -68,6 +68,10 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
                 layer.requires_grad_(False)
             self._disable_adapters = True
 
+    def get_merge_targets(self, adapter_names: list[str]) -> list[str]:
+        # merging swaps the layers instead of writing into a tensor of the base layer
+        return []
+
     def merge(self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False):
         # note that there is no actual merging, so whether safe_merge is True or False is irrelevant
         adapter_names = check_adapters_to_merge(self, adapter_names)
