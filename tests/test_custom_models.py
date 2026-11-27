@@ -9182,13 +9182,11 @@ class TestPeftFsdpStateDict:
         result = set_peft_model_state_dict(target, state_dict)
 
         assert not result.unexpected_keys
-        source_params = {n: p for n, p in source.named_parameters() if "lora_" in n}
-        target_params = {
-            n.replace("_fsdp_wrapped_module.", ""): p for n, p in target.named_parameters() if "lora_" in n
-        }
+        source_params = get_peft_model_state_dict(source)
+        target_params = get_peft_model_state_dict(target.module)
         assert source_params.keys() == target_params.keys()
-        for name, param in source_params.items():
-            assert torch.allclose(param.detach().cpu(), target_params[name].detach().cpu())
+        for name in source_params:
+            assert torch.allclose(source_params[name].detach().cpu(), target_params[name].detach().cpu())
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     @pytest.mark.parametrize("bias_arg", ["bias_all", "bias_peft_method_only"])
