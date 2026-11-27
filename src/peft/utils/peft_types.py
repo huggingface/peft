@@ -51,6 +51,7 @@ class PeftType(str, enum.Enum):  # noqa: UP042
     - WAVEFT
     - OSF
     - DELORA
+    - EWORA
     - GRALORA
     - ADAMSS
     - SHADOW
@@ -94,6 +95,7 @@ class PeftType(str, enum.Enum):  # noqa: UP042
     WAVEFT = "WAVEFT"
     OSF = "OSF"
     DELORA = "DELORA"
+    EWORA = "EWORA"
     GRALORA = "GRALORA"
     CARTRIDGE = "CARTRIDGE"
     TINYLORA = "TINYLORA"
