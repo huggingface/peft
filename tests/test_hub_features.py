@@ -13,35 +13,61 @@
 # limitations under the License.
 import copy
 
+import huggingface_hub
 import pytest
 import torch
 from huggingface_hub import ModelCard
-from transformers import AutoModelForCausalLM, AutoTokenizer, GPT2Config, GPT2LMHeadModel
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer, GPT2Config, GPT2LMHeadModel
 
 from peft import AutoPeftModelForCausalLM, LoraConfig, PeftConfig, PeftModel, TaskType, get_peft_model
+from peft.utils import load_peft_weights
 
 from .testing_utils import hub_online_once
 
 
-PEFT_MODELS_TO_TEST = [("peft-internal-testing/test-lora-subfolder", "test")]
+PEFT_MODELS_TO_TEST = [
+    # adapter stored as adapter_model.safetensors in the subfolder
+    ("peft-internal-testing/opt-125m-lora-subfolder", "sub"),
+    # adapter stored as adapter_model.bin in the subfolder
+    ("peft-internal-testing/test-lora-subfolder", "test"),
+]
 
 
-class PeftHubFeaturesTester:
-    # TODO remove when/if Hub is more stable
-    @pytest.mark.xfail(reason="Test is flaky on CI", raises=ValueError)
-    def test_subfolder(self):
+class TestPeftHubFeatures:
+    @pytest.mark.parametrize("model_id, subfolder", PEFT_MODELS_TO_TEST)
+    def test_subfolder(self, model_id, subfolder):
         r"""
         Test if subfolder argument works as expected
         """
-        for model_id, subfolder in PEFT_MODELS_TO_TEST:
+        with hub_online_once(model_id):
             config = PeftConfig.from_pretrained(model_id, subfolder=subfolder)
-
-            model = AutoModelForCausalLM.from_pretrained(
-                config.base_model_name_or_path,
-            )
+            # the base model weights are irrelevant for this test, only initialize it from its config to avoid
+            # downloading them
+            base_config = AutoConfig.from_pretrained(config.base_model_name_or_path)
+            model = AutoModelForCausalLM.from_config(base_config)
             model = PeftModel.from_pretrained(model, model_id, subfolder=subfolder)
 
-            assert isinstance(model, PeftModel)
+        assert isinstance(model, PeftModel)
+
+    @pytest.mark.parametrize("model_id, subfolder", PEFT_MODELS_TO_TEST)
+    def test_subfolder_offline(self, model_id, subfolder, tmp_path):
+        # See #4035: in offline mode, the subfolder was prepended twice to the adapter file name, so the cached file
+        # could not be found. A separate cache dir and cache key ensure that the first hub_online_once call is online
+        # and downloads the adapter, while the second call runs in offline mode.
+        cache_key = f"{model_id}-offline-subfolder"
+        with hub_online_once(cache_key):
+            config = PeftConfig.from_pretrained(model_id, subfolder=subfolder, cache_dir=tmp_path)
+            expected = load_peft_weights(model_id, subfolder=subfolder, cache_dir=tmp_path)
+
+        with hub_online_once(cache_key):
+            assert huggingface_hub.constants.HF_HUB_OFFLINE
+            config_offline = PeftConfig.from_pretrained(model_id, subfolder=subfolder, cache_dir=tmp_path)
+            weights_offline = load_peft_weights(model_id, subfolder=subfolder, cache_dir=tmp_path)
+
+        assert config_offline.to_dict() == config.to_dict()
+        assert weights_offline.keys() == expected.keys()
+        for key, weight in expected.items():
+            assert torch.equal(weights_offline[key], weight)
 
 
 class TestLocalModel:

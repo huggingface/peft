@@ -769,12 +769,8 @@ def load_peft_weights(
         device = infer_device()
 
     def get_hub_filename(use_safetensors=True):
-        weights_name = SAFETENSORS_WEIGHTS_NAME if use_safetensors else WEIGHTS_NAME
-        return (
-            os.path.join(hf_hub_download_kwargs["subfolder"], weights_name)
-            if hf_hub_download_kwargs.get("subfolder", None) is not None
-            else weights_name
-        )
+        # the subfolder is not prepended, as hf_hub_download receives it via hf_hub_download_kwargs
+        return SAFETENSORS_WEIGHTS_NAME if use_safetensors else WEIGHTS_NAME
 
     if "user_agent" not in hf_hub_download_kwargs:
         hf_hub_download_kwargs["user_agent"] = http_user_agent()
@@ -804,6 +800,10 @@ def load_peft_weights(
             token = hf_hub_download_kwargs.get("use_auth_token", None)
 
         hub_filename = get_hub_filename(use_safetensors=True)
+        subfolder = hf_hub_download_kwargs.get("subfolder", None)
+        if subfolder:
+            # file_exists has no subfolder argument; like hf_hub_download, join with "/" since this is a Hub path
+            hub_filename = f"{subfolder}/{hub_filename}"
         has_remote_safetensors_file = file_exists(
             repo_id=model_id,
             filename=hub_filename,

@@ -153,7 +153,9 @@ class _BaseAutoPeftModel:
                 "Cannot infer the auto class from the config, please make sure that you are loading the correct model for your task type."
             )
 
-        base_model = target_class.from_pretrained(base_model_path, revision=base_model_revision, **kwargs)
+        # subfolder refers to the location of the adapter, not of the base model
+        base_model_kwargs = {k: v for k, v in kwargs.items() if k != "subfolder"}
+        base_model = target_class.from_pretrained(base_model_path, revision=base_model_revision, **base_model_kwargs)
 
         token = kwargs.get("token", None)
         if token is None:
