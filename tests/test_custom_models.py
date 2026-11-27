@@ -21,7 +21,7 @@ import tempfile
 import time
 from contextlib import contextmanager
 from functools import partial
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import packaging.version
 import pytest
@@ -4973,7 +4973,8 @@ class TestPeftCustomModel(PeftCommonTester):
             nn.Conv3d(10, 10, 3),
         ],
     )
-    def test_add_weighted_adapter_svd_conv_layers(self, conv_layer):
+    @pytest.mark.parametrize("svd_lowrank", [False, True])
+    def test_add_weighted_adapter_svd_conv_layers(self, conv_layer, svd_lowrank):
         # SVD based combination types used to flatten the delta weight only for Conv2d, so Conv1d and Conv3d failed
         torch.manual_seed(0)
 
@@ -4996,6 +4997,7 @@ class TestPeftCustomModel(PeftCommonTester):
             adapter_name="merged",
             combination_type="svd",
             svd_rank=8,
+            svd_lowrank=svd_lowrank,
         )
 
         module = model.base_model.model.conv
@@ -5003,6 +5005,78 @@ class TestPeftCustomModel(PeftCommonTester):
         dw_merged = module.get_delta_weight("merged")
         assert dw_merged.shape == module.base_layer.weight.shape
         assert torch.allclose(dw_merged, expected, atol=1e-5, rtol=1e-5)
+
+    @pytest.mark.parametrize(
+        "combination_type", ["svd", "ties_svd", "dare_linear_svd", "dare_ties_svd", "magnitude_prune_svd"]
+    )
+    @pytest.mark.parametrize("weights", [[1.0, 1.0], [0.5, -0.3]])
+    @pytest.mark.parametrize(
+        "model_cls, target_module, ranks",
+        # the ranks fit the layer sizes: lin0 is 10 x 20, emb 100 x 5 and conv1d 5 x 1
+        [(MLP, "lin0", (8, 4)), (ModelEmbConv1D, "emb", (4, 1)), (ModelEmbConv1D, "conv1d", (1, 1))],
+    )
+    def test_add_weighted_adapter_svd_lowrank_matches_svd(
+        self, combination_type, weights, model_cls, target_module, ranks
+    ):
+        # The default subspace of torch.svd_lowrank covers the whole range of the merged delta weight here, so it must
+        # give the same adapter as torch.linalg.svd. This covers Linear, Embedding and Conv1D (fan_in_fan_out) layers.
+        torch.manual_seed(0)
+        config = LoraConfig(target_modules=[target_module], r=ranks[0], init_lora_weights=False)
+        model = get_peft_model(model_cls(), config, adapter_name="adapter1")
+        model.add_adapter("adapter2", LoraConfig(target_modules=[target_module], r=ranks[1], init_lora_weights=False))
+        for adapter_name, svd_lowrank in [("dense", False), ("lowrank", True)]:
+            # same seed, so that the random DARE masks are identical
+            torch.manual_seed(1)
+            model.add_weighted_adapter(
+                adapters=["adapter1", "adapter2"],
+                weights=weights,
+                adapter_name=adapter_name,
+                combination_type=combination_type,
+                density=0.5,
+                svd_lowrank=svd_lowrank,
+            )
+
+        module = getattr(model.base_model.model, target_module)
+        dw_dense = module.get_delta_weight("dense")
+        dw_lowrank = module.get_delta_weight("lowrank")
+        assert torch.allclose(dw_lowrank, dw_dense, atol=1e-4, rtol=1e-4)
+
+    def test_add_weighted_adapter_svd_lowrank_q_and_niter(self):
+        torch.manual_seed(0)
+        config = LoraConfig(target_modules=["lin0"], r=4, init_lora_weights=False)
+        model = get_peft_model(MLP(), config, adapter_name="adapter1")
+        model.add_adapter("adapter2", LoraConfig(target_modules=["lin0"], r=2, init_lora_weights=False))
+
+        with patch("torch.svd_lowrank", wraps=torch.svd_lowrank) as mock_svd_lowrank:
+            # by default, q is the sum of the adapter ranks
+            model.add_weighted_adapter(["adapter1", "adapter2"], [1.0, 1.0], "default_q", svd_lowrank=True)
+            assert mock_svd_lowrank.call_args.kwargs == {"q": 6, "niter": 2}
+
+            # but at least the output rank and at most the size of lin0 (10 x 20)
+            model.add_weighted_adapter(
+                ["adapter1", "adapter2"], [1.0, 1.0], "large_rank", svd_rank=8, svd_lowrank=True
+            )
+            assert mock_svd_lowrank.call_args.kwargs == {"q": 8, "niter": 2}
+            model.delete_adapter("large_rank")
+            model.add_adapter("adapter3", LoraConfig(target_modules=["lin0"], r=10, init_lora_weights=False))
+            model.add_weighted_adapter(["adapter1", "adapter3"], [1.0, 1.0], "capped_q", svd_lowrank=True)
+            assert mock_svd_lowrank.call_args.kwargs == {"q": 10, "niter": 2}
+
+            model.add_weighted_adapter(
+                ["adapter1", "adapter2"],
+                [1.0, 1.0],
+                "custom_q",
+                svd_lowrank=True,
+                svd_lowrank_q=5,
+                svd_lowrank_niter=4,
+            )
+            assert mock_svd_lowrank.call_args.kwargs == {"q": 5, "niter": 4}
+
+        msg = re.escape("svd_lowrank_q (3) must be at least the rank of the merged adapter (4).")
+        with pytest.raises(ValueError, match=msg):
+            model.add_weighted_adapter(
+                ["adapter1", "adapter2"], [1.0, 1.0], "small_q", svd_lowrank=True, svd_lowrank_q=3
+            )
 
     def test_multiple_adapters_no_needless_copy_modules_to_save(self):
         # See 2206

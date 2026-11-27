@@ -803,6 +803,9 @@ class LoraModel(BaseTuner):
         svd_driver: str | None = None,
         density: float | None = None,
         majority_sign_method: Literal["total", "frequency"] = "total",
+        svd_lowrank: bool = False,
+        svd_lowrank_q: int | None = None,
+        svd_lowrank_niter: int = 2,
     ) -> None:
         """
         This method adds a new adapter by merging the given adapters with the given weights.
@@ -845,6 +848,19 @@ class LoraModel(BaseTuner):
             majority_sign_method (`str`):
                 The method, should be one of ["total", "frequency"], to use to get the magnitude of the sign values.
                 Should be used with [`ties`, `ties_svd`, `dare_ties`, `dare_ties_svd`]
+            svd_lowrank (`bool`, *optional*):
+                Whether to use the randomized `torch.svd_lowrank` instead of `torch.linalg.svd` for the SVD based
+                combination types. This is much faster on large layers, since only the leading singular vectors are
+                computed. The result depends on the random number generator, so seed it for reproducible merges.
+                `svd_full_matrices` and `svd_driver` are ignored when this is enabled. Defaults to False.
+            svd_lowrank_q (`int`, *optional*):
+                Size of the subspace used by `torch.svd_lowrank`, must be at least the rank of the output adapter. If
+                None, the sum of the ranks of the merged adapters is used (but at least the output rank), capped at the
+                size of the layer. For `combination_type="svd"`, this default gives the same result as
+                `torch.linalg.svd` up to floating point precision, since the summed delta weight cannot have a higher
+                rank. Defaults to None.
+            svd_lowrank_niter (`int`, *optional*):
+                Number of subspace iterations performed by `torch.svd_lowrank`. Defaults to 2.
         """
 
         if adapter_name in list(self.peft_config.keys()):
@@ -855,6 +871,10 @@ class LoraModel(BaseTuner):
             combination_type=combination_type,
             svd_rank=svd_rank,
         )
+        if svd_lowrank and svd_lowrank_q is not None and svd_lowrank_q < new_rank:
+            raise ValueError(
+                f"svd_lowrank_q ({svd_lowrank_q}) must be at least the rank of the merged adapter ({new_rank})."
+            )
 
         # The scaling of each source adapter is already folded into the combined lora_A/lora_B weights below, so the
         # new adapter must have a scaling of exactly 1. With lora_alpha == r this only holds when use_rslora=False
@@ -929,6 +949,9 @@ class LoraModel(BaseTuner):
                         svd_clamp,
                         full_matrices=svd_full_matrices,
                         driver=svd_driver,
+                        lowrank=svd_lowrank,
+                        lowrank_q=svd_lowrank_q,
+                        lowrank_niter=svd_lowrank_niter,
                     )
                 elif combination_type in ["linear", "ties", "dare_linear", "dare_ties", "magnitude_prune"]:
                     target_lora_A.data, target_lora_B.data = self._generalized_task_arithmetic_weighted_adapter(
@@ -957,6 +980,9 @@ class LoraModel(BaseTuner):
         clamp=None,
         full_matrices=True,
         driver=None,
+        lowrank=False,
+        lowrank_q=None,
+        lowrank_niter=2,
     ):
         valid_adapters = []
         valid_weights = []
@@ -993,7 +1019,15 @@ class LoraModel(BaseTuner):
             delta_weight = delta_weight.T
 
         # based on https://github.com/kohya-ss/sd-scripts/blob/main/networks/svd_merge_lora.py#L114-L131
-        U, S, Vh = torch.linalg.svd(delta_weight, full_matrices=full_matrices, driver=driver)
+        if lowrank:
+            if lowrank_q is None:
+                # for combination_type="svd", the weighted sum has rank <= sum(r), so this subspace contains all of it
+                lowrank_q = max(sum(target.r[adapter] for adapter in valid_adapters), new_rank)
+                lowrank_q = min(lowrank_q, *delta_weight.shape)
+            U, S, V = torch.svd_lowrank(delta_weight, q=lowrank_q, niter=lowrank_niter)
+            Vh = V.mT
+        else:
+            U, S, Vh = torch.linalg.svd(delta_weight, full_matrices=full_matrices, driver=driver)
         U = U[:, :new_rank]
         S = S[:new_rank]
         U = U @ torch.diag(S)

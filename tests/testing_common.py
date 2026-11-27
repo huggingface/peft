@@ -1939,6 +1939,11 @@ class PeftCommonTester:
         # test svd re-weighting with multiple adapters
         model.add_weighted_adapter(adapter_list[1:], weight_list[1:], "multi_adapter_svd_reweighting")
 
+        # test svd re-weighting with torch.svd_lowrank, which should match torch.linalg.svd
+        model.add_weighted_adapter(
+            adapter_list[1:], weight_list[1:], "multi_adapter_svd_lowrank_reweighting", svd_lowrank=True
+        )
+
         # test ties_svd re-weighting with multiple adapters
         model.add_weighted_adapter(
             adapter_list[1:],
@@ -2087,6 +2092,10 @@ class PeftCommonTester:
                         assert torch.allclose(new_delta_weight, weighted_original_delta_weights, atol=1e-4, rtol=1e-4)
                     elif "svd" in adapter_name:
                         assert target.r[adapter_name] == 20
+                        if adapter_name == "multi_adapter_svd_lowrank_reweighting":
+                            dw_lowrank = target.get_delta_weight(adapter_name)
+                            dw_dense = target.get_delta_weight("multi_adapter_svd_reweighting")
+                            assert torch.allclose(dw_lowrank, dw_dense, atol=1e-4, rtol=1e-4)
                     elif "linear" in adapter_name:
                         assert target.r[adapter_name] == 8
                     elif "cat" in adapter_name:
