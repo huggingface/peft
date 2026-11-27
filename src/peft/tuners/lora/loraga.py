@@ -111,7 +111,8 @@ def preprocess_loraga(
             for name, module in get_target_modules(model, lora_config):
                 cache[f"{name}._peft_loraga_grad"] = module._peft_loraga_grad
 
-            os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+            if dirname := os.path.dirname(cache_file):
+                os.makedirs(dirname, exist_ok=True)
             torch.save(cache, cache_file)
 
 
