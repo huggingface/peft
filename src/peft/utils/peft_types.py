@@ -55,6 +55,7 @@ class PeftType(str, enum.Enum):  # noqa: UP042
     - ADAMSS
     - SHADOW
     - DEFT
+    - DUMMY
     """
 
     PROMPT_TUNING = "PROMPT_TUNING"
@@ -103,6 +104,7 @@ class PeftType(str, enum.Enum):  # noqa: UP042
     SUPERTUNING = "SUPERTUNING"
     DEFT = "DEFT"
     PACA = "PACA"
+    DUMMY = "DUMMY"
 
 
 class TaskType(str, enum.Enum):  # noqa: UP042

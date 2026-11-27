@@ -38,7 +38,14 @@ from peft.utils.other import _set_adapter
 
 
 # Collection of constants used for all tuners
-COMPATIBLE_TUNER_TYPES = (PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.ADALORA, PeftType.OFT, PeftType.SHIRA)
+COMPATIBLE_TUNER_TYPES = (
+    PeftType.LORA,
+    PeftType.LOHA,
+    PeftType.LOKR,
+    PeftType.ADALORA,
+    PeftType.OFT,
+    PeftType.SHIRA,
+)
 PREFIXES = [
     lora.LoraModel.prefix,
     lokr.LoKrModel.prefix,
@@ -47,7 +54,12 @@ PREFIXES = [
     shira.ShiraModel.prefix,
 ]
 Configs = Union[
-    lora.LoraConfig, loha.LoHaConfig, lokr.LoKrConfig, adalora.AdaLoraConfig, oft.OFTConfig, shira.ShiraConfig
+    lora.LoraConfig,
+    loha.LoHaConfig,
+    lokr.LoKrConfig,
+    adalora.AdaLoraConfig,
+    oft.OFTConfig,
+    shira.ShiraConfig,
 ]
 Layers = (
     lora.layer.LoraLayer,

@@ -51,6 +51,7 @@ from peft import (
     C3AConfig,
     DeftConfig,
     DeloraConfig,
+    DummyConfig,
     FourierFTConfig,
     FrodConfig,
     GloraConfig,
@@ -1423,6 +1424,35 @@ TEST_CASES = [
         AdaLoraConfig,
         {"target_modules": ["conv2d", "lin0"], "init_lora_weights": False, "total_step": 1},
     ),
+    #########
+    # Dummy #
+    #########
+    # Note: the config kwargs must not set `init_weights=False` here: some tests (e.g. test_disable_adapters) use the
+    # raw kwargs and expect the adapter to be an identity transform at init. Tests that require a non-identity adapter
+    # apply `set_init_weights_false` themselves.
+    ("Vanilla MLP 1 Dummy", "MLP", DummyConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 Dummy", "MLP", DummyConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 Dummy", "MLP", DummyConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 Dummy", "MLP", DummyConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 Dummy", "MLP", DummyConfig, {"target_modules": ["lin0"], "r": 2, "alpha": 4}),
+    ("Vanilla MLP 6 Dummy", "MLP", DummyConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    (
+        "Embedding + transformers Conv1D 1 Dummy",
+        "EmbConv1D",
+        DummyConfig,
+        {"target_modules": ["conv1d"]},
+    ),
+    ("Embedding + transformers Conv1D 2 Dummy", "EmbConv1D", DummyConfig, {"target_modules": ["emb"]}),
+    ("Embedding + transformers Conv1D 3 Dummy", "EmbConv1D", DummyConfig, {"target_modules": ["emb", "conv1d"]}),
+    ("Conv1d 1 Dummy", "Conv1d", DummyConfig, {"target_modules": ["conv1d"]}),
+    ("Conv1d Groups Dummy", "Conv1dGroups", DummyConfig, {"target_modules": ["conv1d"]}),
+    ("Conv2d 1 Dummy", "Conv2d", DummyConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d 2 Dummy", "Conv2d", DummyConfig, {"target_modules": ["conv2d", "lin0"]}),
+    ("Conv2d Groups Dummy", "Conv2dGroups", DummyConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d Groups2 Dummy", "Conv2dGroups2", DummyConfig, {"target_modules": ["conv2d"]}),
+    ("Conv3d 1 Dummy", "Conv3d", DummyConfig, {"target_modules": ["conv3d"]}),
+    ("Conv3d 2 Dummy", "Conv3d", DummyConfig, {"target_modules": ["conv3d", "lin0"]}),
+    ("Conv3d 1x1 Dummy", "Conv3d1x1", DummyConfig, {"target_modules": ["conv3d"]}),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 ALL_PEFT_CONFIG_CASES = [
@@ -1974,6 +2004,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         AdamssConfig,
         {"target_modules": ["lin0"], "r": 8, "num_subspaces": 2, "init_weights": False},
         {"target_modules": ["lin1"], "r": 2, "num_subspaces": 2, "init_weights": False},
+    ),
+    (
+        "Dummy Same",
+        "dummy",
+        DummyConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "Dummy Different",
+        "dummy",
+        DummyConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
     ),
 ]
 
@@ -3777,6 +3821,10 @@ class TestPeftCustomModel(PeftCommonTester):
             "Conv2dGroups2",
         ):
             # Grouped LoHa/LoKr merges need a wider tolerance than a LoRA `B @ A` merge.
+            atol, rtol = 1e-3, 1e-3
+
+        if issubclass(config_cls, DummyConfig) and model_id.startswith(("Conv", "Emb")):
+            # more instability with Conv, like for the other methods above
             atol, rtol = 1e-3, 1e-3
 
         if issubclass(config_cls, OFTConfig):
@@ -9587,6 +9635,16 @@ class TestFsdp2UnshardedParams:
                 True,
                 id="ia3-safe-merge",
             ),
+            pytest.param(
+                lambda: DummyConfig(target_modules=["lin0", "lin1"], init_weights=False),
+                False,
+                id="dummy",
+            ),
+            pytest.param(
+                lambda: DummyConfig(target_modules=["lin0", "lin1"], init_weights=False),
+                True,
+                id="dummy-safe-merge",
+            ),
         ],
     )
     def test_merge_and_unmerge_reach_shards(self, get_config, safe_merge, reshard_after_forward):
@@ -9700,6 +9758,20 @@ class TestFsdp2UnshardedParams:
                 LoraConfig(target_modules=["conv2d"], init_lora_weights=False),
                 torch.rand(2, 45),
                 id="lora-conv2d",
+            ),
+            pytest.param(
+                ModelConv2D,
+                "conv2d",
+                DummyConfig(target_modules=["conv2d"], init_weights=False),
+                torch.rand(2, 45),
+                id="dummy-conv2d",
+            ),
+            pytest.param(
+                ModelEmbConv1D,
+                "emb",
+                DummyConfig(target_modules=["emb", "conv1d"], init_weights=False),
+                torch.arange(90).view(9, 10),
+                id="dummy-embedding-conv1d",
             ),
         ],
     )

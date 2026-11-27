@@ -39,6 +39,7 @@ from peft import (
     CPTConfig,
     DeftConfig,
     DeloraConfig,
+    DummyConfig,
     FourierFTConfig,
     FrodConfig,
     GloraConfig,
@@ -160,6 +161,14 @@ ALL_CONFIGS = [
             "task_type": "CAUSAL_LM",
             "target_modules": None,
             "r": 2,
+        },
+    ),
+    (
+        DummyConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "init_weights": False,
         },
     ),
     (
@@ -807,7 +816,7 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
-        if config_cls != LoraConfig:
+        if config_cls not in (LoraConfig, DummyConfig):
             pytest.skip("Mixed adapter batches not supported for this config.")
         _skip_alora_no_activation(config_cls, config_kwargs)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
@@ -816,7 +825,7 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_generate_with_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
-        if config_cls != LoraConfig:
+        if config_cls not in (LoraConfig, DummyConfig):
             pytest.skip("Mixed adapter batches not supported for this config.")
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_generate_with_mixed_adapter_batches_and_beam_search(model_id, config_cls, config_kwargs.copy())
