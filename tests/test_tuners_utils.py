@@ -38,6 +38,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft import (
     AdaptionPromptConfig,
+    FrodConfig,
     IA3Config,
     LoHaConfig,
     LoraConfig,
@@ -48,6 +49,11 @@ from peft import (
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
+    PveraConfig,
+    RandLoraConfig,
+    TinyLoraConfig,
+    UniLoraConfig,
+    VBLoRAConfig,
     VeraConfig,
     get_layer_status,
     get_model_status,
@@ -746,12 +752,7 @@ class TestExcludedModuleNames:
 
 
 class TestModelAndLayerStatus:
-    """Check the methods `get_layer_status` and `get_model_status`.`
-
-    Note that we only test LoRA here but the same logic should work for other tuner types (if they support the
-    corresponding features like merging).
-
-    """
+    """Check the methods `get_layer_status` and `get_model_status`."""
 
     torch_device = infer_device()
 
@@ -955,6 +956,39 @@ class TestModelAndLayerStatus:
         result = [status.available_adapters for status in layer_status]
         expected = [["default", "other"], ["default"], ["other"], ["default"]]
         assert result == expected
+
+    @pytest.mark.parametrize(
+        ("config_cls", "kwargs"),
+        [
+            (FrodConfig, {"progressbar": False}),
+            (PveraConfig, {}),
+            (RandLoraConfig, {}),
+            (TinyLoraConfig, {"r": 2, "u": 16}),
+            (UniLoraConfig, {}),
+            (VBLoRAConfig, {"vector_length": 2}),
+            (VeraConfig, {}),
+        ],
+    )
+    @pytest.mark.parametrize(("first_layer", "second_layer"), [("lin0", "lin1"), ("lin1", "lin0")])
+    def test_available_adapters_with_shared_weights(
+        self, small_base_model_cls, config_cls, kwargs, first_layer, second_layer
+    ):
+        # Adapters can target disjoint layers. Normally, this is not an issue. However, when there are shared
+        # parameters, there was a bug that dicts associated with this shared parameters, which can contain keys for all
+        # adapters, were taken as reference. This would result in adapters being shown as available on a layer even if
+        # they weren't.
+        model = get_peft_model(small_base_model_cls(), config_cls(target_modules=[first_layer], **kwargs))
+        model.add_adapter("other", config_cls(target_modules=[second_layer], **kwargs))
+
+        # this would show both default and other being available on all layers
+        available_adapters = {status.name: status.available_adapters for status in model.get_layer_status()}
+        assert available_adapters == {f"model.{first_layer}": ["default"], f"model.{second_layer}": ["other"]}
+
+        # The layer that loses its only local adapter must also switch to the surviving adapter.
+        model.delete_adapter("default")
+        assert model.active_adapters == ["other"]
+        # before the fix, this would result in 'irregular' active adapters
+        assert model.get_model_status().active_adapters == ["other"]
 
     def test_devices_all_cpu_small(self, small_model):
         layer_status = small_model.get_layer_status()

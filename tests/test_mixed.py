@@ -847,13 +847,13 @@ class TestMixedAdapterTypes(unittest.TestCase):
 
             wrappers = [m for m in peft_model.modules() if isinstance(m, AuxiliaryTrainingWrapper)]
             assert wrappers
-            assert all(w._get_available_adapters() == {"adapter0", "adapter1"} for w in wrappers)
+            assert all(w._all_available_adapter_names() == ["adapter0", "adapter1"] for w in wrappers)
 
             peft_model.delete_adapter(names)
 
             assert not peft_model.peft_config
             for wrapper in wrappers:
-                assert not wrapper._get_available_adapters(), f"leftover after deleting {names}"
+                assert not wrapper._all_available_adapter_names(), f"leftover after deleting {names}"
 
     def test_modules_to_save(self):
         model = SimpleNet().eval().to(self.torch_device)

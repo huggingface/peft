@@ -6188,6 +6188,35 @@ class TestMultipleActiveAdapters:
 
         assert torch.equal(merged_weight(safe_merge=True), merged_weight(safe_merge=False))
 
+    @pytest.mark.parametrize(
+        "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
+    )
+    def test_delete_active_adapter_keeps_remaining_adapter_active(
+        self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
+    ):
+        # See #4174. For disjoint targets, ensure that deleting the active adapter doesn't leave the layer in a broken
+        # state.
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
+
+        model = self.resolve_model_cls(tuner_method).to(self.torch_device)
+        model = get_peft_model(model, config_cls(**config_kwargs_1), adapter_name="adapter_1")
+        model.add_adapter("adapter_2", config_cls(**config_kwargs_2))
+        model.eval()
+        inputs = self.prepare_inputs_for_testing()
+
+        model.set_adapter("adapter_2")
+        with torch.inference_mode():
+            expected = model(**inputs)
+
+        model.set_adapter("adapter_1")
+        model.delete_adapter("adapter_1")
+
+        assert list(model.peft_config) == ["adapter_2"]
+        assert model.active_adapter == "adapter_2"
+        assert model.active_adapters == ["adapter_2"]
+        with torch.inference_mode():
+            torch.testing.assert_close(model(**inputs), expected)
+
 
 class MLP_2x_same_shape(nn.Module):
     """Simple MLP with two layers of the same shape to test multiple adapters targeting same shape layers."""

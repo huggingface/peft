@@ -3547,7 +3547,7 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
             active_adapters=module.active_adapters,
             merged_adapters=module.merged_adapters,
             requires_grad=requires_grad,
-            available_adapters=sorted(module._get_available_adapters()),
+            available_adapters=module._all_available_adapter_names(),
             devices=devices,
             quantization_backend=quantization_backend_name,
         )

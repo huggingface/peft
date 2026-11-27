@@ -2048,16 +2048,6 @@ class BaseTunerLayer(ABC):
         # use a property to ensure that active_adapter is not set directly, instead use the set_adapter method
         return self._active_adapter
 
-    def _get_available_adapters(self) -> set[str]:
-        """Return all adapter names that can be found on this module."""
-        adapters = set()
-        for layer_name in self.adapter_layer_names:
-            module = getattr(self, layer_name)
-            if not isinstance(module, (nn.ModuleDict, nn.ParameterDict)):
-                continue
-            adapters.update(set(module.keys()))
-        return adapters
-
     @property
     def active_adapters(self):
         if isinstance(self.active_adapter, str):
@@ -2162,9 +2152,9 @@ class BaseTunerLayer(ABC):
     def _all_available_adapter_names(self) -> list[str]:
         """Return a sorted list of all available adapter names"""
         adapter_names = set()
-        for name in self.adapter_layer_names + self.other_param_names:
-            # we check each possible attribute and if it's a dict or ModuleDict, we assume that the keys are the adapter
-            # names
+        # Shared dictionaries in `other_param_names`, such as VeRA's projections, can have contain keys for other
+        # layers' adapters, so only search through `adapter_layer_names`.
+        for name in self.adapter_layer_names:
             attr = getattr(self, name)
             if hasattr(attr, "keys"):
                 adapter_names.update(attr.keys())
@@ -2827,14 +2817,23 @@ def delete_adapter(
             to set the new active adapter of the model if necessary.
     """
     new_adapter = None
+    layers_switching_adapters = []
 
     for key, target in model.named_modules():
         if prefix in key:
             continue
         if isinstance(target, layer_cls):
+            if adapter_name in target.active_adapters:
+                layers_switching_adapters.append(target)
             target.delete_adapter(adapter_name)
-            if new_adapter is None:
+            if not new_adapter:
                 new_adapter = target.active_adapters[:]
+
+    # A layer can lose its last local adapter while other layers still have the replacement active adapter.
+    if new_adapter:
+        for layer in layers_switching_adapters:
+            if layer.active_adapters != new_adapter:
+                layer.set_adapter(new_adapter)
 
     _delete_auxiliary_adapter(model, adapter_name=adapter_name, new_active_adapters=new_adapter)
     return new_adapter

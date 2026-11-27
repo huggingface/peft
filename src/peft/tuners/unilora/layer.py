@@ -61,6 +61,10 @@ class UniLoraLayer(BaseTunerLayer):
         self.out_features = out_features
         self.kwargs = kwargs
 
+    def _all_available_adapter_names(self) -> list[str]:
+        # The trainable theta_d vectors are shared across all UniLoRA layers.
+        return sorted(self.r)
+
     @property
     def merged(self) -> bool:
         return bool(self.merged_adapters)
