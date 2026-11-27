@@ -625,8 +625,12 @@ class TestStateDictRegression:
             return json.load(f)
 
     def get_tolerances_for_model(self, model) -> tuple[float | None, float | None]:
+        # bfloat16 has only 8 mantissa bits, so the same computation can differ by a few units in the last
+        # place (ULP) between CPU kernels, e.g. between ATEN_CPU_CAPABILITY=avx512 and avx2. The recorded
+        # logits were created on an avx512 machine, so a ULP-level tolerance fails for reasons unrelated to
+        # serialization; real serialization bugs shift the output far more than 1e-2. (#4019)
         if getattr(model, "dtype", None) == torch.bfloat16:
-            atol, rtol = 1e-3, 1e-2
+            atol, rtol = 1e-2, 1e-2
         else:
             atol, rtol = None, None
         return atol, rtol
