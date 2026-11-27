@@ -344,8 +344,8 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         """A place to initialize PyTorch modules in `__init__` before the call to `self.update()`."""
         raise NotImplementedError
 
-    def _get_available_adapters(self) -> set[str]:
-        """Return all adapter names that can be found on this module."""
+    def _all_available_adapter_names(self) -> list[str]:
+        """Return the sorted names of the adapters on this module."""
         raise NotImplementedError
 
     def _error_message_name(self):
@@ -891,9 +891,8 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
         return new_module
 
-    def _get_available_adapters(self) -> set[str]:
-        """Return all adapter names that can be found on this module."""
-        return set(self.modules_to_save.keys())
+    def _all_available_adapter_names(self) -> list[str]:
+        return sorted(self.modules_to_save)
 
 
 class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
@@ -1083,9 +1082,8 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
             self.token_adapter.merge(safe_merge=safe_merge, adapter_names=adapter_names)
         return self.token_adapter.get_base_layer()
 
-    def _get_available_adapters(self) -> set[str]:
-        """Return all adapter names that can be found on this module."""
-        return set(self.token_adapter.trainable_tokens_delta.keys())
+    def _all_available_adapter_names(self) -> list[str]:
+        return self.token_adapter._all_available_adapter_names()
 
 
 def _get_input_embeddings_name(model: torch.nn.Module, default: Optional[str] = None) -> Optional[str]:
