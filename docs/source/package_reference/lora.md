@@ -559,6 +559,7 @@ For users, this means:
 - In general, if you want to fine-tune weights that are tied and want to keep them tied, pass `ensure_weight_tying=True`.
 - If your base model's weights are untied, `ensure_weight_tying=True` cannot force tying and only warns.
 - For `trainable_token_indices`, tied layers must use the same token indices when `ensure_weight_tying=True`.
+- For LoRA on tied layers with `ensure_weight_tying=True`, check the [troubleshooting guide](../developer_guides/troubleshooting#lora-weight-tying-with-float16-or-bfloat16-models) for known limitations, e.g. with optimizers like Adam.
 
 ## Optimizers
 
