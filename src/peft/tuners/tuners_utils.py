@@ -2907,6 +2907,9 @@ def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dty
                             nn.Parameter(param.data.to(torch.float32), requires_grad=param.requires_grad),
                         )
 
+        if hasattr(module, "_sync_fsdp_lora_weights"):
+            module._sync_fsdp_lora_weights(adapter_name)
+
 
 def set_requires_grad(model, adapter_names: str | Sequence[str], requires_grad: bool = True) -> None:
     """

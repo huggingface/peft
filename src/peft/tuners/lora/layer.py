@@ -24,6 +24,7 @@ from typing import Any, Optional, Self, Union
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
+from accelerate.state import GradientState
 from torch import nn
 from transformers.pytorch_utils import Conv1D
 
@@ -433,6 +434,50 @@ class LoraLayer(BaseTunerLayer):
             dist.broadcast(self.lora_B[adapter_name].weight.data, src=src, group=pg)
             if self.lora_B[adapter_name].bias is not None:
                 dist.broadcast(self.lora_B[adapter_name].bias.data, src=src, group=pg)
+
+    def _sync_fsdp_lora_weights(self, adapter_name):
+        groups = getattr(self, "_lora_fsdp_replica_groups", ())
+        if not groups:
+            return
+
+        from torch.distributed.tensor import DTensor
+
+        gradient_state = GradientState()
+
+        def local(tensor):
+            return tensor.to_local() if isinstance(tensor, DTensor) else tensor
+
+        def average_gradient(param):
+            if gradient_state.sync_gradients:
+                grad = local(param.grad)
+                for group in groups:
+                    dist.all_reduce(grad, op=dist.ReduceOp.AVG, group=group)
+
+        # These factors were added after fully_shard. A TP-sharded factor still
+        # has a replica of its local shard on each FSDP data rank.
+        for name in self.adapter_layer_names:
+            adapters = getattr(self, name)
+            if adapter_name not in adapters:
+                continue
+            factor = adapters[adapter_name]
+            parameters = factor.parameters() if isinstance(factor, nn.Module) else (factor,)
+            for param in parameters:
+                if (
+                    param.is_meta
+                    or not (param.is_floating_point() or param.is_complex())
+                    or getattr(param, "_peft_fsdp_replicated", False)
+                ):
+                    continue
+                with torch.no_grad():
+                    weight = local(param.detach())
+                    for group in groups:
+                        dist.broadcast(weight, src=dist.get_global_rank(group, 0), group=group)
+                # Inactive adapters can become trainable later.
+                requires_grad = param.requires_grad
+                param.requires_grad_(True)
+                param.register_post_accumulate_grad_hook(average_gradient)
+                param.requires_grad_(requires_grad)
+                param._peft_fsdp_replicated = True
 
     def olora_init(self, adapter_name):
         base_layer = self.get_base_layer()

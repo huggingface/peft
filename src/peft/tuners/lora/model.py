@@ -449,6 +449,26 @@ class LoraModel(BaseTuner):
                         tp_size=self.model._tp_size,
                     )
 
+        groups = self._get_fsdp_replica_groups()
+        if groups:
+            lora_module._lora_fsdp_replica_groups = groups
+            lora_module._sync_fsdp_lora_weights(adapter_name)
+
+    def _get_fsdp_replica_groups(self):
+        if not getattr(self.model, "is_distributed_loading_by_transformers", False):
+            return ()
+
+        config = self.model.config.distributed_config
+        # Expert weights can use a separate mesh.
+        if config.dp_size <= 1 or config.ep_size > 1:
+            return ()
+
+        if config.dp_replicate_size > 1:
+            mesh = self.model._mesh_manager.get_mesh(("dp_replicate", "fsdp"))
+        else:
+            mesh = self.model._device_mesh["fsdp"]
+        return tuple(group for group in mesh.get_all_groups() if group.size() > 1)
+
     def _replace_module(self, parent, child_name, new_module, child):
         # override in LoraModel to handle quantized weights properly
 
