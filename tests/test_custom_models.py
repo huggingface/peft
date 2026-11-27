@@ -9169,24 +9169,26 @@ class TestPeftFsdpStateDict:
 
     def test_load_adapter_into_fsdp_wrapped_model(self):
         # Regression test for loading an adapter directly into an FSDP-wrapped model, see #4223.
-        config = LoraConfig(r=2, target_modules=["0", "1"])
-
-        source = get_peft_model(nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 2)), config)
-        for name, param in source.named_parameters():
-            if "lora_B" in name:
-                nn.init.ones_(param)
-
-        target = get_peft_model(nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 2)), config)
+        source = get_peft_model(
+            nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 2)),
+            LoraConfig(r=2, target_modules=["0", "1"], init_lora_weights=False),
+        )
+        target = get_peft_model(
+            nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 2)), LoraConfig(r=2, target_modules=["0", "1"])
+        )
         target = FSDP(target, use_orig_params=True, device_id=self.torch_device)
 
         state_dict = get_peft_model_state_dict(source)
         result = set_peft_model_state_dict(target, state_dict)
 
         assert not result.unexpected_keys
-        loaded_lora_b = sum(
-            param.detach().abs().sum().item() for name, param in target.named_parameters() if "lora_B" in name
-        )
-        assert loaded_lora_b == pytest.approx(20.0)
+        source_params = {n: p for n, p in source.named_parameters() if "lora_" in n}
+        target_params = {
+            n.replace("_fsdp_wrapped_module.", ""): p for n, p in target.named_parameters() if "lora_" in n
+        }
+        assert source_params.keys() == target_params.keys()
+        for name, param in source_params.items():
+            assert torch.allclose(param.detach().cpu(), target_params[name].detach().cpu())
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     @pytest.mark.parametrize("bias_arg", ["bias_all", "bias_peft_method_only"])
