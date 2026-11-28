@@ -198,7 +198,7 @@ class MissLinear(nn.Module, MissLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.set_base_weight(weight.to(orig_dtype))
+                    self.set_base_weight(weight.to(orig_dtype), context="merge")
                 else:
                     weight = self.get_base_weight()
                     orig_dtype = weight.dtype
@@ -206,7 +206,7 @@ class MissLinear(nn.Module, MissLayer):
                         weight += self.get_delta_weight(active_adapter, weight)
                     else:
                         weight = self.get_delta_weight_miss(active_adapter, weight)
-                    self.set_base_weight(weight.to(orig_dtype))
+                    self.set_base_weight(weight.to(orig_dtype), context="merge")
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -229,7 +229,7 @@ class MissLinear(nn.Module, MissLayer):
                 else:
                     weight = self.get_delta_weight_miss(active_adapter, weight, reverse=True)
 
-                self.set_base_weight(weight.to(orig_dtype))
+                self.set_base_weight(weight.to(orig_dtype), context="unmerge")
 
     def get_delta_weight(self, adapter, orig_weight, reverse: bool = False) -> torch.Tensor:
         """
