@@ -27,6 +27,7 @@ from peft.utils.integrations import dequantize_module_weight, gather_params_ctx
 from peft.utils.other import infer_device, transpose
 
 from .arrow import ArrowLoraLinearLayer
+from .bayesian_lora import InducingWeight
 from .config import LoraConfig, PeftConfig
 from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
 from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraLayer, LoraVariant, _ConvNd
@@ -1594,3 +1595,82 @@ def _kasa_layer_regularization_loss(module: Linear, adapter_name: str, beta: flo
     l3 = torch.linalg.norm(gram_B - eye) + torch.linalg.norm(gram_A - eye)
 
     return beta * l2 + gamma * l3
+
+
+class BayesianLoraLinearVariant(LoraVariant):
+    """
+    Bayesian-LoRA variant, https://huggingface.co/papers/2601.21003.
+
+    Both LoRA factors are random variables, parametrized by `InducingWeight` modules in `lora_bayesian_A` and
+    `lora_bayesian_B`. The factors are sampled in training mode; in eval mode, a deterministic point estimate is used,
+    unless sampling was enabled with `peft.helpers.enable_probabilistic_sampling`. Merging uses the point estimate.
+
+    The regular `lora_A` / `lora_B` weights are not used by this variant and are frozen.
+    """
+
+    def supports_lora_conversion(self) -> bool:
+        return False
+
+    def supports_probabilistic_sampling(self) -> bool:
+        return True
+
+    @staticmethod
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
+        bayesian_lora_config = config.bayesian_lora_config
+        if not hasattr(module, "lora_bayesian_A"):
+            module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_bayesian_A", "lora_bayesian_B")
+            module.lora_bayesian_A = nn.ModuleDict()
+            module.lora_bayesian_B = nn.ModuleDict()
+        if not hasattr(module, "probabilistic_sampling"):
+            # in eval mode, the point estimate is used unless sampling is explicitly enabled; the flag is not specific
+            # to Bayesian-LoRA, see `LoraModel._enable_probabilistic_sampling`
+            module.probabilistic_sampling = False
+
+        r = module.r[adapter_name]
+        lora_A = module.lora_A[adapter_name]
+        module.lora_bayesian_A[adapter_name] = InducingWeight(module.in_features, r, bayesian_lora_config)
+        module.lora_bayesian_B[adapter_name] = InducingWeight(r, module.out_features, bayesian_lora_config)
+        if config.init_lora_weights:
+            module.lora_bayesian_B[adapter_name].zero_init_()
+        for container in (module.lora_bayesian_A, module.lora_bayesian_B):
+            container[adapter_name].to(device=lora_A.weight.device, dtype=lora_A.weight.dtype)
+
+        # The factors are given by the inducing weights, so the regular LoRA weights are unused and frozen. They are
+        # kept, as the LoRA layer relies on them, e.g. to determine which adapters exist and their device and dtype.
+        _register_frozen_peft_weight(module, adapter_name, "lora_A")
+        _register_frozen_peft_weight(module, adapter_name, "lora_B")
+        # The weights are sampled in training mode, so a new layer must not stay in the default training mode of
+        # nn.Module when the model is in eval mode.
+        module.train(module.get_base_layer().training)
+
+    @staticmethod
+    @torch.no_grad()
+    def _get_delta_weight(module: Linear, active_adapter: str) -> torch.Tensor:
+        weight_A = module.lora_bayesian_A[active_adapter](sample=False)
+        weight_B = module.lora_bayesian_B[active_adapter](sample=False)
+        return transpose(weight_B @ weight_A, module.fan_in_fan_out) * module.scaling[active_adapter]
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        delta_weight = BayesianLoraLinearVariant._get_delta_weight(module, active_adapter)
+        return orig_weight + delta_weight.to(orig_weight.dtype)
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        delta_weight = BayesianLoraLinearVariant._get_delta_weight(module, active_adapter)
+        orig_weight.data += delta_weight.to(orig_weight.dtype)
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        delta_weight = BayesianLoraLinearVariant._get_delta_weight(module, active_adapter)
+        return orig_weight - delta_weight.to(orig_weight.dtype)
+
+    @staticmethod
+    def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor, **kwargs) -> torch.Tensor:
+        sample = module.training or module.probabilistic_sampling
+        # one weight sample per forward pass, shared across the batch
+        weight_A = module.lora_bayesian_A[active_adapter](sample=sample)
+        weight_B = module.lora_bayesian_B[active_adapter](sample=sample)
+        x = module.lora_dropout[active_adapter](x.to(weight_A.dtype))
+        output = F.linear(F.linear(x, weight_A), weight_B) * module.scaling[active_adapter]
+        return result + output.to(result.dtype)

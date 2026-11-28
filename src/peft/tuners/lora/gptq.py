@@ -56,6 +56,8 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
         if config.velora_config is not None:
             raise ValueError(f"{self.__class__.__name__} does not support VeLoRA.")
+        if config.bayesian_lora_config is not None:
+            raise ValueError(f"{self.__class__.__name__} does not support Bayesian-LoRA.")
         if config.use_dora and config.use_qalora:
             raise NotImplementedError(
                 f"DoRA and QA-LoRA at the same time is not supported for {self.__class__.__name__} (yet)."

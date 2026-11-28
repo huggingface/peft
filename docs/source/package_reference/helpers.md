@@ -21,6 +21,11 @@ A collection of helper functions for PEFT.
 [[autodoc]] helpers.disable_input_dtype_casting
     - all
 
+## Context manager to enable probabilistic sampling (e.g. Monte Carlo prediction with Bayesian-LoRA)
+
+[[autodoc]] helpers.enable_probabilistic_sampling
+    - all
+
 ## Context manager to enable DoRA caching (faster at inference time but requires more memory)
 
 [[autodoc]] helpers.DoraCaching

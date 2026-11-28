@@ -43,6 +43,7 @@ from transformers.pytorch_utils import Conv1D
 from peft import (
     AdaLoraConfig,
     AdamssConfig,
+    BayesianLoraConfig,
     BeftConfig,
     BOFTConfig,
     C3AConfig,
@@ -2607,6 +2608,116 @@ class TestVeloraInitialization:
     def test_velora_config_invalid_values_raise(self, config_kwargs, msg):
         with pytest.raises(ValueError, match=re.escape(msg)):
             VeloraConfig(**config_kwargs)
+
+
+class TestBayesianLoraInitialization:
+    @pytest.mark.parametrize(
+        "config_kwargs, msg",
+        [
+            pytest.param(
+                {"inducing_rows": 0},
+                "`inducing_rows` and `inducing_cols` must be positive integers; got 0 and 9.",
+                id="inducing-rows",
+            ),
+            pytest.param(
+                {"inducing_cols": -1},
+                "`inducing_rows` and `inducing_cols` must be positive integers; got 9 and -1.",
+                id="inducing-cols",
+            ),
+            pytest.param({"prior_sd": 0.0}, "`prior_sd` must be positive; got 0.0.", id="prior-sd"),
+            pytest.param({"max_lambda": 0.0}, "`max_lambda` must be positive or `None`; got 0.0.", id="max-lambda"),
+            pytest.param(
+                {"max_inducing_sd": -0.1},
+                "`max_inducing_sd` must be positive or `None`; got -0.1.",
+                id="max-inducing-sd",
+            ),
+            pytest.param(
+                {"num_flow_layers": 0},
+                "`num_flow_layers` must be a positive integer; got 0.",
+                id="num-flow-layers",
+            ),
+            pytest.param(
+                {"use_flow": False, "num_flow_layers": 2},
+                "`num_flow_layers` is only used by the flow, but `use_flow=False`; got `num_flow_layers=2`.",
+                id="num-flow-layers-without-flow",
+            ),
+            pytest.param(
+                {"flow_hidden_features": 0},
+                "`flow_hidden_features` must be a positive integer; got 0.",
+                id="flow-hidden-features",
+            ),
+            pytest.param(
+                {"use_flow": False, "flow_hidden_features": 16},
+                "`flow_hidden_features` is only used by the flow, but `use_flow=False`; got "
+                "`flow_hidden_features=16`.",
+                id="flow-hidden-features-without-flow",
+            ),
+        ],
+    )
+    def test_bayesian_lora_config_invalid_values_raise(self, config_kwargs, msg):
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            BayesianLoraConfig(**config_kwargs)
+
+    def test_bayesian_lora_config_flow_defaults(self):
+        # the defaults of the flow arguments depend on whether the flow is used
+        config = BayesianLoraConfig()
+        assert config.num_flow_layers == 1
+        assert config.flow_hidden_features == 16
+
+        config = BayesianLoraConfig(num_flow_layers=2, flow_hidden_features=8)
+        assert config.num_flow_layers == 2
+        assert config.flow_hidden_features == 8
+
+        config = BayesianLoraConfig(use_flow=False)
+        assert config.num_flow_layers is None
+        assert config.flow_hidden_features is None
+
+    def test_bayesian_lora_config_no_bounds(self):
+        config = BayesianLoraConfig(max_lambda=None, max_inducing_sd=None)
+        assert config.max_lambda is None
+        assert config.max_inducing_sd is None
+
+    @staticmethod
+    def get_model(num_flow_layers):
+        torch.manual_seed(0)
+        config = LoraConfig(
+            target_modules=["lin0"], bayesian_lora_config=BayesianLoraConfig(num_flow_layers=num_flow_layers)
+        )
+        base_model = nn.Sequential()
+        base_model.add_module("lin0", nn.Linear(10, 20))
+        return get_peft_model(base_model, config)
+
+    @staticmethod
+    def get_num_flow_params(model):
+        return sum(p.numel() for n, p in model.named_parameters() if ".flow_" in n)
+
+    def test_bayesian_lora_num_flow_layers_adds_parameters(self):
+        # each flow layer has its own autoregressive network
+        num_params = self.get_num_flow_params(self.get_model(num_flow_layers=1))
+        assert num_params > 0
+        assert self.get_num_flow_params(self.get_model(num_flow_layers=3)) == 3 * num_params
+
+    def test_bayesian_lora_multiple_flow_layers_init_is_identity(self):
+        # with the default init, the adapter must not change the output, irrespective of the number of flow layers
+        model = self.get_model(num_flow_layers=3).eval()
+        x = torch.randn(4, 10)
+        with torch.no_grad():
+            output = model(x)
+            with model.disable_adapter():
+                output_base = model(x)
+        assert torch.allclose(output, output_base)
+
+    def test_bayesian_lora_multiple_flow_layers_training_step(self):
+        # all flow layers take part in the forward pass and in the KL divergence
+        model = self.get_model(num_flow_layers=2).train()
+        loss = model(torch.randn(4, 10)).sum() + model.base_model._get_bayesian_lora_loss()
+        assert torch.isfinite(loss)
+        loss.backward()
+        flow_weights = [(n, p) for n, p in model.named_parameters() if ".flow_weight_" in n]
+        assert len(flow_weights) == 2 * 2 * 6  # factors A and B, 2 flow layers with 6 linear layers each
+        for name, param in flow_weights:
+            assert param.grad is not None, name
+            assert torch.isfinite(param.grad).all(), name
 
 
 class TestKasaInitialization:

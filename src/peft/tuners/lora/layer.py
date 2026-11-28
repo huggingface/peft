@@ -70,6 +70,14 @@ class LoraVariant:
         """Whether an adapter using this variant can be converted to vanilla LoRA (see `convert_to_lora`)."""
         return True
 
+    def supports_probabilistic_sampling(self) -> bool:
+        """
+        Whether the weights of this variant can be sampled at inference time (see
+        `peft.helpers.enable_probabilistic_sampling`). A variant that supports this must sample its weights in
+        `forward` if `module.training` or `module.probabilistic_sampling` is `True`.
+        """
+        return False
+
     @staticmethod
     def init(module: LoraLayer, adapter_name: str) -> None:
         """Initialization code for the LoRA variant, it's called within `update_layer`"""
@@ -1049,6 +1057,7 @@ class Linear(nn.Module, LoraLayer):
             ("monteclora_config",): variants.MontecloraLinearVariant,
             ("mica",): variants.MiCALinearVariant,
             ("kasa_config",): variants.KasaLinearVariant,
+            ("bayesian_lora_config",): variants.BayesianLoraLinearVariant,
         }
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:

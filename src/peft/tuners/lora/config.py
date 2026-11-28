@@ -511,6 +511,155 @@ class AstraConfig:
 
 
 @dataclass
+class BayesianLoraConfig:
+    """
+    This is the sub-configuration class to store the configuration for Bayesian-LoRA
+    (https://huggingface.co/papers/2601.21003).
+
+    Bayesian-LoRA keeps the low-rank structure of LoRA, but treats both LoRA factors A and B as random variables. Each
+    factor is parametrized by a small matrix of inducing weights with a variational posterior; the factor itself is
+    drawn from the conditional of a matrix-normal prior given the inducing weights. This yields calibrated predictive
+    uncertainty when averaging the predictions of several weight samples.
+
+    Usage:
+        - In training mode, the factors are sampled in every forward pass, and the KL divergence returned by
+          `model._get_bayesian_lora_loss()` must be added to the loss (typically scaled by the inverse of the number
+          of training batches per epoch).
+        - In eval mode, a deterministic point estimate of the factors is used, so the adapter behaves like a regular
+          LoRA adapter and can be merged.
+        - To obtain Monte Carlo predictions, sample in eval mode with `with
+          peft.helpers.enable_probabilistic_sampling(model): ...` and average the outputs of several forward passes.
+
+    The initialization is controlled by `LoraConfig.init_lora_weights`: if `True` (default), the point estimate of B is
+    zero, so that the adapter does not change the output at initialization; if `False`, the inducing weights of both
+    factors are initialized randomly, as in the experiments of the paper.
+
+    The defaults work well in most cases. To make the predictions more diverse (more uncertain), increase `max_lambda`
+    and `max_inducing_sd`; to make the adapter behave more like a regular LoRA adapter, decrease them.
+
+    Args:
+        inducing_rows (`int`, defaults to 9):
+            Number of rows of the inducing weight matrix of each factor. Together with `inducing_cols`, this
+            determines the capacity of the adapter, similar to the rank of LoRA: increase both for a more expressive
+            posterior, decrease them for fewer trainable parameters. For a layer with `in_features` inputs and
+            `out_features` outputs, the number of trainable parameters grows with `inducing_rows * out_features +
+            inducing_cols * in_features`. Values slightly above the LoRA rank `r` are a good starting point.
+        inducing_cols (`int`, defaults to 9):
+            Number of columns of the inducing weight matrix of each factor, see `inducing_rows`.
+        prior_sd (`float`, defaults to 1.0):
+            Standard deviation of the prior over the adapter weights. It scales the adapter weights: with larger
+            values, the adapter changes the output of the base model faster during training, similar to a larger
+            learning rate; with smaller values, the adapter stays closer to the base model. The default lets the
+            adapter train at a similar pace to LoRA. The paper used 0.1 together with `sqrt_width_scaling=True` and
+            `init_lora_weights=False`; with the default zero initialization of B, these values keep the adapter nearly
+            frozen.
+        sqrt_width_scaling (`bool`, defaults to `False`):
+            Whether to divide `prior_sd` by the square root of the input dimension of each factor, as is common for
+            priors of Bayesian neural networks. If you enable this, increase `prior_sd` accordingly or use
+            `init_lora_weights=False`.
+        max_lambda (`Optional[float]`, defaults to 0.03):
+            Upper bound of lambda, the scale of the noise of the weights that is not explained by the inducing weights.
+            Lambda is learned and starts at a small value. A larger bound allows for noisier weights, i.e. more
+            diverse Monte Carlo predictions, but can make training less stable and reduce accuracy; a smaller bound
+            keeps the adapter closer to a deterministic LoRA adapter. `None` means no bound.
+        max_inducing_sd (`Optional[float]`, defaults to 0.1):
+            Upper bound of the standard deviation of the variational posterior over the inducing weights. The
+            standard deviation is learned and starts at a small value. As for `max_lambda`, a larger bound allows for
+            more diverse predictions and a smaller bound for more stable training. `None` means no bound.
+        use_flow (`bool`, defaults to `True`):
+            Whether to transform the inducing weights with a masked autoregressive flow, which makes the posterior
+            non-Gaussian and thus more expressive. Disable it to save a few parameters and some computation, at the
+            cost of a slightly less flexible posterior.
+        num_flow_layers (`Optional[int]`):
+            Number of layers of the flow, i.e. the number of masked autoregressive transforms that are applied one
+            after the other. A single layer gives the best accuracy in the experiments of the paper. More layers make
+            the posterior more expressive, which can improve the calibration, in particular on larger datasets, at the
+            cost of more trainable parameters and a longer training time. Defaults to 1 if `use_flow=True`; must not be
+            set if `use_flow=False`.
+        flow_hidden_features (`Optional[int]`):
+            Hidden size of the autoregressive network of each flow layer. Increase it for a more expressive flow.
+            Defaults to 16 if `use_flow=True`; must not be set if `use_flow=False`.
+    """
+
+    inducing_rows: int = field(
+        default=9, metadata={"help": "Number of rows of the inducing weight matrix of each factor."}
+    )
+    inducing_cols: int = field(
+        default=9, metadata={"help": "Number of columns of the inducing weight matrix of each factor."}
+    )
+    prior_sd: float = field(
+        default=1.0, metadata={"help": "Standard deviation of the prior over the adapter weights."}
+    )
+    sqrt_width_scaling: bool = field(
+        default=False,
+        metadata={"help": "Whether to divide `prior_sd` by the square root of the input dimension of each factor."},
+    )
+    max_lambda: Optional[float] = field(
+        default=0.03,
+        metadata={
+            "help": (
+                "Upper bound of lambda, the scale of the noise of the weights that is not explained by the inducing "
+                "weights. `None` means no bound."
+            )
+        },
+    )
+    max_inducing_sd: Optional[float] = field(
+        default=0.1,
+        metadata={
+            "help": (
+                "Upper bound of the standard deviation of the variational posterior over the inducing weights. `None` "
+                "means no bound."
+            )
+        },
+    )
+    use_flow: bool = field(
+        default=True,
+        metadata={"help": "Whether to transform the inducing weights with a masked autoregressive flow."},
+    )
+    num_flow_layers: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Number of masked autoregressive transforms of the flow. Defaults to 1 if `use_flow=True`; must not "
+                "be set if `use_flow=False`."
+            )
+        },
+    )
+    flow_hidden_features: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Hidden size of the autoregressive network of each flow layer. Defaults to 16 if `use_flow=True`; "
+                "must not be set if `use_flow=False`."
+            )
+        },
+    )
+
+    def __post_init__(self):
+        if self.inducing_rows <= 0 or self.inducing_cols <= 0:
+            raise ValueError(
+                "`inducing_rows` and `inducing_cols` must be positive integers; got "
+                f"{self.inducing_rows} and {self.inducing_cols}."
+            )
+        if self.prior_sd <= 0:
+            raise ValueError(f"`prior_sd` must be positive; got {self.prior_sd}.")
+        for name in ("max_lambda", "max_inducing_sd"):
+            value = getattr(self, name)
+            if value is not None and value <= 0:
+                raise ValueError(f"`{name}` must be positive or `None`; got {value}.")
+        # the defaults of the arguments of the flow are `None`, so that setting them without the flow can be detected
+        for name, default in (("num_flow_layers", 1), ("flow_hidden_features", 16)):
+            value = getattr(self, name)
+            if not self.use_flow:
+                if value is not None:
+                    raise ValueError(f"`{name}` is only used by the flow, but `use_flow=False`; got `{name}={value}`.")
+            elif value is None:
+                setattr(self, name, default)
+            elif value <= 0:
+                raise ValueError(f"`{name}` must be a positive integer; got {value}.")
+
+
+@dataclass
 class LoraConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`LoraModel`].
@@ -670,6 +819,10 @@ class LoraConfig(PeftConfig):
             The configuration of Monteclora (Monte Carlo Low-Rank Adaptation). If passed, Monteclora will be used to
             add variational Monte Carlo sampling on top of the LoRA adapters. See `MontecloraConfig` for details on the
             individual hyperparameters.
+        bayesian_lora_config (`Optional[BayesianLoraConfig]`):
+            The configuration of Bayesian-LoRA. If passed, the LoRA factors are treated as random variables with a
+            variational posterior based on inducing weights, see `BayesianLoraConfig` for details. Only supported for
+            linear layers.
         layer_replication (`List[Tuple[int, int]]`):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
@@ -1003,6 +1156,17 @@ class LoraConfig(PeftConfig):
             "is_lora_variant": True,
         },
     )
+    bayesian_lora_config: Optional[BayesianLoraConfig] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The configuration of Bayesian-LoRA. If passed, the LoRA factors are treated as random variables with "
+                "a variational posterior based on inducing weights, see `BayesianLoraConfig` for details. Only "
+                "supported for linear layers."
+            ),
+            "is_lora_variant": True,
+        },
+    )
     # Enables replicating layers in a model to expand it to a larger model.
     layer_replication: Optional[list[tuple[int, int]]] = field(
         default=None,
@@ -1109,6 +1273,13 @@ class LoraConfig(PeftConfig):
         self.peft_type = PeftType.LORA
         if isinstance(self.monteclora_config, dict):
             self.monteclora_config = MontecloraConfig(**self.monteclora_config)
+        if isinstance(self.bayesian_lora_config, dict):
+            self.bayesian_lora_config = BayesianLoraConfig(**self.bayesian_lora_config)
+        if self.bayesian_lora_config is not None and not isinstance(self.init_lora_weights, bool):
+            raise ValueError(
+                "Bayesian-LoRA only supports `init_lora_weights=True` (point estimate of B is zero) or "
+                f"`init_lora_weights=False` (random initialization), got {self.init_lora_weights!r}."
+            )
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
