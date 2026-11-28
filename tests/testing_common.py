@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import copy
+import dataclasses
 import json
 import os
 import pickle
@@ -86,6 +87,7 @@ from peft.utils import (
     activation_checkpointing_enable,
     infer_device,
 )
+from peft.utils.runtime_checks import attach_runtime_checks
 
 from .testing_utils import get_state_dict, hub_online_once
 
@@ -1493,6 +1495,65 @@ class PeftCommonTester:
                         assert param.grad is None
                 else:
                     assert param.grad is None
+
+    def _test_zero_embedding_check(self, model_id, config_cls, config_kwargs):
+        # Training on tokens whose input embedding row is zero and frozen should be reported for every PEFT method,
+        # see #4130. Rows covered by trainable_token_indices are trainable and must not be reported.
+        inputs = self.prepare_inputs_for_testing()
+        input_ids = inputs["input_ids"]
+        # every token of the test batch gets an all-zero row, like never-trained special tokens
+        zero_ids = torch.unique(input_ids).tolist()
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+        # the padding row is zero by design and is never reported, so it is left out of the expected ids
+        padding_idx = model.get_input_embeddings().padding_idx
+        with torch.no_grad():
+            model.get_input_embeddings().weight[zero_ids] = 0
+
+        config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+        model = get_peft_model(model, config, runtime_checks="raise").to(self.torch_device)
+        model.train()
+
+        # LoRA uses trainable_token_indices, TrainableTokensConfig uses token_indices
+        token_indices = config_kwargs.get("trainable_token_indices") or config_kwargs.get("token_indices") or []
+        expected = set(zero_ids) - set(token_indices) - {padding_idx}
+        if not expected:
+            model(**inputs)
+            return
+
+        with pytest.raises(RuntimeError, match="input embedding rows are all zero and frozen") as exc_info:
+            model(**inputs)
+        assert f"token ids {sorted(expected)}" in str(exc_info.value)
+
+        # once the embedding is trainable, the same batch is fine
+        for param in model.get_input_embeddings().parameters():
+            param.requires_grad_(True)
+        attach_runtime_checks(model, mode="raise")
+        model(**inputs)
+
+    def _test_zero_embedding_check_modules_to_save(self, model_id, config_cls, config_kwargs):
+        # With the input embedding in modules_to_save, every row is trainable, so nothing may be reported.
+        if "modules_to_save" not in {field.name for field in dataclasses.fields(config_cls)}:
+            pytest.skip(f"{config_cls.__name__} does not support modules_to_save")
+        if "trainable_token_indices" in config_kwargs or "token_indices" in config_kwargs:
+            pytest.skip("trainable tokens and modules_to_save cannot target the same embedding")
+        inputs = self.prepare_inputs_for_testing()
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+        embedding = model.get_input_embeddings()
+        embedding_name = next(name for name, module in model.named_modules() if module is embedding).rpartition(".")[
+            -1
+        ]
+        with torch.no_grad():
+            embedding.weight[torch.unique(inputs["input_ids"])] = 0
+
+        config = config_cls(base_model_name_or_path=model_id, **{**config_kwargs, "modules_to_save": [embedding_name]})
+        model = get_peft_model(model, config, runtime_checks="warn").to(self.torch_device)
+        model.train()
+        with warnings.catch_warnings(record=True) as record:
+            warnings.simplefilter("always")
+            model(**inputs)
+        assert not [w for w in record if "input embedding rows are all zero" in str(w.message)]
 
     def _test_inference_safetensors(self, model_id, config_cls, config_kwargs):
         if (config_cls == PrefixTuningConfig) and ("deberta" in model_id.lower()):

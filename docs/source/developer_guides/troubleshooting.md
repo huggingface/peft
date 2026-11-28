@@ -145,6 +145,34 @@ Any `target_modules` entry that does not correspond to a module in the model is 
 > [!TIP]
 > This issue affects all PEFT methods that use `target_modules` (LoRA, LoHa, IA³, etc.), not just LoRA. The diagnostic steps are the same regardless of the method. If you are unsure which module names a given architecture uses, check the model's documentation or inspect `model.named_modules()` before configuring the adapter.
 
+### The model never learns to generate a special token
+
+Some checkpoints contain special tokens that were never trained, for instance the tags of a chat template like `<tool_call>`. Their input embedding rows are often, but not always, zero: untrained tokens may keep a random initialization. Their output embedding (`lm_head`) rows are often identical to those of many other untrained tokens. Most PEFT methods keep both layers frozen, so the model cannot learn to generate such a token: tokens with identical output embedding rows always receive identical logits. The training loss still decreases, because the rest of the sequence is learned. For an example of near-zero input rows, see the tool-call tags in Qwen2.5-Coder-7B-Instruct.
+
+By passing `runtime_checks="warn"` (or `"raise"`) to [`get_peft_model`], PEFT can look for this during the first training batches and report the affected token ids. The check only works if the input embedding rows of these tokens are (near) zero. It is off by default and adds a small runtime overhead to the first training batches only. To fix it, make the rows of these tokens trainable with `trainable_token_indices`. Since the trainable rows start from the current values, initialize them first, e.g. with the mean embedding of a related text:
+
+```python
+tokens = ["<tool_call>", "</tool_call>"]
+token_ids = tokenizer.convert_tokens_to_ids(tokens)
+
+input_embeddings = base_model.get_input_embeddings().weight
+output_embeddings = base_model.get_output_embeddings().weight
+with torch.no_grad():
+    for token_id, text in zip(token_ids, ["tool call", "end of tool call"]):
+        text_ids = tokenizer.encode(text, add_special_tokens=False)
+        input_embeddings[token_id] = input_embeddings[text_ids].mean(0)
+        output_embeddings[token_id] = output_embeddings[text_ids].mean(0)
+
+lora_config = LoraConfig(..., trainable_token_indices={"embed_tokens": token_ids, "lm_head": token_ids})
+peft_model = get_peft_model(base_model, lora_config)
+```
+
+The check treats an embedding output with `grad_fn` as trainable. However, a trainable transformation can preserve zero vectors: for example, an OFT rotation or HiRA elementwise scaling produces an output with `grad_fn`, yet a zero row stays zero. In general, trainable parameters do not guarantee that a zero input vector can become nonzero. For these zero-preserving transformations, the check skips inspection and removes itself without reporting when its batch budget expires.
+
+The `lm_head` entry is only needed if the output embedding is not tied to the input embedding, otherwise trainable tokens keep the tied layer updated automatically. Alternatively, or if you're not using LoRA, add the embedding layers to `target_modules` or `modules_to_save` if the PEFT method supports it, see [Extending the vocabulary](#extending-the-vocabulary).
+
+Some inference engines do not load trainable tokens from a LoRA checkpoint. In that case, merge the adapter into the base model with [`~LoraModel.merge_and_unload`] before serving it.
+
 ## Bad results from a loaded PEFT model
 
 There can be several reasons for getting a poor result from a loaded PEFT model which are listed below. If you're still unable to troubleshoot the problem, see if anyone else had a similar [issue](https://github.com/huggingface/peft/issues) on GitHub, and if you can't find any, open a new issue.
