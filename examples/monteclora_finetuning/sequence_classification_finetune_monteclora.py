@@ -14,7 +14,7 @@ from transformers import (
 
 # Assuming MonteCLoRA is available in your local installed PEFT version
 from peft import LoraConfig, MontecloraConfig, TaskType, get_peft_model
-from peft.helpers import MontecloraTrainerMixin as MonteCLoRATrainerMixin
+from peft.helpers import PeftTrainerMixin
 from peft.utils import infer_device
 
 
@@ -22,7 +22,7 @@ from peft.utils import infer_device
 # 1. Trainer Definition
 # ----------------------------------------------------------------------------
 # Reuse the helper mixin so variational loss handling stays centralized.
-class MonteCLoRATrainer(MonteCLoRATrainerMixin, Trainer):
+class MonteCLoRATrainer(PeftTrainerMixin, Trainer):
     pass
 
 

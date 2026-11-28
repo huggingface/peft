@@ -30,6 +30,8 @@ If these constraints don't work for your use case, consider other methods instea
 
 ## Benchmark overview
 
+When `use_asa=True`, call [`PeftModel.on_peft_optimizer_step`] after each successful optimizer update and before clearing gradients. For Transformers `Trainer`, use [`helpers.PeftTrainerMixin`] to perform these updates automatically.
+
 <iframe
 	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=ADAMSS"
 	frameborder="0"

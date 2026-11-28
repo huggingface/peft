@@ -44,14 +44,18 @@ config = AdamssConfig(
 peft_model = get_peft_model(model, config)
 ```
 
-**Option A – With HuggingFace Trainer (callback):**
+**Option A – With HuggingFace Trainer:**
 ```python
-from peft.tuners.adamss.asa_callback import AdamssAsaCallback
+from peft.helpers import PeftTrainerMixin
+from transformers import Trainer
 
-# The callback is a thin wrapper around model.update_and_allocate()
-trainer = Trainer(
+
+class PeftTrainer(PeftTrainerMixin, Trainer):
+    pass
+
+
+trainer = PeftTrainer(
     model=peft_model,
-    callbacks=[AdamssAsaCallback()],
     # ... other arguments
 )
 trainer.train()
@@ -63,7 +67,7 @@ for step, batch in enumerate(dataloader):
     loss = peft_model(**batch).loss
     loss.backward()
     optimizer.step()
-    peft_model.base_model.update_and_allocate(step)   # ← all ASA logic in one call
+    peft_model.on_peft_optimizer_step(step)
     optimizer.zero_grad()
 ```
 
@@ -130,15 +134,15 @@ python examples/adamss_finetuning/glue_adamss_asa_example.py \
 | `asa_target_subspaces` | int | None | Target active subspaces when ASA enabled |
 | `modules_to_save` | list | None | Modules to train without decomposition |
 
-### AdamssAsaCallback
+### Trainer integration
 
-The ASA callback reads all parameters from `AdamssConfig`. Import it directly:
+`PeftTrainerMixin` performs ASA updates using the parameters from `AdamssConfig`:
 
 ```python
-from peft.tuners.adamss.asa_callback import AdamssAsaCallback
+from peft.helpers import PeftTrainerMixin
 ```
 
-ASA-related config parameters:
+### ASA-related config parameters:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|

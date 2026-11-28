@@ -35,7 +35,7 @@ from transformers import (
 )
 
 from peft import AdamssConfig, get_peft_model
-from peft.tuners.adamss.asa_callback import AdamssAsaCallback
+from peft.helpers import PeftTrainerMixin
 
 
 # Table 19: Hyperparameters for GLUE tasks (from paper)
@@ -104,6 +104,10 @@ class AdaMSSTrainingArguments:
     seed: int = field(default=0, metadata={"help": "Random seed"})
     output_dir: str = field(default="./output", metadata={"help": "Output directory"})
     cache_dir: str = field(default="./cache", metadata={"help": "Cache directory"})
+
+
+class PeftTrainer(PeftTrainerMixin, Trainer):
+    pass
 
 
 def get_dataset(args: AdaMSSTrainingArguments, tokenizer):
@@ -261,10 +265,9 @@ def main():
         print(f"Allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
         print(f"Reserved: {torch.cuda.memory_reserved() / 1024**3:.2f} GB")
 
-    # Setup ASA callback
-    callbacks = []
+    # Report the ASA configuration used by the PEFT training updates
     if args.use_asa:
-        print("\nSetting up ASA callback...")
+        print("\nUsing PEFT training updates for ASA...")
 
         print("\n[ASA Configuration]")
         print(f"Dataset size: {len(train_ds)}, Batch size: {args.batch_size}")
@@ -274,9 +277,6 @@ def main():
         print(f"  init_warmup: {args.asa_init_warmup} epochs → {asa_init_warmup_steps} steps")
         print(f"  final_warmup: {args.asa_final_warmup} epochs → {asa_final_warmup_steps} steps")
         print(f"  mask_interval: {args.asa_mask_interval} epochs → {asa_mask_interval_steps} steps\n")
-
-        asa_callback = AdamssAsaCallback()
-        callbacks.append(asa_callback)
 
     # Training configuration
     print("\n[Training Configuration]")
@@ -336,14 +336,13 @@ def main():
     optimizer = AdamW(optimizer_grouped_parameters, weight_decay=hp["wd"])
 
     # Create trainer
-    trainer = Trainer(
+    trainer = PeftTrainer(
         model=model,
         args=training_args,
         train_dataset=train_ds,
         eval_dataset=val_ds,
         compute_metrics=compute_metrics,
         optimizers=(optimizer, None),
-        callbacks=callbacks,
     )
 
     # Train

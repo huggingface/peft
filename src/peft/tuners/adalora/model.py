@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import warnings
+from typing import Any, Optional, Union
 
 import torch
 from transformers.pytorch_utils import Conv1D
@@ -325,6 +326,17 @@ class AdaLoraModel(LoraModel):
             model.resize_modules_by_rank_pattern(rank_pattern, adapter_name)
         return peft_model_state_dict
 
+    def on_peft_optimizer_step(self, global_step: int, **kwargs: Any) -> None:
+        """Update importance scores and rank allocation after an optimizer update, before clearing gradients."""
+        if self.training and any(not self.peft_config[name].inference_mode for name in self.active_adapters):
+            self.update_and_allocate(global_step)
+
+    def get_peft_loss(
+        self, adapter_names: Optional[Union[str, list[str]]] = None, **kwargs: Any
+    ) -> torch.Tensor | float:
+        """AdaLoRA's orthogonal regularization is already included by its forward method."""
+        return 0.0
+
     def update_and_allocate(self, global_step):
         """
         This method updates Adalora budget and mask.
@@ -347,25 +359,28 @@ class AdaLoraModel(LoraModel):
         ```
         """
         lora_config = self.peft_config[self.trainable_adapter_name]
+        final_step = lora_config.total_step - lora_config.tfinal
         # Update the importance score and allocate the budget
-        if global_step < lora_config.total_step - lora_config.tfinal:
+        if global_step < final_step:
             _, rank_pattern = self.rankallocator.update_and_allocate(self.model, global_step)
             if rank_pattern:
                 lora_config.rank_pattern = rank_pattern
         # Finalize the budget allocation
-        elif global_step == lora_config.total_step - lora_config.tfinal:
-            _, rank_pattern = self.rankallocator.update_and_allocate(self.model, global_step, force_mask=True)
+        elif (global_step == final_step) or self.rankallocator.ipt or (lora_config.rank_pattern is None):
+            # The final step could theoretically be skipped, e.g. when AMP detects an overflow. In this case, we still
+            # need to finalize. To detect this, check if rankallocator.ipt is empty or rank_pattern is not None (which
+            # happens during the final step)
+            if not self.rankallocator.ipt:
+                self.rankallocator.update_ipt(self.model)
+            _, rank_pattern = self.rankallocator.update_and_allocate(self.model, final_step, force_mask=True)
             # for some reason, this freezes the trainable parameters and nothing gets updates
             # self.resize_modules_by_rank_pattern(rank_pattern, self.trainable_adapter_name)
             lora_config.rank_pattern = rank_pattern
             self.rankallocator.reset_ipt()
         # Currently using inefficient way to mask the unimportant weights using the rank pattern
         #  due to problem mentioned above
-        elif global_step > lora_config.total_step - lora_config.tfinal:
-            self.rankallocator.mask_using_rank_pattern(self.model, lora_config.rank_pattern)
-        # Pass the function and do forward propagation
         else:
-            return
+            self.rankallocator.mask_using_rank_pattern(self.model, lora_config.rank_pattern)
 
     def add_weighted_adapter(self, *args, **kwargs):
         """This method is not supported for AdaLoRA, use LoRA instead."""

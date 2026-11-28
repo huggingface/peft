@@ -35,11 +35,11 @@ config = LoraConfig(
 )
 ```
 
-The paper additionally trains with two auxiliary regularizers: an L2 penalty on the learnable singular values (weighted by `beta`) and an orthogonal regularization on the adapter factors (weighted by `gamma`), which softly enforces the semi-orthogonality assumed by the SVD parametrization. These cannot be injected automatically by PEFT, so during training you must add them to the task loss by calling [`LoraModel._get_kasa_loss`] on the underlying `LoraModel`:
+The paper additionally trains with two auxiliary regularizers: an L2 penalty on the learnable singular values (weighted by `beta`) and an orthogonal regularization on the adapter factors (weighted by `gamma`), which softly enforces the semi-orthogonality assumed by the SVD parametrization. During training, add them to the general loss using [`PeftModel.get_peft_loss`], or use [`helpers.PeftTrainerMixin`] with Transformers `Trainer`:
 
 ```py
 task_loss = ...  # standard loss returned by your model
-kasa_loss = model._get_kasa_loss()  # 0.0 if KaSA is not used
+kasa_loss = model.get_peft_loss()  # 0.0 if no additional PEFT loss is required
 total_loss = task_loss + kasa_loss
 ```
 

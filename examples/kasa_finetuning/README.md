@@ -13,6 +13,7 @@ KaSA (Knowledge-aware Singular-value Adaptation) is a parameter-efficient fine-t
 ```python
 import torch
 from peft import KasaConfig, LoraConfig, get_peft_model
+from peft.helpers import PeftTrainerMixin
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import SFTConfig, SFTTrainer
 from datasets import load_dataset
@@ -32,16 +33,8 @@ peft_model = get_peft_model(model, lora_config)
 peft_model.print_trainable_parameters()
 
 
-class KasaSFTTrainer(SFTTrainer):
+class KasaSFTTrainer(PeftTrainerMixin, SFTTrainer):
     """Adds the KaSA auxiliary regularization to the task loss."""
-
-    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-        result = super().compute_loss(model, inputs, return_outputs=return_outputs, **kwargs)
-        if return_outputs:
-            loss, outputs = result
-            return loss + model._get_kasa_loss(), outputs
-        return result + model._get_kasa_loss()
-
 
 dataset = load_dataset("imdb", split="train[:1%]")
 training_args = SFTConfig(dataset_text_field="text", max_length=128)
@@ -75,7 +68,7 @@ Loading the adapter re-applies the same SVD truncation to the freshly loaded bas
 - KaSA currently supports `nn.Linear` target modules only, and not `fan_in_fan_out=True` layers (e.g. transformers `Conv1D`).
 - The SVD truncation of the base weight is **destructive**: adding a KaSA adapter permanently changes the layer's frozen weight. Disabling or unloading the adapter does not restore the original base weight, and `merge` followed by `unmerge` round-trips to the truncated weight, not the original one. This is inherent to the method. Keep the original checkpoint if you need the unmodified base model.
 - KaSA performs a full SVD per target weight at initialization. For 7B-scale models this is a one-time cost of seconds; for substantially larger weight matrices the cost grows.
-- The auxiliary regularizers are optional but recommended for faithfulness to the paper; without them the SVD interpretation of the update is only approximate. They only take effect if you add the model's `_get_kasa_loss()` to your loss as shown above.
+- The auxiliary regularizers are optional but recommended for faithfulness to the paper; without them the SVD interpretation of the update is only approximate. Use `PeftTrainerMixin` as shown above, or add `model.get_peft_loss()` to the task loss in a custom training loop.
 - Combining KaSA with `use_dora=True` or other LoRA variants is not supported, and KaSA adapters cannot be mixed with non-KaSA adapters on the same model.
 
 ## Citation
