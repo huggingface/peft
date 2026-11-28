@@ -52,6 +52,9 @@ CONFIGS = {
     "lora": LoraConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     "dora": LoraConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"], use_dora=True),
     "loha": LoHaConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
+    "loha-khatri-rao": LoHaConfig(
+        target_modules=["convolution"], use_khatri_rao=True, modules_to_save=["classifier", "normalization"]
+    ),
     "lokr": LoKrConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     "oft": OFTConfig(
         r=1, oft_block_size=0, target_modules=["convolution"], modules_to_save=["classifier", "normalization"]

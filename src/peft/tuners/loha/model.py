@@ -91,6 +91,34 @@ class LoHaModel(LycorisTuner):
         torch.nn.Linear: Linear,
     }
 
+    def inject_adapter(
+        self,
+        model: nn.Module,
+        adapter_name: str,
+        **kwargs,
+    ) -> None:
+        super().inject_adapter(
+            model,
+            adapter_name,
+            **kwargs,
+        )
+        config = self.peft_config[adapter_name]
+        if config.use_khatri_rao:
+            # The Khatri-Rao path is resolved per layer, as it does not apply to layers that use the Tucker
+            # decomposition. Mixing both layer kinds in one model is fine, but if no layer at all supports the factored
+            # path, the option would silently be without effect, so raise instead.
+            uses_any_khatri_rao = any(
+                module.use_khatri_rao.get(adapter_name, False)
+                for module in model.modules()
+                if isinstance(module, LoHaLayer)
+            )
+            if not uses_any_khatri_rao:
+                raise ValueError(
+                    "use_khatri_rao=True, but none of the targeted layers support the Khatri-Rao factored path, as "
+                    "they all use the Tucker decomposition (use_effective_conv2d=True with kernel size > 1). Either "
+                    "set use_khatri_rao=False or use_effective_conv2d=False."
+                )
+
     def _create_and_replace(
         self,
         config: LycorisConfig,
